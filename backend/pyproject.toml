@@ -1,0 +1,22 @@
+[project]
+name = "toneup-backend"
+version = "0.1.0"
+requires-python = "==3.10.*"
+
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic>=2",
+  "pydantic-settings",
+  "argon2-cffi",
+  "pyjwt",
+  "structlog",
+  "httpx",
+  "python-multipart",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = ["pytest", "psutil"]
