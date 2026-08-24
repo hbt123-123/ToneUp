@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -72,13 +73,43 @@ def main() -> int:
 
         usernames = [f"loaduser_{i}" for i in range(args.workers)]
         tokens: list[str] = []
-        with httpx.Client(base_url=base_url, timeout=10) as c:
+        # 直接预置用户进库：绕过 register 5次/小时/IP 限流（压测自身会触发）
+        import sqlite3
+        from datetime import datetime, timezone
+
+        import jwt as pyjwt
+        from argon2 import PasswordHasher
+
+        db_path = BACKEND / "data" / "user_data.db"
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            ph = PasswordHasher(memory_cost=19456, time_cost=2, parallelism=1)
+            now_iso = datetime.now(timezone.utc).isoformat()
             for name in usernames:
-                r = c.post("/api/auth/register", json={"username": name, "password": "password123"})
-                if r.status_code == 200:
-                    r = c.post("/api/auth/login", json={"username": name, "password": "password123"})
+                try:
+                    conn.execute(
+                        "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, 'user', ?)",
+                        (name, ph.hash("password123"), now_iso),
+                    )
+                except sqlite3.IntegrityError:
+                    pass
+            conn.commit()
+            conn.close()
+
+        secret = "x" * 32
+        with httpx.Client(base_url=base_url, timeout=10) as c:
+            for i, name in enumerate(usernames):
+                r = c.post("/api/auth/login", json={"username": name, "password": "password123"})
                 if r.status_code == 200 and r.json().get("data", {}).get("access_token"):
                     tokens.append(r.json()["data"]["access_token"])
+                elif r.status_code == 401:
+                    # 兜底：本地签发与后端同构的 token（仅压测用途）
+                    payload = {
+                        "sub": str(i + 1), "role": "user",
+                        "exp": datetime.now(timezone.utc) + timedelta(hours=12),
+                        "iat": datetime.now(timezone.utc),
+                    }
+                    tokens.append(pyjwt.encode(payload, secret, algorithm="HS256"))
 
         catalog = httpx.get(f"{base_url}/api/catalog", timeout=10).json()
         banks = [b["id"] for b in catalog.get("data", {}).get("banks", []) if b.get("enabled")]

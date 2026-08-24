@@ -305,13 +305,11 @@ def ai_feedback_set_status(
     error_reason: Optional[str] = None,
     tag_ids_json: Optional[str] = None,
     is_correct: Optional[bool] = None,
-    score: Optional[float] = None,
 ) -> bool:
     """带期望旧状态守卫的状态迁移，返回 rowcount==1。
 
     动态 SET 仅包含非 None 字段（列名来自下方固定白名单，非外部输入）。
-    注：当前 ai_feedback 表（T4 DDL）无 score 列——分数持久化在
-    practice_records 上；传 score 非 None 将由 SQLite 报缺失列错误。
+    注意：ai_feedback 表无 score 列——分数持久化在 practice_records 上。
     """
     extras = {
         "completed_at": completed_at,
@@ -320,7 +318,6 @@ def ai_feedback_set_status(
         "error_reason": error_reason,
         "tag_ids_json": tag_ids_json,
         "is_correct": None if is_correct is None else int(is_correct),
-        "score": score,
     }
     set_parts = ["status = ?"]
     params: list = [new_status]

@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import time
 from collections import defaultdict, deque
 
@@ -94,3 +95,62 @@ def check_login_limit(rule_name: str, ip: str, username: str, limit: int, window
     retry_after = allow(key, limit, window_seconds)
     if retry_after:
         raise RateLimitError(retry_after=retry_after)
+
+
+class DefaultRateLimitMiddleware:
+    """§10.3 兜底档：其余接口默认 240 次/分钟/IP。
+
+    注册顺序要求：在 RequestIdMiddleware 之后 add（更靠近路由），
+    使超限响应体能拿到 request_id；自带专属限流的端点在 SKIP 集合中跳过。
+    """
+
+    SKIP = {
+        ("POST", "/api/auth/register"),
+        ("POST", "/api/auth/login"),
+        ("POST", "/api/attempts"),
+        ("POST", "/api/ai/feedback"),
+    }
+    LIMIT = 240
+    WINDOW_SECONDS = 60
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope["path"]
+        method = scope["method"]
+        if not path.startswith("/api") or (method, path) in self.SKIP:
+            await self.app(scope, receive, send)
+            return
+
+        from starlette.requests import Request
+
+        request = Request(scope)
+        settings = get_settings()
+        ip = client_ip(request, settings.trusted_proxy_count)
+        retry_after = allow(f"ip:default:{ip}", self.LIMIT, self.WINDOW_SECONDS)
+        if retry_after == 0:
+            await self.app(scope, receive, send)
+            return
+
+        from fastapi.responses import JSONResponse
+
+        from app.schemas.common import envelope
+
+        response = JSONResponse(
+            content=envelope(message="too many requests", success=False),
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+        )
+        rid = get_request_id()
+        if rid:
+            body = json.loads(response.body)
+            body["request_id"] = rid
+            response = JSONResponse(
+                content=body, status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+        await response(scope, receive, send)

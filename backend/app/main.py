@@ -69,6 +69,11 @@ def create_app() -> FastAPI:
     # --- request_id 中间件 ---
     add_request_id_middleware(app)
 
+    # --- 兜底限流（240/min/IP，注册在 request_id 之后=更内层，响应体可带 request_id）---
+    from app.core.ratelimit import DefaultRateLimitMiddleware
+
+    app.add_middleware(DefaultRateLimitMiddleware)
+
     # --- 全局异常处理器注册 ---
     register_exception_handlers(app)
 
