@@ -1,0 +1,181 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--tu-font-family);
+  line-height: var(--tu-line-height);
+  background: var(--tu-bg);
+  color: var(--tu-text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#app {
+  height: 100%;
+}
+
+a {
+  color: var(--tu-accent);
+  text-decoration: none;
+}
+
+/* 焦点可见性：强调色焦点环（§12.2） */
+:focus-visible {
+  outline: 2px solid var(--tu-accent);
+  outline-offset: 2px;
+  border-radius: var(--tu-radius-control);
+}
+
+/* ---------- 富文本渲染区（第 7 章） ---------- */
+.rich-text {
+  font-size: 16px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.rich-text p {
+  margin: 0.4em 0;
+}
+
+.rich-text h1,
+.rich-text h2,
+.rich-text h3,
+.rich-text h4,
+.rich-text h5,
+.rich-text h6 {
+  margin: 0.6em 0 0.3em;
+  line-height: 1.4;
+}
+
+.rich-text pre,
+.rich-text code {
+  font-family: 'JetBrains Mono', Consolas, Menlo, monospace;
+  font-size: 0.92em;
+}
+
+.rich-text pre {
+  padding: 10px 12px;
+  border-radius: var(--tu-radius-card);
+  overflow-x: auto;
+  background: rgba(127, 127, 127, 0.1);
+}
+
+.rich-text table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+
+.rich-text th,
+.rich-text td {
+  border: 1px solid var(--tu-border);
+  padding: 4px 10px;
+}
+
+.rich-text img {
+  max-width: 100%;
+}
+
+.rich-text .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+.rich-text .katex-error {
+  color: inherit;
+  background: rgba(208, 48, 80, 0.08);
+  border-bottom: 1px dashed var(--tu-error);
+}
+
+/* KaTeX 深色模式适配 */
+html.dark .katex {
+  color: var(--tu-text);
+}
+
+/* ---------- 题干/选项 ---------- */
+.option-row {
+  transition:
+    transform var(--tu-duration-micro) var(--tu-ease),
+    box-shadow var(--tu-duration-micro) var(--tu-ease),
+    border-color var(--tu-duration-micro) var(--tu-ease);
+  cursor: pointer;
+}
+
+.option-row:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.18), var(--tu-shadow-card);
+}
+
+.option-row:active {
+  transform: translateY(0);
+}
+
+@keyframes tu-shake {
+  0% { transform: rotate(0deg); }
+  25% { transform: rotate(3deg); }
+  50% { transform: rotate(-3deg); }
+  75% { transform: rotate(2deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.shake-once {
+  animation: tu-shake 300ms ease-in-out 1;
+}
+
+@keyframes tu-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.pulsing {
+  animation: tu-pulse 1.4s ease-in-out infinite;
+}
+
+/* ---------- 工具类 ---------- */
+.tu-card {
+  background: var(--tu-surface);
+  border-radius: var(--tu-radius-card);
+  box-shadow: var(--tu-shadow-card);
+}
+
+.text-secondary {
+  color: var(--tu-text-secondary);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(127, 127, 140, 0.35);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(127, 127, 140, 0.55);
+}
