@@ -1,0 +1,75 @@
+:root {
+  /* 色彩令牌（PC 需求文档 §10.1） */
+  --tu-primary: #2b3a67;
+  --tu-primary-hover: #3a4d85;
+  --tu-primary-pressed: #22305a;
+  --tu-accent: #7c3aed;
+  --tu-accent-hover: #8d55f0;
+  --tu-success: #18a058;
+  --tu-error: #d03050;
+  --tu-warning: #f0a020;
+  --tu-info: #2080f0;
+
+  /* 浅色模式 */
+  --tu-bg: #f4f5fa;
+  --tu-surface: #ffffff;
+  --tu-sidebar-bg: rgba(255, 255, 255, 0.72);
+  --tu-border: rgba(43, 58, 103, 0.14);
+  --tu-text: #24283a;
+  --tu-text-secondary: #5c6379;
+  --tu-text-disabled: #9aa1b5;
+
+  /* 字体与排版 */
+  --tu-font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --tu-line-height: 1.75;
+
+  /* 圆角 */
+  --tu-radius-card: 8px;
+  --tu-radius-control: 4px;
+
+  /* 布局 */
+  --tu-sidebar-width: 240px;
+  --tu-sidebar-collapsed-width: 64px;
+  --tu-content-max-width: 1280px;
+  --tu-topbar-height: 56px;
+
+  /* 动效时长（§10.3） */
+  --tu-duration-micro: 150ms;
+  --tu-duration-expand: 240ms;
+  --tu-duration-page: 300ms;
+  --tu-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 阴影 */
+  --tu-shadow-card: 0 1px 3px rgba(20, 28, 52, 0.08), 0 4px 16px rgba(20, 28, 52, 0.06);
+  --tu-shadow-pop: 0 8px 28px rgba(20, 28, 52, 0.18);
+}
+
+html.dark {
+  --tu-bg: #16181f;
+  --tu-surface: #1e212b;
+  --tu-sidebar-bg: linear-gradient(180deg, #232736 0%, #1a1d27 100%);
+  --tu-border: rgba(255, 255, 255, 0.12);
+  --tu-text: #e6e8f0;
+  --tu-text-secondary: #a3aac0;
+  --tu-text-disabled: #666d84;
+  --tu-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* 动效开关：关闭全部过渡动画 */
+html.no-motion *,
+html.no-motion *::before,
+html.no-motion *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.force-motion) *,
+  html:not(.force-motion) *::before,
+  html:not(.force-motion) *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
