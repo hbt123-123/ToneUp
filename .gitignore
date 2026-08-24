@@ -1,0 +1,84 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data and logs
+*.log
+backend/data/user_data.db
+backend/data/knowledge_tags.db
+backend/data/backups/
+backend/data/uploads/
+backend/data/manifest.local.json
+
+# Node / Vue
+node_modules/
+dist/
+.vite/
+.cache/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Android / Gradle
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# IDE and OS files
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+
+# AI
+.omo/
+.codegraph/
