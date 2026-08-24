@@ -96,9 +96,12 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(AppError)
     async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
-        """AppError 统一走信封格式。"""
+        """AppError 统一走信封格式；429 附带 Retry-After。"""
         env = envelope(message=exc.message, success=False)
-        return JSONResponse(content=env, status_code=exc.status_code)
+        headers = {}
+        if isinstance(exc, RateLimitError):
+            headers["Retry-After"] = str(exc.retry_after)
+        return JSONResponse(content=env, status_code=exc.status_code, headers=headers)
 
     @app.exception_handler(StarletteHTTPException)
     async def starlette_http_exception_handler(

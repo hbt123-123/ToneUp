@@ -198,6 +198,41 @@ def mastery_apply_terminal(
             )
 
 
+def get_mastery(db_path: str, user_id: int, bank_id: str, question_id: int) -> Optional[sqlite3.Row]:
+    """查单题掌握度行，无则 None。"""
+    with user_connection(db_path) as conn:
+        return conn.execute(
+            "SELECT * FROM user_mastery WHERE user_id = ? AND bank_id = ? AND question_id = ?",
+            (user_id, bank_id, question_id),
+        ).fetchone()
+
+
+def latest_pending_attempt(
+    db_path: str, user_id: int, bank_id: str, question_id: int
+) -> Optional[sqlite3.Row]:
+    """本人该题最新一条待判分流水（is_correct IS NULL），无则 None。"""
+    with user_connection(db_path) as conn:
+        return conn.execute(
+            """
+            SELECT * FROM practice_records
+            WHERE user_id = ? AND bank_id = ? AND question_id = ? AND is_correct IS NULL
+            ORDER BY id DESC LIMIT 1
+            """,
+            (user_id, bank_id, question_id),
+        ).fetchone()
+
+
+def ai_feedback_get_by_attempt(
+    db_path: str, attempt_id: int
+) -> Optional[sqlite3.Row]:
+    """按 attempt 查 AI 判分任务（取最新一条）。"""
+    with user_connection(db_path) as conn:
+        return conn.execute(
+            "SELECT * FROM ai_feedback WHERE attempt_id = ? ORDER BY created_at DESC LIMIT 1",
+            (attempt_id,),
+        ).fetchone()
+
+
 # ── user_notes ───────────────────────────────────────────────────────────────
 
 def notes_get(db_path: str, user_id: int, bank_id: str, question_id: int) -> Optional[sqlite3.Row]:
