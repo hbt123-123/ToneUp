@@ -100,8 +100,9 @@ def check_login_limit(rule_name: str, ip: str, username: str, limit: int, window
 class DefaultRateLimitMiddleware:
     """§10.3 兜底档：其余接口默认 240 次/分钟/IP。
 
-    注册顺序要求：在 RequestIdMiddleware 之后 add（更靠近路由），
-    使超限响应体能拿到 request_id；自带专属限流的端点在 SKIP 集合中跳过。
+    注册顺序要求：先于 RequestIdMiddleware add（Starlette 后注册者为外层），
+    使本中间件位于 request_id 上下文之内，429 响应向外穿过时被注入 request_id。
+    自带专属限流的端点在 SKIP 集合中跳过。
     """
 
     SKIP = {

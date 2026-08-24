@@ -66,13 +66,14 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # --- request_id 中间件 ---
-    add_request_id_middleware(app)
-
-    # --- 兜底限流（240/min/IP，注册在 request_id 之后=更内层，响应体可带 request_id）---
+    # --- 兜底限流（240/min/IP）：必须先于 request_id 注册（更内层），
+    # 使其 429 响应向外穿过 request_id 中间件时被注入 request_id ---
     from app.core.ratelimit import DefaultRateLimitMiddleware
 
     app.add_middleware(DefaultRateLimitMiddleware)
+
+    # --- request_id 中间件（后注册=外层，负责透传/生成/回显）---
+    add_request_id_middleware(app)
 
     # --- 全局异常处理器注册 ---
     register_exception_handlers(app)

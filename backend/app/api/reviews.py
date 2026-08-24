@@ -38,36 +38,31 @@ def today(
     settings = get_settings()
     db = _user_db()
     now_iso = datetime.now(timezone.utc).isoformat()
+    allowed_banks = _subject_filter_banks(subject_id)
 
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     try:
+        where = ["user_id = ?", "next_review_at IS NOT NULL", "next_review_at <= ?"]
+        args: list = [user["id"], now_iso]
+        if allowed_banks is not None:
+            if not allowed_banks:
+                return envelope(page([], 0, False))
+            where.append(f"bank_id IN ({','.join('?' * len(allowed_banks))})")
+            args.extend(allowed_banks)
+        where_sql = " AND ".join(where)
         rows = conn.execute(
-            """
-            SELECT * FROM user_mastery
-            WHERE user_id = ? AND next_review_at IS NOT NULL AND next_review_at <= ?
-            ORDER BY next_review_at ASC LIMIT ?
-            """,
-            (user["id"], now_iso, limit + 1),
+            f"SELECT * FROM user_mastery WHERE {where_sql} ORDER BY next_review_at ASC LIMIT ?",
+            [*args, limit],
         ).fetchall()
         total_due = conn.execute(
-            """
-            SELECT COUNT(*) FROM user_mastery
-            WHERE user_id = ? AND next_review_at IS NOT NULL AND next_review_at <= ?
-            """,
-            (user["id"], now_iso),
+            f"SELECT COUNT(*) FROM user_mastery WHERE {where_sql}", args
         ).fetchone()[0]
     finally:
         conn.close()
 
-    has_more = len(rows) > limit
-    rows = rows[:limit]
-
-    allowed_banks = _subject_filter_banks(subject_id)
     items = []
     for m in rows:
-        if allowed_banks is not None and m["bank_id"] not in allowed_banks:
-            continue
         entry = get_registry().get(m["bank_id"])
         if entry is None:
             continue
@@ -87,6 +82,7 @@ def today(
             "next_review_at": m["next_review_at"],
         })
 
+    has_more = total_due > len(items)
     return envelope(page(items[:limit], total_due, has_more))
 
 
