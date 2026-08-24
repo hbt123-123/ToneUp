@@ -1,0 +1,28 @@
+{
+  "subjects": [
+    {
+      "id": "math",
+      "name": "考研数学",
+      "icon": "📐",
+      "types": [
+        {"id": "zhenti", "name": "真题", "desc": "历年套卷"},
+        {"id": "zhuanti", "name": "专项题", "desc": "分模块强化"},
+        {"id": "lianxi", "name": "练习题", "desc": "随机/自定义"}
+      ]
+    },
+    {
+      "id": "english",
+      "name": "考研英语",
+      "icon": "🔤",
+      "types": [
+        {"id": "zhenti", "name": "真题", "desc": "历年套卷"}
+      ]
+    }
+  ],
+  "banks": [
+    {"id": "math1", "subject_id": "math", "type_id": "zhenti", "name": "考研数学一真题", "path": "math/math1.db", "schema_version": 1, "enabled": true},
+    {"id": "math2", "subject_id": "math", "type_id": "zhenti", "name": "考研数学二真题", "path": "math/math2.db", "schema_version": 1, "enabled": true},
+    {"id": "english1", "subject_id": "english", "type_id": "zhenti", "name": "考研英语一真题", "path": "english/english1.db", "schema_version": 1, "enabled": true},
+    {"id": "english2", "subject_id": "english", "type_id": "zhenti", "name": "考研英语二真题", "path": "english/english2.db", "schema_version": 1, "enabled": true}
+  ]
+}
