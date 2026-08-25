@@ -42,20 +42,26 @@ const editSaving = ref(false)
 const editText = ref('')
 const savedSnapshot = ref('')
 
+/** 竞态保护：连续点击两条笔记时仅采纳最后一次请求结果 */
+let editSeq = 0
+
 async function openEditor(entry: NoteIndexEntry): Promise<void> {
+  const mySeq = ++editSeq
   editing.value = entry
   editText.value = ''
   savedSnapshot.value = ''
   editLoading.value = true
   try {
     const note = await apiGetNote(entry.questionId, entry.bankId)
+    if (mySeq !== editSeq) return
     editText.value = note?.note_text ?? ''
     savedSnapshot.value = editText.value
   } catch (err) {
+    if (mySeq !== editSeq) return
     appMessage.error(humanizeError(err))
     editing.value = null
   } finally {
-    editLoading.value = false
+    if (mySeq === editSeq) editLoading.value = false
   }
 }
 

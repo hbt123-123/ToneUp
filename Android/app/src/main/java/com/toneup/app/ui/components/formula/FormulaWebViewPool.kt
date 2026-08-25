@@ -37,11 +37,15 @@ class FormulaWebViewPool @Inject constructor(
 
     fun prewarm() {
         mainHandler.post {
+            if (_prewarmed.value) return@post
+            // 分帧逐个创建：每帧仅构造一个 WebView，避免单帧持锁连续构造阻塞主线程（§7.2 冷启动）
+            val created = create()
             synchronized(lock) {
-                if (_prewarmed.value) return@post
-                repeat(POOL_SIZE) { all.add(create()) }
-                _prewarmed.value = true
+                all.add(created)
+                idle.addLast(created)
+                if (all.size >= POOL_SIZE) _prewarmed.value = true
             }
+            if (!_prewarmed.value) prewarm()
         }
     }
 
@@ -50,9 +54,12 @@ class FormulaWebViewPool @Inject constructor(
         check(Looper.myLooper() == Looper.getMainLooper()) { "acquire must be on main thread" }
         synchronized(lock) {
             idle.pollFirst()?.let { return it }
-            Log.d(TAG, "pool empty, creating ad-hoc instance")
-            return create().also { all.add(it) }
         }
+        Log.d(TAG, "pool empty, creating ad-hoc instance")
+        // 构造移出锁外：WebView 构造期间不阻塞 release/prewarm 的主线程任务
+        val created = create()
+        synchronized(lock) { all.add(created) }
+        return created
     }
 
     fun release(pooled: PooledWebView) {
@@ -65,17 +72,6 @@ class FormulaWebViewPool @Inject constructor(
                 } else {
                     idle.addLast(pooled)
                 }
-            }
-        }
-    }
-
-    fun releaseAll() {
-        mainHandler.post {
-            synchronized(lock) {
-                all.forEach(::destroy)
-                idle.clear()
-                all.clear()
-                _prewarmed.value = false
             }
         }
     }
@@ -186,13 +182,14 @@ class PooledWebView internal constructor(val webView: WebView) {
     fun render(html: String, dark: Boolean) {
         check(Looper.myLooper() == Looper.getMainLooper()) { "render must run on main thread" }
         failed = false
+        // 挂起与直渲染统一挂 800ms 守卫：模板加载异常（onPageFinished 不回调）时也能走降级链路
+        renderTimeoutPending = true
+        mainHandler.removeCallbacks(timeoutRunnable)
+        mainHandler.postDelayed(timeoutRunnable, FormulaWebViewPool.RENDER_TIMEOUT_MS)
         if (!ready) {
             pending = html to dark
             return
         }
-        renderTimeoutPending = true
-        mainHandler.removeCallbacks(timeoutRunnable)
-        mainHandler.postDelayed(timeoutRunnable, FormulaWebViewPool.RENDER_TIMEOUT_MS)
         webView.evaluateJavascript("renderContent(${FormulaWebViewPool.jsString(html)}, $dark)", null)
     }
 

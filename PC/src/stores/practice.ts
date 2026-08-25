@@ -61,6 +61,8 @@ const POLL_MAX_MS = 10000
 /** 超时兜底阈值（§8.2）：pending>60s 或 processing>300s 展示自评入口 */
 const PENDING_SELF_JUDGE_MS = 60_000
 const PROCESSING_SELF_JUDGE_MS = 300_000
+/** 判分轮询总窗口：超窗停止并保持自评入口，避免永久轮询 */
+const GRADING_POLL_MAX_MS = 600_000
 /** LRU 列表会话缓存上限（§8.5） */
 const MAX_LIST_SESSIONS = 20
 
@@ -194,7 +196,13 @@ export const usePracticeStore = defineStore('practice', () => {
 
   async function ensureWindow(index: number): Promise<void> {
     while (index >= orderedIds.value.length && hasMore.value) {
+      const before = orderedIds.value.length
       await appendPage(nextPage.value)
+      if (orderedIds.value.length === before) {
+        // 服务端分页异常（整页重复）：终止避免无限打接口
+        hasMore.value = false
+        break
+      }
     }
   }
 
@@ -267,7 +275,15 @@ export const usePracticeStore = defineStore('practice', () => {
   async function gotoIndex(index: number, opts: { skipEnsure?: boolean } = {}): Promise<void> {
     accumulateCurrentTime()
     flushDraftFor(currentKey.value)
-    if (!opts.skipEnsure) await ensureWindow(index)
+    if (!opts.skipEnsure) {
+      try {
+        await ensureWindow(index)
+      } catch (err) {
+        // 分页加载失败转为列表错误呈现，避免向上抛成 unhandled rejection
+        listError.value = err instanceof Error ? err.message : String(err)
+        return
+      }
+    }
     if (index < 0 || index >= orderedIds.value.length) return
     currentIndex.value = index
     const id = orderedIds.value[index]!
@@ -295,7 +311,12 @@ export const usePracticeStore = defineStore('practice', () => {
   async function gotoQuestion(questionId: number): Promise<boolean> {
     let idx = orderedIds.value.indexOf(questionId)
     while (idx === -1 && hasMore.value) {
+      const before = orderedIds.value.length
       await appendPage(nextPage.value)
+      if (orderedIds.value.length === before) {
+        hasMore.value = false // 整页重复：终止避免无限打接口
+        break
+      }
       idx = orderedIds.value.indexOf(questionId)
     }
     if (idx === -1) return false
@@ -476,36 +497,48 @@ export const usePracticeStore = defineStore('practice', () => {
     }
   }
 
+  const activeGradingPolls = new Set<string>()
+
   async function startGradingPoll(key: string, attemptId: number): Promise<void> {
-    const startedAt = Date.now()
-    let delay = POLL_START_MS
-    for (;;) {
-      const rt = runtimes.get(key)
-      if (!rt || rt.phase !== 'submitted') return // 组件卸载/切走后停止轮询（M2 验收 4）
-      const status = rt.grading
-      if (status !== 'queued' && status !== 'pending' && status !== 'processing') return
-      // 超时兜底：主动展示自评入口，但不阻塞切题
-      const elapsed = Date.now() - startedAt
-      if ((status === 'pending' && elapsed > PENDING_SELF_JUDGE_MS) || (status === 'processing' && elapsed > PROCESSING_SELF_JUDGE_MS)) {
-        rt.selfJudgeReady = true
-      }
-      await sleep(delay)
-      delay = Math.min(POLL_MAX_MS, Math.round(delay * 1.6))
-      try {
-        const latest = await apiAttemptResult(attemptId)
-        const cur = runtimes.get(key)
-        if (!cur) return
-        cur.attempt = { ...cur.attempt, ...latest, attempt_id: attemptId }
-        const s = normalizeGrading(latest)
-        cur.grading = s
-        if (s === 'succeeded' || s === 'failed') {
-          if (s === 'failed') cur.selfJudgeReady = true
-          if (latest.is_correct === false) recordWrongAnswer(key)
+    if (activeGradingPolls.has(key)) return // 同题已有活动轮询（手动重试/队列重放重复触发），跳过
+    activeGradingPolls.add(key)
+    try {
+      const startedAt = Date.now()
+      let delay = POLL_START_MS
+      for (;;) {
+        const rt = runtimes.get(key)
+        if (!rt || rt.phase !== 'submitted') return // 组件卸载/切走后停止轮询（M2 验收 4）
+        const status = rt.grading
+        if (status !== 'queued' && status !== 'pending' && status !== 'processing') return
+        // 超时兜底：主动展示自评入口，但不阻塞切题
+        const elapsed = Date.now() - startedAt
+        if ((status === 'pending' && elapsed > PENDING_SELF_JUDGE_MS) || (status === 'processing' && elapsed > PROCESSING_SELF_JUDGE_MS)) {
+          rt.selfJudgeReady = true
+        }
+        if (elapsed > GRADING_POLL_MAX_MS) {
+          rt.selfJudgeReady = true // 总窗口耗尽：保持自评入口，停止轮询
           return
         }
-      } catch {
-        /* 单次轮询失败忽略，下一轮重试 */
+        await sleep(delay)
+        delay = Math.min(POLL_MAX_MS, Math.round(delay * 1.6))
+        try {
+          const latest = await apiAttemptResult(attemptId)
+          const cur = runtimes.get(key)
+          if (!cur) return
+          cur.attempt = { ...cur.attempt, ...latest, attempt_id: attemptId }
+          const s = normalizeGrading(latest)
+          cur.grading = s
+          if (s === 'succeeded' || s === 'failed') {
+            if (s === 'failed') cur.selfJudgeReady = true
+            if (latest.is_correct === false) recordWrongAnswer(key)
+            return
+          }
+        } catch {
+          /* 单次轮询失败忽略，下一轮重试 */
+        }
       }
+    } finally {
+      activeGradingPolls.delete(key)
     }
   }
 
@@ -660,6 +693,8 @@ export const usePracticeStore = defineStore('practice', () => {
     for (const timer of draftTimers.values()) clearTimeout(timer)
     draftTimers = new Map()
     runtimes.clear()
+    detailCache.clear()
+    listSessions.clear()
     orderedIds.value = []
     itemBanks.value = new Map()
     currentIndex.value = -1

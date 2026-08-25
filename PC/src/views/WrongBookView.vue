@@ -22,7 +22,7 @@ const catalog = useCatalogStore()
 
 onMounted(async () => {
   await catalog.fetchCatalog().catch(() => undefined)
-  wrongbook.bindUser(auth.userId)
+  wrongbook.bindUser(() => auth.userId)
   wrongbook.loadForUser(auth.userId, (bankId) => readMarked(auth.userId, bankId))
 })
 

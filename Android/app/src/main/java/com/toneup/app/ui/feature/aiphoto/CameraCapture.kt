@@ -27,7 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +60,7 @@ fun rememberCameraPermissionFlow(): CameraPermissionFlowState {
         )
     }
     var showPrePrompt by remember { mutableStateOf(state == CameraPermissionState.UNKNOWN) }
+    var denialDismissed by remember { mutableStateOf(false) }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -67,6 +68,7 @@ fun rememberCameraPermissionFlow(): CameraPermissionFlowState {
         if (granted) {
             state = CameraPermissionState.GRANTED
         } else {
+            denialDismissed = false
             val activity = context.findActivity()
             val shouldShowRationale = activity?.let {
                 androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(
@@ -79,11 +81,13 @@ fun rememberCameraPermissionFlow(): CameraPermissionFlowState {
         }
     }
 
-    return remember(state, showPrePrompt, launcher) {
+    return remember(state, showPrePrompt, denialDismissed, launcher) {
         CameraPermissionFlowState(
             state = state,
             showPrePrompt = showPrePrompt,
+            showDenialDialog = !denialDismissed,
             dismissPrePrompt = { showPrePrompt = false },
+            dismissDenialDialog = { denialDismissed = true },
             request = {
                 showPrePrompt = false
                 launcher.launch(Manifest.permission.CAMERA)
@@ -96,7 +100,10 @@ fun rememberCameraPermissionFlow(): CameraPermissionFlowState {
 data class CameraPermissionFlowState(
     val state: CameraPermissionState,
     val showPrePrompt: Boolean,
+    /** 拒绝/永久拒绝弹窗是否仍展示；用户取消后隐藏，由页面兜底引导 */
+    val showDenialDialog: Boolean,
     val dismissPrePrompt: () -> Unit,
+    val dismissDenialDialog: () -> Unit,
     val request: () -> Unit,
     val openSettings: () -> Unit
 )
@@ -113,21 +120,21 @@ fun CameraPermissionDialogs(flow: CameraPermissionFlowState) {
                 OutlinedButton(onClick = flow.dismissPrePrompt) { Text("暂不") }
             }
         )
-    } else if (flow.state == CameraPermissionState.DENIED_RATIONALE) {
+    } else if (flow.state == CameraPermissionState.DENIED_RATIONALE && flow.showDenialDialog) {
         AlertDialog(
-            onDismissRequest = {},
+            onDismissRequest = flow.dismissDenialDialog,
             title = { Text("相机权限被拒绝") },
             text = { Text("拍照纠错需要使用相机。你可以重新发起授权，其他功能不受影响。") },
             confirmButton = { Button(onClick = flow.request) { Text("去开启") } },
-            dismissButton = { OutlinedButton(onClick = flow.dismissPrePrompt) { Text("取消") } }
+            dismissButton = { OutlinedButton(onClick = flow.dismissDenialDialog) { Text("取消") } }
         )
-    } else if (flow.state == CameraPermissionState.PERMANENTLY_DENIED) {
+    } else if (flow.state == CameraPermissionState.PERMANENTLY_DENIED && flow.showDenialDialog) {
         AlertDialog(
-            onDismissRequest = {},
+            onDismissRequest = flow.dismissDenialDialog,
             title = { Text("相机权限已被永久拒绝") },
             text = { Text("请在系统设置中手动开启相机权限后返回") },
             confirmButton = { Button(onClick = flow.openSettings) { Text("打开设置") } },
-            dismissButton = { OutlinedButton(onClick = flow.dismissPrePrompt) { Text("取消") } }
+            dismissButton = { OutlinedButton(onClick = flow.dismissDenialDialog) { Text("取消") } }
         )
     }
 }
@@ -144,11 +151,13 @@ fun CameraCaptureView(
     val previewView = remember { mutableStateOf<PreviewView?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
+    DisposableEffect(lifecycleOwner) {
+        var boundProvider: ProcessCameraProvider? = null
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
             try {
                 val provider = providerFuture.get()
+                boundProvider = provider
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.value?.surfaceProvider)
                 }
@@ -163,6 +172,13 @@ fun CameraCaptureView(
                 errorMessage = "相机启动失败：${e.message}"
             }
         }, ContextCompat.getMainExecutor(context))
+        onDispose {
+            // 离开组合即解绑相机，避免后台持续供帧耗电与重复绑定异常
+            try {
+                boundProvider?.unbindAll()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     Box(modifier.fillMaxSize()) {

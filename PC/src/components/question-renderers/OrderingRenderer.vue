@@ -100,7 +100,6 @@ function labelOf(id: string): OptionItem | undefined {
         <div class="seq-head">
           <span class="seq-badge">{{ index + 1 }}</span>
           <span class="orig-label">卡片 {{ labelOf(id)?.label ?? id }}</span>
-          <span v-if="ctx.showAnswer" class="correct-slot text-secondary">标准答案位：{{ index + 1 }}</span>
           <span class="ops">
             <n-button size="tiny" quaternary :disabled="index <= 0 || ctx.disabled || ctx.readonly" aria-label="上移" @click="move(index, -1)">↑</n-button>
             <n-button size="tiny" quaternary :disabled="index >= currentOrder().length - 1 || ctx.disabled || ctx.readonly" aria-label="下移" @click="move(index, 1)">↓</n-button>
@@ -156,10 +155,6 @@ function labelOf(id: string): OptionItem | undefined {
 .orig-label {
   font-size: 13px;
   color: var(--tu-text-secondary);
-}
-
-.correct-slot {
-  font-size: 12px;
 }
 
 .ops {

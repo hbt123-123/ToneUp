@@ -34,7 +34,7 @@ def put_notes(question_id: int, body: dict = Body(...), user=Depends(get_current
     note_text = body.get("note_text")
     if not bank_id:
         raise BadRequestError("bank_id is required")
-    if note_text is None or len(note_text) > 10000:
+    if not isinstance(note_text, str) or len(note_text) > 10000:
         raise BadRequestError("note_text required and must be <= 10000 chars")
     db = str(get_settings().data_root / "user_data.db")
     now_iso = datetime.now(timezone.utc).isoformat()

@@ -143,7 +143,27 @@ fun ReadingRenderer(context: QuestionContext) {
 @Composable
 fun OrderingRenderer(context: QuestionContext) {
     val items = orderingItems(context.question)
-    require(items.isNotEmpty()) { "ORDERING question has no items" }
+    if (items.isEmpty()) {
+        // §6.4 降级原则：解析不出排序项时降级提示，绝不崩溃
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("排序内容加载失败", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "题号 ${context.question.questionId} 未解析到可排序项，可重试或跳过",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { context.onRetryLoad?.invoke() }) { Text("重试") }
+                    OutlinedButton(onClick = { context.onSkipQuestion?.invoke() }) { Text("跳过本题") }
+                }
+            }
+        }
+        return
+    }
 
     val currentOrder = (context.answer as? AnswerValue.Order)?.ids
     var orderIds by remember(context.question.questionId) {

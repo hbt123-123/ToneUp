@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -94,6 +95,11 @@ fun MainScaffold(rootNavController: NavHostController) {
                             if (tab == MainTab.REVIEW) {
                                 val badgeVm: ReviewBadgeViewModel = hiltViewModel()
                                 val count by badgeVm.count.collectAsStateWithLifecycle()
+                                // FR-RV-05：回到主界面/前台时刷新角标，避免完成复习后数字陈旧
+                                LifecycleResumeEffect(Unit) {
+                                    badgeVm.refresh()
+                                    onPauseOrDispose { }
+                                }
                                 IconWithBadge(icon = tab.icon, badgeCount = count)
                             } else {
                                 Icon(tab.icon, contentDescription = tab.label)

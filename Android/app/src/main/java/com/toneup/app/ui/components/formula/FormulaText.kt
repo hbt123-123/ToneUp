@@ -1,7 +1,6 @@
 package com.toneup.app.ui.components.formula
 
 import android.view.ViewGroup
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,12 +38,14 @@ fun FormulaText(
     var pooledRef by remember { mutableStateOf<PooledWebView?>(null) }
     val consecutiveFailures = remember { AtomicInteger(0) }
 
-    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f || isSystemInDarkTheme()
+    // 仅以生效配色判定深浅色：用户强制浅色而系统深色时，WebView 不应按深色渲染
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val density = LocalDensity.current
 
     val preparedHtml = remember(text) {
         MarkdownSanitizer.toParagraphs(MarkdownSanitizer.sanitize(text))
     }
+    var lastRendered by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
 
     if (forceRawText || failed) {
         Text(text = text, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
@@ -88,6 +89,11 @@ fun FormulaText(
             update = { webView ->
                 val pooled = pooledRef ?: return@AndroidView
                 if (pooled.webView === webView) {
+                    // 高度回调/父级重组反复触发 update：未变则跳过，避免 render→onHeight→重组→render 循环
+                    if (lastRendered?.first == preparedHtml && lastRendered?.second == darkTheme) {
+                        return@AndroidView
+                    }
+                    lastRendered = preparedHtml to darkTheme
                     pooled.setDark(darkTheme)
                     pooled.render(preparedHtml, darkTheme)
                 }
@@ -97,6 +103,7 @@ fun FormulaText(
                     FormulaWebViewPoolHolder.getOrNull()?.release(pooled)
                 }
                 pooledRef = null
+                lastRendered = null
             },
             modifier = Modifier
                 .fillMaxWidth()

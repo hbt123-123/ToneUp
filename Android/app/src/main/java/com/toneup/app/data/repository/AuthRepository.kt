@@ -24,7 +24,17 @@ class AuthRepository @Inject constructor(
         val token = EnvelopeUnwrapper.unwrap(jsonProvider.json) {
             authApi.login(LoginRequest(username, password))
         }.accessToken
-        val user = me()
+        // 先落库新令牌再调 me()：否则全新安装时 me() 无 Authorization 必然 401，
+        // 残留旧令牌时 me() 会返回上一账号信息导致串号
+        sessionManager.stageToken(token)
+        val user = try {
+            me()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            sessionManager.clearSession()
+            throw e
+        }
         sessionManager.onLogin(token, SessionUser(user.id, user.username, user.role))
         return user
     }

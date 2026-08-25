@@ -45,16 +45,27 @@ const { mode: layoutMode, isCompactOrNarrower } = useLayoutMode()
 const booting = ref(true)
 const bootError = ref<string | null>(null)
 
+/** 复习队列加载失败标记：区分"网络失败"与"队列确实为空（完成态）" */
+const reviewBootError = ref<string | null>(null)
+
+async function bootReviewSession(): Promise<void> {
+  await reviewStore.fetchQueue()
+  if (reviewStore.queue.length > 0) {
+    practice.startReviewSession(
+      reviewStore.queue.map((q) => ({ bankId: q.bank_id, questionId: q.question_id })),
+    )
+    practice.bankId = ''
+  }
+}
+
 onMounted(async () => {
   try {
     if (isReviewMode.value) {
-      // 今日复习：加载到期队列后交给同一引擎
-      await reviewStore.fetchQueue().catch(() => undefined)
-      if (reviewStore.queue.length > 0) {
-        practice.startReviewSession(
-          reviewStore.queue.map((q) => ({ bankId: q.bank_id, questionId: q.question_id })),
-        )
-        practice.bankId = ''
+      // 今日复习：加载到期队列后交给同一引擎；失败需可重试而非假完成态
+      try {
+        await bootReviewSession()
+      } catch (err) {
+        reviewBootError.value = humanizeError(err)
       }
       booting.value = false
       return
@@ -116,10 +127,26 @@ async function skipCurrentReview(): Promise<void> {
   }
 }
 
-/** 复习完成反馈（FR-REV-04） */
+/** 复习完成反馈（FR-REV-04）：加载失败时不算完成 */
 const reviewCompleted = computed(
-  () => isReviewMode.value && !booting.value && practice.orderedIds.length === 0,
+  () =>
+    isReviewMode.value &&
+    !booting.value &&
+    reviewBootError.value === null &&
+    practice.orderedIds.length === 0,
 )
+
+async function retryReviewBoot(): Promise<void> {
+  reviewBootError.value = null
+  booting.value = true
+  try {
+    await bootReviewSession()
+  } catch (err) {
+    reviewBootError.value = humanizeError(err)
+  } finally {
+    booting.value = false
+  }
+}
 
 /* ---------- 当前题目上下文（QuestionContext 契约） ---------- */
 
@@ -151,6 +178,13 @@ const ctx = computed<QuestionContext | null>(() => {
 
 /* ---------- 提交与切题 ---------- */
 
+/** 空答案判定：null/undefined/'' 以及全空数组（[]、['','']）均视为未作答 */
+function isBlankAnswer(v: unknown): boolean {
+  if (v === null || v === undefined || v === '') return true
+  if (Array.isArray(v)) return v.every((item) => item === null || item === undefined || item === '')
+  return false
+}
+
 async function handleSubmit(): Promise<void> {
   const r = rt.value
   if (!r) return
@@ -160,7 +194,7 @@ async function handleSubmit(): Promise<void> {
   }
   // error 态重试：网络失败保留答案与同一 client_request_id，重试走成功路径（§8.1）
   if (r.phase === 'error') {
-    if (r.answer === null || r.answer === undefined || r.answer === '') {
+    if (isBlankAnswer(r.answer)) {
       appMessage.warning('请先作答，再确认提交')
       return
     }
@@ -168,7 +202,7 @@ async function handleSubmit(): Promise<void> {
     return
   }
   if (r.phase !== 'idle' && r.phase !== 'editing') return
-  if (r.answer === null || r.answer === undefined || r.answer === '') {
+  if (isBlankAnswer(r.answer)) {
     appMessage.warning('请先作答，再确认提交')
     return
   }
@@ -202,7 +236,7 @@ const answeredIds = computed(() => {
   for (const id of practice.orderedIds) {
     const b = practice.itemBanks.get(id) ?? practice.bankId
     const r = practice.runtimes.get(`${b}:${id}`)
-    if (r && (r.phase === 'submitted' || (r.answer !== null && r.answer !== undefined && r.answer !== ''))) {
+    if (r && (r.phase === 'submitted' || !isBlankAnswer(r.answer))) {
       set.add(id)
     }
   }
@@ -409,11 +443,11 @@ onBeforeUnmount(() => {
       <n-skeleton height="48px" width="100%" :sharp="false" />
     </div>
 
-    <!-- 列表失败重试 -->
-    <div v-else-if="practice.listError || bootError" class="content-inner error-state">
+    <!-- 列表失败重试（含复习队列加载失败） -->
+    <div v-else-if="practice.listError || bootError || reviewBootError" class="content-inner error-state">
       <n-result-lite
-        :message="bootError ?? practice.listError ?? ''"
-        @retry="refreshCache"
+        :message="bootError ?? reviewBootError ?? practice.listError ?? ''"
+        @retry="reviewBootError ? retryReviewBoot() : refreshCache()"
       />
     </div>
 

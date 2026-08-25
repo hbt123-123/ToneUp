@@ -47,7 +47,7 @@ const correctLabel = computed<'A' | 'B' | null>(() => {
       </button>
     </div>
     <div v-if="ctx.showAnswer" class="answer-line text-secondary">
-      正确答案：{{ correctLabel === 'B' ? 'B（错误）' : 'A（正确）' }}
+      正确答案：{{ correctLabel === 'B' ? 'B（错误）' : correctLabel === 'A' ? 'A（正确）' : '暂无法解析正确答案' }}
     </div>
   </div>
 </template>

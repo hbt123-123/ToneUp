@@ -14,6 +14,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -43,7 +44,7 @@ class SessionDataStoreManager @Inject constructor(
     @ApplicationScope private val scope: CoroutineScope
 ) {
     private val mutex = Mutex()
-    private val stores = mutableMapOf<Long, DataStore<SessionData>>()
+    private val stores = ConcurrentHashMap<Long, DataStore<SessionData>>()
 
     suspend fun storeFor(userId: Long): DataStore<SessionData> {
         stores[userId]?.let { return it }
@@ -60,9 +61,12 @@ class SessionDataStoreManager @Inject constructor(
 
     /** 退出登录 / 切换账号：销毁内存引用并删除该用户命名空间文件 */
     suspend fun wipeUser(userId: Long) {
-        val store = mutex.withLock { stores.remove(userId) }
-        if (store != null) runCatching { store.data.first() }
         val file = File(context.filesDir, "practice_$userId.bin")
-        if (file.exists()) file.delete()
+        mutex.withLock {
+            val store = stores.remove(userId)
+            // 锁内排空旧实例在途写入后再删文件，防止并发 storeFor 为同一文件重建实例
+            if (store != null) runCatching { store.data.first() }
+            if (file.exists()) file.delete()
+        }
     }
 }

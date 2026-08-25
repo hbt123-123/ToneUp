@@ -52,6 +52,12 @@ def _attempt_payload(user_db: str, attempt_id: int, include_answer: bool) -> dic
     fb = None
     if a["is_correct"] is None:
         fb = user_repo.ai_feedback_get_by_attempt(user_db, attempt_id)
+    if a["is_correct"] is not None:
+        grading_status = "done"
+    elif fb is not None:
+        grading_status = fb["status"]
+    else:
+        grading_status = None
     data = {
         "attempt_id": a["id"],
         "bank_id": a["bank_id"],
@@ -60,7 +66,7 @@ def _attempt_payload(user_db: str, attempt_id: int, include_answer: bool) -> dic
         "is_correct": a["is_correct"],
         "score": a["score"],
         "created_at": a["created_at"],
-        "grading_status": ("queued" if fb else None) if a["is_correct"] is None else "done",
+        "grading_status": grading_status,
         "feedback": (
             {"status": fb["status"], "error_reason": fb["error_reason"],
              "error_message": fb["error_message"], "tag_ids": fb["tag_ids_json"]}
@@ -94,6 +100,8 @@ def submit_attempt(request: Request, body: dict = Body(...), user=Depends(get_cu
 
     if not bank_id or question_id is None or time_spent is None or not mode or not client_request_id:
         raise BadRequestError("bank_id/question_id/time_spent/mode/client_request_id are required")
+    if isinstance(question_id, bool) or not isinstance(question_id, int):
+        raise BadRequestError("question_id must be an integer")
     if mode not in VALID_MODES:
         raise BadRequestError(f"mode must be one of {sorted(VALID_MODES)}")
     if not isinstance(time_spent, int) or time_spent <= 0:
@@ -113,7 +121,7 @@ def submit_attempt(request: Request, body: dict = Body(...), user=Depends(get_cu
             raise ConflictError("no pending attempt to self-judge")
         self_correct = bool(answer["self_correct"])
         _, qrow, _tc = _locate_question(bank_id, int(question_id))
-        score = float(qrow["score"]) if self_correct else 0.0
+        score = float(qrow["score"] or 0) if self_correct else 0.0
         applied = user_repo.update_attempt_result(
             user_db, pending["id"], int(self_correct), score
         )
@@ -134,6 +142,17 @@ def submit_attempt(request: Request, body: dict = Body(...), user=Depends(get_cu
             )
         return envelope(_attempt_payload(user_db, pending["id"], include_answer=True))
 
+    # ── 先定位题目并完成客观题判分计算：校验失败不落库、不占幂等键 ──
+    entry, qrow, type_code = _locate_question(str(bank_id), int(question_id))
+    objective_result = None
+    if type_code in OBJECTIVE_TYPES:
+        parsed = bank_repo.parse_answer(qrow["answer_text"], type_code)
+        objective_result = grade_objective(type_code, answer, parsed, float(qrow["score"] or 0))
+        if objective_result[0] is None:
+            raise BadRequestError("answer key unparsable for this question; contact admin")
+    elif type_code not in SUBJECTIVE_TYPES:
+        raise BadRequestError(f"unsupported question type '{type_code}'")
+
     # ── 幂等插入 ──
     attempt_id, replayed = user_repo.insert_attempt(
         user_db,
@@ -146,16 +165,11 @@ def submit_attempt(request: Request, body: dict = Body(...), user=Depends(get_cu
     if replayed:
         return envelope(_attempt_payload(user_db, attempt_id, include_answer=True))
 
-    entry, qrow, type_code = _locate_question(str(bank_id), int(question_id))
-
     # 提交即计 total_attempts（B2 两段式第一步）
     user_repo.mastery_submit(user_db, user["id"], str(bank_id), int(question_id), now_iso)
 
     if type_code in OBJECTIVE_TYPES:
-        parsed = bank_repo.parse_answer(qrow["answer_text"], type_code)
-        is_correct, score = grade_objective(type_code, answer, parsed, float(qrow["score"] or 0))
-        if is_correct is None:
-            raise BadRequestError("answer key unparsable for this question; contact admin")
+        is_correct, score = objective_result
         applied = user_repo.update_attempt_result(user_db, attempt_id, int(is_correct), score)
         if applied:
             level, next_at = review_policy(0, is_correct, settings.review_retry_hours)

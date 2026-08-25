@@ -17,7 +17,7 @@ from app.api.deps import get_current_user
 from app.core.bank_registry import QUESTION_TYPE_MAPPING, get_registry
 from app.core.config import get_settings
 from app.core.errors import BadRequestError
-from app.repositories import tags_repo
+from app.repositories import bank_repo, tags_repo
 from app.schemas.common import envelope
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -34,27 +34,35 @@ def _subject_banks(subject_id: str | None) -> list[str] | None:
 
 
 def _streak_days(db: str, user_id: int, tz: ZoneInfo) -> int:
-    """连续学习天数：按配置时区切日，从今天（或昨天）往回连续有作答的天数。"""
+    """连续学习天数：按配置时区切日，从今天（或昨天）往回连续有作答的天数。
+
+    游标惰性逐行读取（新→旧），遇到首个日期空档即终止，
+    不再把全量 created_at 物化到内存。
+    """
+    today = datetime.now(tz).date()
     conn = sqlite3.connect(db)
+    streak = 0
+    expected = None
     try:
-        rows = conn.execute(
+        cursor = conn.execute(
             "SELECT created_at FROM practice_records WHERE user_id = ? ORDER BY created_at DESC",
             (user_id,),
-        ).fetchall()
+        )
+        for (created_at,) in cursor:
+            day = datetime.fromisoformat(created_at).astimezone(tz).date()
+            if expected is None:
+                if day > today:
+                    continue
+                if day < today - timedelta(days=1):
+                    break
+                expected = day
+            if day == expected:
+                streak += 1
+                expected -= timedelta(days=1)
+            elif day < expected:
+                break
     finally:
         conn.close()
-    days = {
-        datetime.fromisoformat(r[0]).astimezone(tz).date()
-        for r in rows
-    }
-    if not days:
-        return 0
-    today = datetime.now(tz).date()
-    cursor = today if today in days else today - timedelta(days=1)
-    streak = 0
-    while cursor in days:
-        streak += 1
-        cursor -= timedelta(days=1)
     return streak
 
 
@@ -145,52 +153,81 @@ def weaknesses(
     rows = [r for r in rows if r["created_at"] >= cutoff]
 
     registry = get_registry()
-    by_type: dict[tuple, list[int]] = {}
-    by_tag: dict[int, list[int]] = {}
+
+    # 按库批量取题：每库一条 IN 查询，替代逐行 get_question 的 N+1
+    qtype_by_key: dict[tuple[str, int], str | None] = {}
+    by_bank: dict[str, list[int]] = {}
     for r in rows:
-        entry = registry.entries.get(r["bank_id"])
-        if entry is None:
-            continue
+        if registry.entries.get(r["bank_id"]) is not None:
+            by_bank.setdefault(r["bank_id"], []).append(r["question_id"])
+    for bank_id, qids in by_bank.items():
+        entry = registry.entries[bank_id]
         mapping = QUESTION_TYPE_MAPPING.get(entry.subject_id, {})
-        qtype = None
         try:
-            from app.repositories import bank_repo
-
-            q = bank_repo.get_question(str(entry.path), r["question_id"])
-            if q is not None:
-                qtype = mapping.get(q["question_type_id"])
-        except Exception:
-            qtype = None
-        key_t = (entry.subject_id, qtype or "UNKNOWN")
-        by_type.setdefault(key_t, []).append(r["is_correct"])
-
-        tag_ids: list[int] = []
-        try:
-            tconn = sqlite3.connect(str(settings.data_root / "knowledge_tags.db"))
-            trows = tconn.execute(
-                "SELECT tag_id FROM question_tags WHERE bank_id = ? AND question_id = ?",
-                (r["bank_id"], r["question_id"]),
+            conn_q = bank_repo.get_connection(str(entry.path))
+            unique_ids = sorted(set(qids))
+            placeholders = ",".join("?" * len(unique_ids))
+            qrows = conn_q.execute(
+                f"SELECT id, question_type_id FROM questions WHERE id IN ({placeholders})",
+                unique_ids,
             ).fetchall()
-            tconn.close()
-            tag_ids = [t[0] for t in trows]
+            for qr in qrows:
+                qtype_by_key[(bank_id, qr["id"])] = mapping.get(qr["question_type_id"])
         except sqlite3.Error:
             pass
-        fb = None
+
+    # tags 库与用户库各复用一条连接贯穿循环，try/finally 确保关闭
+    tags_conn = None
+    uconn = None
+    by_type: dict[tuple, list[int]] = {}
+    by_tag: dict[int, list[int]] = {}
+    try:
+        try:
+            tags_conn = sqlite3.connect(str(settings.data_root / "knowledge_tags.db"))
+        except sqlite3.Error:
+            tags_conn = None
         try:
             uconn = sqlite3.connect(db)
             uconn.row_factory = sqlite3.Row
-            fb = uconn.execute(
-                "SELECT tag_ids_json FROM ai_feedback WHERE bank_id = ? AND question_id = ? AND tag_ids_json IS NOT NULL "
-                "ORDER BY created_at DESC LIMIT 1",
-                (r["bank_id"], r["question_id"]),
-            ).fetchone()
+        except sqlite3.Error:
+            uconn = None
+
+        for r in rows:
+            entry = registry.entries.get(r["bank_id"])
+            if entry is None:
+                continue
+            qtype = qtype_by_key.get((r["bank_id"], r["question_id"]))
+            key_t = (entry.subject_id, qtype or "UNKNOWN")
+            by_type.setdefault(key_t, []).append(r["is_correct"])
+
+            tag_ids: list[int] = []
+            if tags_conn is not None:
+                try:
+                    trows = tags_conn.execute(
+                        "SELECT tag_id FROM question_tags WHERE bank_id = ? AND question_id = ?",
+                        (r["bank_id"], r["question_id"]),
+                    ).fetchall()
+                    tag_ids = [t[0] for t in trows]
+                except sqlite3.Error:
+                    pass
+            if uconn is not None:
+                try:
+                    fb = uconn.execute(
+                        "SELECT tag_ids_json FROM ai_feedback WHERE bank_id = ? AND question_id = ? AND tag_ids_json IS NOT NULL "
+                        "ORDER BY created_at DESC LIMIT 1",
+                        (r["bank_id"], r["question_id"]),
+                    ).fetchone()
+                    if fb and fb["tag_ids_json"]:
+                        tag_ids.extend(int(t) for t in json.loads(fb["tag_ids_json"]))
+                except (sqlite3.Error, ValueError, TypeError):
+                    pass
+            for tid in set(tag_ids):
+                by_tag.setdefault(tid, []).append(r["is_correct"])
+    finally:
+        if tags_conn is not None:
+            tags_conn.close()
+        if uconn is not None:
             uconn.close()
-            if fb and fb["tag_ids_json"]:
-                tag_ids.extend(int(t) for t in json.loads(fb["tag_ids_json"]))
-        except (sqlite3.Error, ValueError, TypeError):
-            pass
-        for tid in set(tag_ids):
-            by_tag.setdefault(tid, []).append(r["is_correct"])
 
     items = []
     for (subj, tcode), results in by_type.items():
@@ -202,16 +239,17 @@ def weaknesses(
                     "dimension": "type", "subject_id": subj, "key": tcode,
                     "attempts": n, "accuracy": round(acc, 4), "wrong_rate": round(1 - acc, 4),
                 })
+    # 标签名整表查一次，循环内查字典
     tags_db = str(settings.data_root / "knowledge_tags.db")
+    name_rows = tags_repo.list_tags_by_subject(tags_db, subject_id or "")
+    tag_names = {t["id"]: t["tag_name"] for t in name_rows}
     for tid, results in by_tag.items():
         n = len(results)
         if n >= 5:
             acc = sum(1 for x in results if x == 1) / n
             if acc < 0.6:
-                name_rows = tags_repo.list_tags_by_subject(tags_db, subject_id or "")
-                tag_name = next((t["tag_name"] for t in name_rows if t["id"] == tid), str(tid))
                 items.append({
-                    "dimension": "tag", "subject_id": subject_id, "key": tag_name,
+                    "dimension": "tag", "subject_id": subject_id, "key": tag_names.get(tid, str(tid)),
                     "attempts": n, "accuracy": round(acc, 4), "wrong_rate": round(1 - acc, 4),
                 })
 

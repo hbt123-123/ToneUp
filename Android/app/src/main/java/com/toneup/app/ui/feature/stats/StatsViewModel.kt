@@ -8,6 +8,7 @@ import com.toneup.app.data.repository.CatalogRepository
 import com.toneup.app.data.repository.StatsRepository
 import com.toneup.app.ui.common.Load
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -30,6 +31,8 @@ class StatsViewModel @Inject constructor(
     private val _state = MutableStateFlow(StatsUiState())
     val state: StateFlow<StatsUiState> = _state
 
+    private var loadJob: Job? = null
+
     init {
         viewModelScope.launch {
             runCatching { catalogRepository.catalog() }.onSuccess { dto ->
@@ -44,7 +47,9 @@ class StatsViewModel @Inject constructor(
     /** FR-ST-01 总览 + FR-ST-02 薄弱项；FR-ST-03 时间范围与学科筛选 */
     fun load(rangeDays: Int? = _state.value.rangeDays, subjectId: String? = _state.value.subjectId) {
         _state.value = _state.value.copy(rangeDays = rangeDays, subjectId = subjectId)
-        viewModelScope.launch {
+        // 取消上一次加载，避免快速切换筛选时旧响应后到覆盖新数据
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _state.value = _state.value.copy(overview = Load.Loading, weaknesses = Load.Loading)
             try {
                 val overview = statsRepository.overview(rangeDays, subjectId?.takeIf { it.isNotBlank() })

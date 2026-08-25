@@ -109,19 +109,22 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
   }
 
   function persist(): void {
+    const uid = currentUserId()
+    if (uid === -1) return // 会话未恢复时不落盘，避免写入 toneup:wrongbook:-1
     /* marked 字段为派生值，落盘前剥离 */
     const plain = records.value.map(({ marked: _m, ...rest }) => rest)
     try {
-      localStorage.setItem(WRONGBOOK_KEY(currentUserId), JSON.stringify(plain))
+      localStorage.setItem(WRONGBOOK_KEY(uid), JSON.stringify(plain))
     } catch {
       /* ignore */
     }
   }
 
-  let currentUserId: number | string = -1
+  /** 与 practice.bindUserId 同款：传 getter，会话恢复后自动取到真实 userId */
+  let currentUserId: () => number | string = () => -1
 
-  function bindUser(id: number | string): void {
-    currentUserId = id
+  function bindUser(provider: () => number | string): void {
+    currentUserId = provider
   }
 
   function reset(): void {

@@ -126,6 +126,16 @@ fun BankTab(
                             }
                         }
                     }
+                    home.errorHint?.let { hint ->
+                        item {
+                            Text(
+                                text = hint,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
                 }
 
                 // FR-HM-03 学科入口列表

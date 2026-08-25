@@ -24,7 +24,8 @@ export function humanizeError(err: unknown): string {
       case 400:
         return err.message || '请求参数有误'
       case 401:
-        return '登录已失效，请重新登录'
+        // 登录/注册失败携带服务端 message（如账号密码错误），其余 401 用统一提示
+        return err.message && err.message !== '登录已失效' ? err.message : '登录已失效，请重新登录'
       case 403:
         return '权限不足，无法执行该操作'
       case 404:
@@ -101,6 +102,10 @@ async function parseBody(response: Response): Promise<{ payload: unknown; reques
 
 async function execute<T>(path: string, options: RequestOptions): Promise<T> {
   const { query, json, rawBody, extraHeaders, timeoutMs = 15000, signal } = options
+  // 外层 signal 在进入前已中止：addEventListener 不会再触发，直接以 reason 拒绝
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException('请求已取消', 'AbortError')
+  }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(new DOMException('请求超时', 'TimeoutError')), timeoutMs)
   const onOuterAbort = (): void => controller.abort(signal?.reason)
@@ -131,20 +136,25 @@ async function execute<T>(path: string, options: RequestOptions): Promise<T> {
     const { payload, requestId } = await parseBody(response)
 
     if (response.status === 401) {
-      unauthorizedHandler?.()
-      throw new ApiError('登录已失效', 401, requestId)
+      // 登录/注册失败后端同样返回 401：不触发全局登出跳转，透传服务端 message
+      const isAuthEndpoint = path.includes('/auth/login') || path.includes('/auth/register')
+      if (!isAuthEndpoint) unauthorizedHandler?.()
+      const envMessage = isAuthEndpoint
+        ? ((payload as Partial<ApiEnvelope<unknown>> | null)?.message ?? null)
+        : null
+      throw new ApiError(
+        typeof envMessage === 'string' && envMessage ? envMessage : '登录已失效',
+        401,
+        requestId,
+      )
     }
 
     const envelope = payload as Partial<ApiEnvelope<T>> | null
     // 契约统一外层 {"success","data","message","request_id"}；裸响应直接透传。
-    // 判定条件：存在对象型 data 字段且伴随信封特征键，避免把业务 DTO 误判为信封。
+    // 判定条件：对象响应携带信封特征键即按信封解包（data 可为 null/数组/原始值）。
     const looksEnvelope =
       !!envelope &&
       typeof envelope === 'object' &&
-      'data' in envelope &&
-      envelope.data !== null &&
-      typeof envelope.data === 'object' &&
-      !Array.isArray(envelope.data) &&
       ('success' in envelope || 'message' in envelope || 'request_id' in envelope)
 
     if (!response.ok || (envelope && envelope.success === false)) {

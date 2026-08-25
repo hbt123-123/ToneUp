@@ -47,8 +47,7 @@ data class PracticeUiState(
     val currentIndex: Int = 0,
     val knownTotal: Int = -1,
     val hasMore: Boolean = false,
-    val pendingSyncCount: Int = 0,
-    val restoredDraftHint: Boolean = false
+    val pendingSyncCount: Int = 0
 ) {
     val answeredCount: Int
         get() = slots.count {
@@ -79,7 +78,8 @@ class PracticeViewModel @Inject constructor(
     /** 提交耗时计时：题目成为当前题时启动 */
     private var questionShownAtMs: Long = System.currentTimeMillis()
 
-    private var draftJob: Job? = null
+    /** 按题维护防抖 Job：切题时上一题的待写草稿仍会独立落盘 */
+    private val draftFlushJobs = mutableMapOf<Long, Job>()
     private val essayFlushJobs = mutableMapOf<Long, Job>()
 
     init {
@@ -136,6 +136,8 @@ class PracticeViewModel @Inject constructor(
             questionShownAtMs = System.currentTimeMillis()
         }
         if (goTo) {
+            // 同步扩容，避免 currentIndex 越过已装载页时 UI 因取不到 slot 短暂空白
+            growSlots(index + 1)
             _state.value = _state.value.copy(currentIndex = index)
         }
         viewModelScope.launch { ensureSlot(index) }
@@ -210,7 +212,6 @@ class PracticeViewModel @Inject constructor(
                 errorHint = null
             )
         }
-        _state.value = _state.value.copy(restoredDraftHint = restored != null)
         // 恢复在途幂等键（断网队列）
         userId?.let {
             runCatching { practiceRepository.restorePendingState(it) }
@@ -266,8 +267,8 @@ class PracticeViewModel @Inject constructor(
      */
     private fun scheduleDraftWrite(index: Int, answer: AnswerValue) {
         val question = slotAt(index)?.question ?: return
-        draftJob?.cancel()
-        draftJob = viewModelScope.launch {
+        draftFlushJobs.remove(question.questionId)?.cancel()
+        draftFlushJobs[question.questionId] = viewModelScope.launch {
             delay(DRAFT_DEBOUNCE_MS)
             writeDraft(question, answer)
         }
@@ -314,6 +315,10 @@ class PracticeViewModel @Inject constructor(
         val question = slot.question ?: return
         val answer = slot.answer ?: return
         dispatch(index, PracticeEvent.SubmitClicked)
+        // 恢复草稿的题停留在 Idle（状态机无 Idle→Submitting 转移），显式置位以禁用按钮并支持失败重试
+        if (slotAt(index)?.status == PracticeStatus.Idle) {
+            setStatus(index, PracticeStatus.Submitting)
+        }
         viewModelScope.launch {
             try {
                 val elapsedSeconds =
@@ -333,6 +338,8 @@ class PracticeViewModel @Inject constructor(
                         errorHint = null
                     )
                 }
+                // 先取消已排期的 ESSAY 兜底落盘，避免 clearDraft 后又被重新写入
+                essayFlushJobs.remove(question.questionId)?.cancel()
                 clearDraft(question.bankId, question.questionId)
             } catch (e: AppException.Network) {
                 dispatch(index, PracticeEvent.SubmitNetworkFailed("网络不可用，答案已保存待同步"))
@@ -368,15 +375,9 @@ class PracticeViewModel @Inject constructor(
         }
     }
 
-    fun consumeDraftHint(): Boolean {
-        val had = _state.value.restoredDraftHint
-        _state.value = _state.value.copy(restoredDraftHint = false)
-        return had
-    }
-
     override fun onCleared() {
         super.onCleared()
-        draftJob?.cancel()
+        draftFlushJobs.values.forEach { it.cancel() }
         essayFlushJobs.values.forEach { it.cancel() }
     }
 

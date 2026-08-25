@@ -80,20 +80,24 @@ def create_feedback(
     now_iso = datetime.now(timezone.utc).isoformat()
     feedback_id = uuid.uuid4().hex
 
-    uploads_dir = settings.data_root / "uploads"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    image_path = uploads_dir / f"{feedback_id}{ext}"
-    image_path.write_bytes(data)
-
     if attempt_id is not None:
         a = user_repo.get_attempt(user_db, attempt_id)
         if a is None or a["user_id"] != user["id"]:
             raise ForbiddenError("attempt not yours")
 
-    user_repo.ai_feedback_create(
-        user_db, feedback_id, user["id"], attempt_id,
-        bank_id, question_id, str(image_path), created_at=now_iso,
-    )
+    uploads_dir = settings.data_root / "uploads"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    image_path = uploads_dir / f"{feedback_id}{ext}"
+    image_path.write_bytes(data)
+
+    try:
+        user_repo.ai_feedback_create(
+            user_db, feedback_id, user["id"], attempt_id,
+            bank_id, question_id, str(image_path), created_at=now_iso,
+        )
+    except Exception:
+        image_path.unlink(missing_ok=True)
+        raise
 
     sync_threshold_bytes = settings.ai_sync_max_bytes
     sync_threshold_px = settings.ai_sync_max_pixels
@@ -106,14 +110,16 @@ def create_feedback(
     if small:
         enqueue_grading(feedback_id)
         fb = user_repo.ai_feedback_get(user_db, feedback_id)
-        deadline = datetime.now(timezone.utc).timestamp() + 8
+        # 有界短等待：快速路径尽量同步返回完整结果，超时即 202 交由客户端轮询，
+        # 避免长时间占住线程池线程拖垮其他同步端点
+        deadline = datetime.now(timezone.utc).timestamp() + 2
         while datetime.now(timezone.utc).timestamp() < deadline:
             fb = user_repo.ai_feedback_get(user_db, feedback_id)
             if fb and fb["status"] in ("succeeded", "failed"):
                 break
             import time as _t
 
-            _t.sleep(0.2)
+            _t.sleep(0.1)
         if fb and fb["status"] in ("succeeded", "failed"):
             return envelope(_feedback_payload(fb))
         return envelope({"feedback_id": feedback_id, "status": "queued"}, message="processing"), 202

@@ -78,6 +78,22 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 }),
 })
 
+/** 发版后旧 index-hash 的 chunk 404 会导致导航静默中止：命中即整页刷新拉取新资源 */
+const CHUNK_LOAD_ERROR_RE =
+  /importing a module script failed|loading chunk .* failed|failed to fetch dynamically imported module|error loading dynamically imported module/i
+
+router.onError((error) => {
+  if (!(error instanceof Error && CHUNK_LOAD_ERROR_RE.test(error.message))) return
+  try {
+    const last = Number(sessionStorage.getItem('toneup:chunk-reload-at') ?? 0)
+    if (Date.now() - last < 10_000) return // 节流防刷新循环
+    sessionStorage.setItem('toneup:chunk-reload-at', String(Date.now()))
+  } catch {
+    /* sessionStorage 不可用时直接刷新 */
+  }
+  window.location.reload()
+})
+
 let sessionRestorePromise: Promise<boolean> | null = null
 
 router.beforeEach(async (to) => {

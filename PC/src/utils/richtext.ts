@@ -56,6 +56,32 @@ function normalizeImages(holder: HTMLElement): void {
   })
 }
 
+/** KaTeX 生成节点：class 含 katex 前缀，或属于 MathML/SVG 标签集合 */
+const KATEX_STYLE_TAGS = new Set([
+  'math', 'semantics', 'annotation', 'mrow', 'mi', 'mn', 'mo', 'ms', 'mtext',
+  'msup', 'msub', 'msubsup', 'mfrac', 'msqrt', 'mroot', 'mstyle',
+  'munder', 'mover', 'munderover', 'mpadded', 'mphantom', 'mspace',
+  'mtable', 'mtr', 'mtd', 'mlabeledtr', 'mmultiscripts', 'svg', 'path', 'line',
+])
+
+/** 危险样式值：KaTeX 输出不会包含这些模式，命中即整条剥离（纵深防御） */
+const DANGEROUS_STYLE_RE = /url\(|position\s*:|z-index\s*:/i
+
+/**
+ * style 属性加固（§7.2）：仅 KaTeX 生成的节点保留 inline style，
+ * 其余标签一律剥离，杜绝 position:fixed 遮罩 / z-index 覆盖 / background:url() 外链探测。
+ */
+function hardenStyles(root: HTMLElement): void {
+  root.querySelectorAll<HTMLElement | SVGElement>('*').forEach((el) => {
+    if (!el.hasAttribute('style')) return
+    const cls = el.getAttribute('class') ?? ''
+    const isKatex = cls.includes('katex') || KATEX_STYLE_TAGS.has(el.tagName.toLowerCase())
+    if (!isKatex || DANGEROUS_STYLE_RE.test(el.getAttribute('style') ?? '')) {
+      el.removeAttribute('style')
+    }
+  })
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, '&amp;')
@@ -133,7 +159,11 @@ export async function renderRichText(raw: string | null | undefined): Promise<st
       /* KaTeX 整体失败时保留 markdown 结果，片段级错误已由 throwOnError=false 兜底 */
     }
     normalizeImages(holder)
-    const safe = pipeline.sanitize(holder.innerHTML)
+    const sanitizedHtml = pipeline.sanitize(holder.innerHTML)
+    const cleanHolder = document.createElement('div')
+    cleanHolder.innerHTML = sanitizedHtml
+    hardenStyles(cleanHolder)
+    const safe = cleanHolder.innerHTML
     if (!safe.replace(/<br\s*\/?>|&nbsp;|\s/g, '')) {
       return '<p class="tu-rich-error">内容渲染异常</p>'
     }

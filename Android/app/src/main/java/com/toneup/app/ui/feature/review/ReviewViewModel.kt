@@ -18,8 +18,9 @@ import javax.inject.Inject
 data class ReviewUiState(
     val items: Load<List<ReviewItemDto>> = Load.Loading,
     val skippingIds: Set<Long> = emptySet(),
-    /** 暂缓撤销窗口内的条目（限时内可撤销，P1） */
-    val lastSkipped: ReviewItemDto? = null
+    /** 最近一次暂缓成功（仅用于短暂提示；服务端已顺延且无撤销端点，不可撤销） */
+    val lastSkipped: ReviewItemDto? = null,
+    val errorHint: String? = null
 )
 
 @HiltViewModel
@@ -49,10 +50,13 @@ class ReviewViewModel @Inject constructor(
         }
     }
 
-    /** FR-RV-03 暂缓单题：顺延 1 天，限时内可撤销 */
+    /** FR-RV-03 暂缓单题：服务端顺延 1 天；无撤销端点，暂缓后不可撤销 */
     fun skip(item: ReviewItemDto) {
         viewModelScope.launch {
-            _state.value = _state.value.copy(skippingIds = _state.value.skippingIds + item.questionId)
+            _state.value = _state.value.copy(
+                skippingIds = _state.value.skippingIds + item.questionId,
+                errorHint = null
+            )
             runCatching { reviewRepository.skip(item.questionId, item.bankId) }
                 .onSuccess {
                     val current = (_state.value.items as? Load.Ready)?.value ?: emptyList()
@@ -63,24 +67,12 @@ class ReviewViewModel @Inject constructor(
                     )
                 }
                 .onFailure {
-                    _state.value =
-                        _state.value.copy(skippingIds = _state.value.skippingIds - item.questionId)
+                    _state.value = _state.value.copy(
+                        skippingIds = _state.value.skippingIds - item.questionId,
+                        errorHint = "暂缓失败，请检查网络后重试"
+                    )
                 }
         }
-    }
-
-    fun undoSkip(item: ReviewItemDto) {
-        viewModelScope.launch {
-            val current = (_state.value.items as? Load.Ready)?.value ?: emptyList()
-            _state.value = _state.value.copy(
-                items = Load.Ready((listOf(item) + current).sortedBy { it.nextReviewAt ?: "" }),
-                lastSkipped = null
-            )
-        }
-    }
-
-    fun dismissUndo() {
-        _state.value = _state.value.copy(lastSkipped = null)
     }
 
     /** FR-RV-02 以复习模式进入刷题页 */

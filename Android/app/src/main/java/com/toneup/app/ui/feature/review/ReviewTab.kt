@@ -19,10 +19,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -41,7 +45,7 @@ import androidx.navigation.NavHostController
 
 /**
  * 今日复习 Tab（RV）：
- * FR-RV-01 列表；FR-RV-02 复习模式进入刷题；FR-RV-03 暂缓可撤销；
+ * FR-RV-01 列表；FR-RV-02 复习模式进入刷题；FR-RV-03 暂缓（服务端无撤销端点，提示不可撤销）；
  * FR-RV-04 空态鼓励语；FR-RV-05 下拉刷新。
  */
 @Composable
@@ -50,6 +54,17 @@ fun ReviewTab(
     viewModel: ReviewViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // FR-RV-03 暂缓成功短暂提示；服务端无撤销端点，不提供撤销动作
+    LaunchedEffect(state.lastSkipped) {
+        state.lastSkipped?.let {
+            snackbarHostState.showSnackbar(
+                message = "已暂缓 1 题（暂缓后不可撤销）",
+                duration = SnackbarDuration.Short
+            )
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Text(
@@ -57,6 +72,15 @@ fun ReviewTab(
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(16.dp)
         )
+
+        state.errorHint?.let { hint ->
+            Text(
+                text = hint,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+        }
 
         when (val itemsLoad = state.items) {
             is Load.Loading -> Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -106,17 +130,8 @@ fun ReviewTab(
             }
         }
 
-        // FR-RV-03 撤销暂缓（限时提示）
-        state.lastSkipped?.let { skipped ->
-            Snackbar(
-                action = {
-                    OutlinedButton(onClick = { viewModel.undoSkip(skipped) }) { Text("撤销") }
-                },
-                dismissAction = {}
-            ) {
-                Text("已暂缓 1 题")
-            }
-        }
+        // FR-RV-03 暂缓提示：由 SnackbarHost 托管，Short 时长自动消失
+        SnackbarHost(snackbarHostState)
     }
 }
 

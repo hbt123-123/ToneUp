@@ -32,6 +32,32 @@ function isEditable(target: EventTarget | null): boolean {
   return target.isContentEditable || target.getAttribute('contenteditable') === 'true'
 }
 
+/** Tab 聚焦后按 Space 应触发元素默认激活（按钮/开关/下拉等），不劫持 */
+function isActivatable(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  if (tag === 'BUTTON' || tag === 'A' || tag === 'SUMMARY') return true
+  const role = target.getAttribute('role')
+  return !!role && ACTIVATABLE_ROLES.includes(role)
+}
+
+const ACTIVATABLE_ROLES = [
+  'button',
+  'switch',
+  'checkbox',
+  'radio',
+  'option',
+  'menuitem',
+  'menuitemradio',
+  'tab',
+  'link',
+]
+
+/** Naive UI 弹层（对话框/模态）打开时不劫持按键，避免 Enter/Space 穿透到底层页面 */
+function hasOpenOverlay(): boolean {
+  return document.querySelector('.n-modal, .n-dialog') !== null
+}
+
 export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: () => boolean = () => true): void {
   let spaceTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -51,6 +77,8 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: () => 
       handlers.onEscape?.()
       return
     }
+    // 弹层打开时放行所有按键（Escape 已在上方处理，仍可关闭浮层）
+    if (hasOpenOverlay()) return
     if (isEditable(e.target)) return
 
     switch (true) {
@@ -70,7 +98,8 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: () => 
         handlers.onNext?.()
         break
       case key === ' ': {
-        // 长按计时；OS 自动重复（e.repeat）忽略
+        // 长按计时仅在非交互元素上生效；交互元素的 Space 默认激活行为放行
+        if (isActivatable(e.target)) break
         e.preventDefault()
         if (!e.repeat && spaceTimer === null) {
           spaceTimer = setTimeout(() => {

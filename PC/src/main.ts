@@ -45,7 +45,7 @@ setUnauthorizedHandler(() => {
 // practice ↔ auth/wrongbook 接线（避免 store 循环依赖，用注入方式）
 const wrongbook = useWrongBookStore(pinia)
 usePracticeStore(pinia).bindUserId(() => auth.userId)
-wrongbook.bindUser(auth.userId)
+wrongbook.bindUser(() => auth.userId)
 bindWrongRecorder((entry) => {
   wrongbook.recordWrong(entry)
 })

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { apiLogin, apiMe, apiRegister } from '@/api/endpoints'
+import { ApiError } from '@/api/http'
 import { clearToken, loadToken, saveToken } from '@/api/token'
 import { clearAllUserDomainData } from '@/utils/storage'
 import type { CurrentUser } from '@/api/generated/schema'
@@ -37,14 +38,16 @@ export const useAuthStore = defineStore('auth', () => {
     await login(username, password)
   }
 
-  /** 用本地令牌恢复会话；失败返回 false 并清场 */
+  /** 用本地令牌恢复会话；仅鉴权失败（401）清场，网络类错误保留令牌待联网重试 */
   async function restoreSession(): Promise<boolean> {
     if (!token.value) return false
     try {
       user.value = await apiMe()
       return true
-    } catch {
-      logoutLocally()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        logoutLocally()
+      }
       return false
     }
   }
@@ -54,10 +57,24 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     clearToken()
     clearAllUserDomainData()
+    resetDomainStores()
   }
 
   function logout(): void {
     logoutLocally()
+  }
+
+  /** 清各业务 store 内存态（懒加载避免模块环）：换账号后不得命中上一用户的缓存/残留 */
+  function resetDomainStores(): void {
+    void Promise.all([
+      import('@/stores/practice'),
+      import('@/stores/wrongbook'),
+      import('@/stores/review'),
+    ]).then(([practiceMod, wrongbookMod, reviewMod]) => {
+      practiceMod.usePracticeStore().resetSession()
+      wrongbookMod.useWrongBookStore().reset()
+      reviewMod.useReviewStore().reset()
+    })
   }
 
   return {

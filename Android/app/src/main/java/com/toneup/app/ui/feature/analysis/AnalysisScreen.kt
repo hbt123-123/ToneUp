@@ -1,5 +1,6 @@
 package com.toneup.app.ui.feature.analysis
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -159,6 +160,9 @@ fun AnalysisScreen(
         }
     }
 
+    // FR-AN-05 系统返回手势拦截：笔记未保存时先弹确认
+    BackHandler(enabled = state.noteDirty) { showNoteLeaveDialog = true }
+
     if (showNoteLeaveDialog) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showNoteLeaveDialog = false },
@@ -241,7 +245,7 @@ fun GradingStatusCard(
                         Spacer(Modifier.size(8.dp))
                         Text(
                             text = buildString {
-                                append(feedback?.isCorrect?.let { if (it) "判定正确" } ?: "已出分")
+                                append(feedback?.isCorrect?.let { if (it) "判定正确" else "判定错误" } ?: "已出分")
                                 feedback?.errorReason?.let { reason -> append("：$reason") }
                             }.ifBlank { "判分完成" }
                         )

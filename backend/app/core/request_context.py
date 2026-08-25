@@ -1,15 +1,18 @@
-"""Request context management with contextvars and middleware.
+﻿"""Request context management with contextvars and middleware.
 
 - contextvar: request_id_var 用于在请求/响应周期中传递 request_id
 - 中间件：读取 X-Request-ID 头部，不存在则生成 uuid4().hex 并 set 到 contextvar
 - 响应阶段：application/json 响应将 request_id 注入 body
 """
 
+import json
+import time
 import uuid as _uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any
 
+import structlog
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -53,6 +56,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         set_request_id(rid)
 
         # --- 阶段2：调用下一层 ---
+        started = time.perf_counter()
         response: Response = await call_next(request)
 
         # --- 阶段3：如果是 JSON 响应，注入 request_id 到 body ---
@@ -77,9 +81,21 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
                     media_type="application/json",
                     headers=headers,
                 )
-            except Exception:
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 # 解析失败则原样返回（头里仍带 X-Request-ID）
-                pass
+                structlog.get_logger().debug(
+                    "request_id_body_inject_failed", error=str(exc), request_id=rid
+                )
+
+        # --- 阶段4：access log——每条请求一条结构化事件，request_id 由处理器注入 ---
+        structlog.get_logger().info(
+            "http_request",
+            request_id=rid,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+        )
 
         return response
 

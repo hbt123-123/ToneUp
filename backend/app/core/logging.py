@@ -47,3 +47,6 @@ def inject_request_id(
 
 # 模块导入即调用 setup_logging()
 setup_logging()
+
+# 模块级 logger（供 main.py 等直接 from app.core.logging import logger 使用）
+logger = structlog.get_logger()

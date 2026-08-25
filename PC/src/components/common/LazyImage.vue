@@ -71,6 +71,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   observer?.disconnect()
   observer = null
+  // 使在途请求失效：否则卸载后完成的 fetch 会给已卸载组件创建永不回收的 blob URL
+  seq++
   revoke()
 })
 

@@ -38,10 +38,15 @@ class SessionManager @Inject constructor(
     fun cachedToken(): String? = _token.value ?: tokenStore.token().also { _token.value = it }
 
     fun onLogin(token: String, user: SessionUser) {
-        tokenStore.save(token)
-        _token.value = token
+        stageToken(token)
         _user.value = user
         pendingRestoreRoute = null
+    }
+
+    /** 登录流程暂存令牌：持久化并更新内存镜像（拦截器立即可见），用户信息待 /me 成功后经 [onLogin] 写入 */
+    fun stageToken(token: String) {
+        tokenStore.save(token)
+        _token.value = token
     }
 
     fun restoreCachedUser(user: SessionUser) {

@@ -45,9 +45,12 @@ def client(monkeypatch, tmp_path) -> Any:
     from app.main import create_app
     app = create_app()
 
-    # 返回 TestClient
-    with TestClient(app) as c:
-        yield c
+    # 返回 TestClient；teardown 再清缓存，防止指向已删 tmp_path 的 Settings 泄漏
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        get_settings.cache_clear()
 
 
 # ── fixture: data_root_with_banks ────────────────────────────────────────
@@ -58,14 +61,14 @@ def data_root_with_banks(tmp_path) -> Path:
 
     返回值：临时 data_root 的 Path
     """
-    src_dir = Path("E:/project/ToneUp/backend/data")
+    src_dir = Path(__file__).resolve().parents[1] / "data"
     dst_dir = tmp_path / "data_root" / "data"
     # 复制整个 data 目录
     if dst_dir.exists():
         shutil.rmtree(dst_dir)
     shutil.copytree(src_dir, dst_dir)
     # 复制 manifest.json 到 data_root 级别
-    src_manifest = Path("E:/project/ToneUp/backend/data/manifest.json")
+    src_manifest = src_dir / "manifest.json"
     dst_manifest = tmp_path / "data_root" / "manifest.json"
     if src_manifest.exists():
         shutil.copy(str(src_manifest), str(dst_manifest))

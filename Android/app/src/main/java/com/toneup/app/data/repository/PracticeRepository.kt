@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,8 +34,7 @@ class PracticeRepository @Inject constructor(
     private val _pendingCount = MutableStateFlow(0)
     val pendingCount: StateFlow<Int> = _pendingCount
 
-    @Volatile
-    private var replaying = false
+    private val replaying = AtomicBoolean(false)
 
     suspend fun submit(
         bankId: String,
@@ -54,10 +54,7 @@ class PracticeRepository @Inject constructor(
         )
         return try {
             val (code, result) = EnvelopeUnwrapper.unwrapWithStatus(jsonProvider.json) {
-                val response = attemptApi.submit(body)
-                val envelope = response.body()
-                    ?: throw AppException.Business("服务端返回为空")
-                response.code() to envelope
+                attemptApi.submit(body)
             }
             // 明确成功（含 202 受理）：幂等键使命结束，缓存结果
             idempotencyKeyStore.confirm(bankId, questionId)
@@ -122,18 +119,18 @@ class PracticeRepository @Inject constructor(
      * 成功 → 移除并以服务端结果为准刷新缓存；失败 → 保留等待下次。
      */
     suspend fun replayPendingQueue(): Int {
-        if (replaying) return 0
-        val userId = sessionManager.currentUserId() ?: return 0
-        replaying = true
+        // compareAndSet 保证互斥：连接恢复回调与手动重试并发时仅一轮进入
+        if (!replaying.compareAndSet(false, true)) return 0
         var replayed = 0
         try {
+            val userId = sessionManager.currentUserId() ?: return 0
             val store = sessionDataStoreManager.storeFor(userId)
             while (true) {
                 val pending = store.data.first().pendingSubmissions.firstOrNull()
                     ?: break
                 try {
                     val (_, result) = EnvelopeUnwrapper.unwrapWithStatus(jsonProvider.json) {
-                        val response = attemptApi.submit(
+                        attemptApi.submit(
                             SubmitAttemptRequest(
                                 bankId = pending.bankId,
                                 questionId = pending.questionId,
@@ -143,8 +140,6 @@ class PracticeRepository @Inject constructor(
                                 clientRequestId = pending.clientRequestId
                             )
                         )
-                        response.code() to (response.body()
-                            ?: throw AppException.Business("服务端返回为空"))
                     }
                     resultCache.put(result, pending.bankId, pending.questionId)
                     removePending(userId, pending)
@@ -153,16 +148,23 @@ class PracticeRepository @Inject constructor(
                     break // 网络仍不可用：停止本轮，剩余项保留
                 } catch (e: IOException) {
                     break
+                } catch (e: AppException.Server) {
+                    Log.w(TAG, "replay deferred for q=${pending.questionId}: ${e.userMessage}")
+                    break // 5xx 瞬态：保留条目等待下一轮重放
+                } catch (e: AppException.RateLimited) {
+                    Log.w(TAG, "replay deferred for q=${pending.questionId}: ${e.userMessage}")
+                    break // 429 限流：保留条目等待下一轮重放
                 } catch (e: AppException) {
+                    // 明确业务拒绝（400/401/403/404/success=false）：移除条目
                     Log.w(TAG, "replay rejected for q=${pending.questionId}: ${e.userMessage}")
                     removePending(userId, pending)
                 } catch (e: Exception) {
                     Log.e(TAG, "replay failed for q=${pending.questionId}", e)
-                    removePending(userId, pending)
+                    break // 未知异常：保留条目等待下一轮重放，避免误删未确认作答
                 }
             }
         } finally {
-            replaying = false
+            replaying.set(false)
             refreshPendingCount()
         }
         return replayed

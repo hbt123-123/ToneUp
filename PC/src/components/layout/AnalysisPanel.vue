@@ -83,22 +83,29 @@ const noteText = ref('')
 const noteSavedAt = ref<string | null>(null)
 const savedSnapshot = ref<string | null>(null)
 
+/** 竞态保护：仅应用最后一次笔记请求的结果（快速切题时旧响应作废） */
+let noteSeq = 0
+
 watch(
   () => props.ctx.question.question_id,
   async () => {
+    const mySeq = ++noteSeq
+    const qid = props.ctx.question.question_id
+    const bankId = props.bankId
     noteText.value = ''
     noteSavedAt.value = null
     savedSnapshot.value = null
     noteLoading.value = true
     try {
-      const note = await apiGetNote(props.ctx.question.question_id, props.bankId)
+      const note = await apiGetNote(qid, bankId)
+      if (mySeq !== noteSeq) return
       noteText.value = note?.note_text ?? ''
       noteSavedAt.value = note?.updated_at ?? null
       savedSnapshot.value = noteText.value
     } catch {
       /* 笔记加载失败不打断解析浏览 */
     } finally {
-      noteLoading.value = false
+      if (mySeq === noteSeq) noteLoading.value = false
     }
   },
   { immediate: true },
@@ -108,18 +115,23 @@ const noteDirty = computed(() => noteText.value !== savedSnapshot.value && !(sav
 
 async function saveNote(): Promise<void> {
   if (!noteDirty.value || noteSaving.value) return
-  // 保存前后内容一致性校验（FR-NOTE-02 口径）
+  // 保存前后内容一致性校验（FR-NOTE-02 口径）；await 前捕获题目标识，防止保存期间切题串题
   const content = noteText.value
+  const qid = props.ctx.question.question_id
+  const bankId = props.bankId
   noteSaving.value = true
   try {
-    const saved = await apiPutNote(props.ctx.question.question_id, props.bankId, content)
-    savedSnapshot.value = content
-    noteSavedAt.value = saved.updated_at ?? new Date().toISOString()
+    const saved = await apiPutNote(qid, bankId, content)
     upsertNoteIndex(auth.userId, {
-      bankId: props.bankId,
-      questionId: props.ctx.question.question_id,
+      bankId,
+      questionId: qid,
       noteText: content,
     })
+    // 保存期间已切题：索引按捕获值登记旧题，但不污染新题的快照/时间戳
+    if (props.ctx.question.question_id === qid) {
+      savedSnapshot.value = content
+      noteSavedAt.value = saved.updated_at ?? new Date().toISOString()
+    }
     message.success('笔记已保存')
   } catch (err) {
     message.error(humanizeError(err))

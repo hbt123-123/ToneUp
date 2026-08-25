@@ -23,12 +23,15 @@ type NaiveItemData = Record<string, unknown>
 function asItemData(items: T[]): NaiveItemData[] {
   return items.map((it) => (typeof it === 'object' && it !== null ? (it as Record<string, unknown>) : { value: it }))
 }
+
+/** 缓存包装结果：避免模板内每次重渲染都新建数组导致 NVirtualList 整段重建 */
+const wrappedItems = computed(() => asItemData(props.items))
 </script>
 
 <template>
   <n-virtual-list
     v-if="useVirtual"
-    :items="asItemData(items)"
+    :items="wrappedItems"
     :item-size="itemSize"
     :item-resizable="false"
     style="height: 100%"

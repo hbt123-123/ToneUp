@@ -52,13 +52,13 @@ fun BankPickerSheet(
             Breadcrumb(
                 crumbs = buildList {
                     picker.subjectId?.let {
-                        add(BreadcrumbCrumb(subjectLabel(catalog, it)) {})
+                        add(BreadcrumbCrumb(subjectLabel(catalog, it)) { viewModel.selectType(null) })
                     }
                     picker.typeId?.let {
-                        add(BreadcrumbCrumb(typeLabel(catalog, picker.subjectId, it)) {})
+                        add(BreadcrumbCrumb(typeLabel(catalog, picker.subjectId, it)) { viewModel.selectBank(null) })
                     }
                 },
-                onSelectRoot = { viewModel.selectSubject("") }
+                onSelectRoot = { viewModel.selectSubject(null) }
             )
 
             when {
@@ -124,7 +124,12 @@ private fun Breadcrumb(crumbs: List<BreadcrumbCrumb>, onSelectRoot: () -> Unit) 
         )
         crumbs.forEach { crumb ->
             Text("›", color = MaterialTheme.colorScheme.outline)
-            Text(crumb.label, style = MaterialTheme.typography.labelLarge)
+            Text(
+                text = crumb.label,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable(role = Role.Button, onClick = crumb.onClick)
+            )
         }
     }
 }

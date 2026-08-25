@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.onSizeChanged
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -54,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -149,10 +149,15 @@ fun PracticeScreen(
             }
         }
 
+        // 分页模式（knownTotal<0 或 hasMore）下放行下一题，由 ensureSlot 分页装载
+        val canGoNext = state.currentIndex + 1 < state.slots.size ||
+            state.currentIndex + 1 < state.knownTotal ||
+            state.hasMore
+
         BoxWithEdgeSwipe(
             enabled = true,
             onSwipeLeft = {
-                if (state.currentIndex < state.slots.size - 1) {
+                if (canGoNext) {
                     viewModel.loadQuestion(state.currentIndex + 1)
                 }
             },
@@ -190,7 +195,7 @@ fun PracticeScreen(
         BottomActionBar(
             slot = slot,
             canPrev = state.currentIndex > 0,
-            hasNext = state.currentIndex < state.slots.size - 1,
+            hasNext = canGoNext,
             onPrev = { viewModel.loadQuestion(state.currentIndex - 1) },
             onNext = { viewModel.loadQuestion(state.currentIndex + 1) },
             onSubmit = { haptics(Haptic.LIGHT_IMPACT); viewModel.submitCurrent(state.currentIndex) },
@@ -205,6 +210,8 @@ fun PracticeScreen(
         QuestionGridPanel(
             slots = state.slots,
             currentIndex = state.currentIndex,
+            knownTotal = state.knownTotal,
+            hasMore = state.hasMore,
             onSelect = { index ->
                 showGridPanel = false
                 viewModel.loadQuestion(index)
@@ -307,6 +314,8 @@ private val OBJECTIVE_TYPES = setOf(
 fun QuestionGridPanel(
     slots: List<QuestionSlot>,
     currentIndex: Int,
+    knownTotal: Int,
+    hasMore: Boolean,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -318,14 +327,17 @@ fun QuestionGridPanel(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.heightIn(max = 380.dp).padding(bottom = 24.dp)
         ) {
-            items(slots.size) { index ->
-                val slotState = slots[index]
-                val answered = slotState.answer?.isEmpty == false ||
-                    slotState.status is PracticeStatus.Submitted
+            // 分页模式下展示未装载的题号（含 hasMore 时的“更多”占位），点击由 ensureSlot 装载
+            val panelCount = maxOf(slots.size, if (knownTotal > 0) knownTotal else 0) +
+                if (hasMore) 1 else 0
+            items(panelCount) { index ->
+                val slotState = slots.getOrNull(index)
+                val answered = slotState?.answer?.isEmpty == false ||
+                    slotState?.status is PracticeStatus.Submitted
                 Surface(
                     shape = CircleShape,
                     color = when {
-                        slotState.marked -> MaterialTheme.colorScheme.tertiaryContainer
+                        slotState?.marked == true -> MaterialTheme.colorScheme.tertiaryContainer
                         answered -> MaterialTheme.colorScheme.primaryContainer
                         else -> MaterialTheme.colorScheme.surfaceVariant
                     },
@@ -336,7 +348,10 @@ fun QuestionGridPanel(
                     } else null
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("${index + 1}", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            if (slotState == null) "+" else "${index + 1}",
+                            style = MaterialTheme.typography.labelLarge
+                        )
                     }
                 }
             }

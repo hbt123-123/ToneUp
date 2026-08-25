@@ -82,7 +82,8 @@ def today(
             "next_review_at": m["next_review_at"],
         })
 
-    has_more = total_due > len(items)
+    # 以取回的到期行数（过滤前）对比 total_due，避免被跳过的失效行误判 has_more
+    has_more = total_due > len(rows)
     return envelope(page(items[:limit], total_due, has_more))
 
 

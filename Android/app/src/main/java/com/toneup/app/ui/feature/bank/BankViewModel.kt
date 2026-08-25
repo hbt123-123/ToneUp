@@ -31,7 +31,8 @@ data class HomeUiState(
     val checkedToday: Boolean = false,
     val lastContext: LastPracticeContext? = null,
     val catalog: Load<CatalogDto> = Load.Loading,
-    val refreshing: Boolean = false
+    val refreshing: Boolean = false,
+    val errorHint: String? = null
 )
 
 /** 选题 Sheet 三级联动状态：学科 → 题型(题库分类) → 年份 */
@@ -125,15 +126,25 @@ class BankViewModel @Inject constructor(
         _picker.value = _picker.value.copy(visible = false)
     }
 
-    fun selectSubject(subjectId: String) {
+    /** 传 null 表示回退到根节点（FR-BS-03 面包屑任意一级回退） */
+    fun selectSubject(subjectId: String?) {
         _picker.value = _picker.value.copy(subjectId = subjectId, typeId = null, bankId = null, year = null)
     }
 
-    fun selectType(typeId: String) {
+    /** 传 null 表示回退到学科层 */
+    fun selectType(typeId: String?) {
         _picker.value = _picker.value.copy(typeId = typeId, bankId = null, year = null)
     }
 
-    fun selectBank(bankId: String) {
+    /** 传 null 表示回退到题库层（不重新拉取年份） */
+    fun selectBank(bankId: String?) {
+        if (bankId == null) {
+            _picker.value = _picker.value.copy(
+                bankId = null, year = null, years = emptyList(),
+                yearsLoading = false, yearsError = null
+            )
+            return
+        }
         _picker.value = _picker.value.copy(bankId = bankId, year = null, yearsLoading = true, yearsError = null)
         viewModelScope.launch {
             try {
@@ -232,8 +243,10 @@ class BankViewModel @Inject constructor(
                         typeCodeFilter = ctx.typeCode
                     )
                     sessionRegistry.register(session)
+                    _home.value = _home.value.copy(errorHint = null)
                     onReady(ctx.sessionId)
                 } catch (_: Exception) {
+                    _home.value = _home.value.copy(errorHint = "继续刷题失败，请重新选题")
                 }
             }
         }

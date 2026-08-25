@@ -16,7 +16,7 @@ class ReviewRepository @Inject constructor(
 
     /** 暂缓单题：默认顺延 1 天，跳过不改掌握度 */
     suspend fun skip(questionId: Long, bankId: String, nextReviewAt: String? = null) {
-        EnvelopeUnwrapper.unwrap(jsonProvider.json) {
+        EnvelopeUnwrapper.unwrapUnit(jsonProvider.json) {
             reviewApi.skip(questionId, bankId, nextReviewAt)
         }
     }

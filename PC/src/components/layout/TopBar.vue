@@ -4,8 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { NDropdown } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
+import { usePracticeStore } from '@/stores/practice'
+import { useReviewStore } from '@/stores/review'
 import { useStatsStore } from '@/stores/stats'
 import { useUiStore } from '@/stores/ui'
+import { useWrongBookStore } from '@/stores/wrongbook'
 
 /** 顶栏（§4.1）：左面包屑，右用户菜单（退出、主题切换、动效开关） */
 const route = useRoute()
@@ -14,6 +17,9 @@ const auth = useAuthStore()
 const catalog = useCatalogStore()
 const stats = useStatsStore()
 const ui = useUiStore()
+const review = useReviewStore()
+const wrongbook = useWrongBookStore()
+const practice = usePracticeStore()
 
 type DropdownOption = { key: string; label?: string; type?: 'divider' }
 
@@ -34,6 +40,10 @@ function onUserAction(key: string | number): void {
     auth.logout()
     catalog.reset()
     stats.reset()
+    // 清理其余 per-user 状态，防止同浏览器换账号后残留上一用户的徽标/缓存
+    review.reset()
+    wrongbook.reset()
+    practice.resetSession()
     void router.push('/login')
   }
 }

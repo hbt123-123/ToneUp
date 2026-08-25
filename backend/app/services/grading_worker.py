@@ -2,7 +2,7 @@
 
 - 守护线程消费 queue.Queue，并发度 GRADING_CONCURRENCY 默认 1
 - 任务持久化于 ai_feedback 表；内存队列仅为句柄，重启不丢任务：
-  启动例程 = 全量入队 status='queued' 行 + 复位 processing 超 10 分钟行再入队
+  启动例程 = 全量入队 status='queued' 行 + 无条件复位 processing 行再入队
 - 写回守卫：update_attempt_result 的 is_correct IS NULL 条件——
   自评兜底已回填的 attempt，AI 迟到结果直接丢弃，绝不覆盖
 """
@@ -11,13 +11,13 @@ from __future__ import annotations
 import json
 import queue
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import structlog
 
 from app.core.config import get_settings
-from app.repositories import bank_repo, user_repo
+from app.repositories import bank_repo, tags_repo, user_repo
 from app.services import ai_grading, glm_client
 
 logger = structlog.get_logger()
@@ -53,18 +53,21 @@ def stop_worker() -> None:
 
 
 def recover_pending(user_db_path: str) -> int:
-    """启动恢复：queued 全量入队；processing 超 10 分钟复位为 queued 再入队。返回入队数。"""
+    """启动恢复：queued 全量入队；processing 行无条件复位为 queued 再入队。返回入队数。
+
+    仅在 lifespan 启动阶段运行一次，此时 worker 无可消费任务、外部流量
+    未进入（单进程独占假设）：仍处于 processing 的行必然属于已崩溃的
+    旧进程，可安全复位——不按 created_at 判 stale，避免短间隔重启导致
+    任务永久滞留，也避免把正在处理的行误复位造成并发双跑。
+    """
     import sqlite3
 
     conn = sqlite3.connect(user_db_path)
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-        stale = conn.execute(
-            "SELECT id FROM ai_feedback WHERE status='processing' AND completed_at IS NULL AND created_at <= ?",
-            (cutoff,),
-        ).fetchall()
-        for (fid,) in stale:
-            conn.execute("UPDATE ai_feedback SET status='queued' WHERE id=?", (fid,))
+        conn.execute(
+            "UPDATE ai_feedback SET status='queued' "
+            "WHERE status='processing' AND completed_at IS NULL"
+        )
         pending = [r[0] for r in conn.execute(
             "SELECT id FROM ai_feedback WHERE status='queued'"
         ).fetchall()]
@@ -198,6 +201,26 @@ def _advance_review(user_db_path: str, fb, is_correct: bool) -> tuple[int, str |
     return review_policy(current_level, is_correct, get_settings().review_retry_hours)
 
 
+_MAX_TASK_RETRIES = 3
+_retry_counts: dict[str, int] = {}
+
+
+def _mark_failed_best_effort(feedback_id: str, exc: Exception) -> None:
+    """重试耗尽后把仍停留在 queued 的行显式置为 failed；DB 不可用时仅记日志。"""
+    try:
+        settings = get_settings()
+        user_repo.ai_feedback_set_status(
+            str(settings.data_root / "user_data.db"),
+            feedback_id,
+            "failed",
+            expected_old_status="queued",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            error_message=str(exc)[:500],
+        )
+    except Exception:
+        logger.error("worker_loop_mark_failed_error", feedback_id=feedback_id)
+
+
 def _loop() -> None:
     while True:
         item = _queue.get()
@@ -210,7 +233,18 @@ def _loop() -> None:
                 str(settings.data_root / "user_data.db"),
                 str(settings.data_root / "knowledge_tags.db"),
             )
+            _retry_counts.pop(item, None)
         except Exception as exc:
-            logger.error("worker_loop_error", error=str(exc))
+            attempts = _retry_counts.get(item, 0) + 1
+            _retry_counts[item] = attempts
+            logger.error(
+                "worker_loop_error", feedback_id=item, attempt=attempts, error=str(exc)
+            )
+            if attempts < _MAX_TASK_RETRIES:
+                # 出队后、状态翻转前失败：重新入队，避免任务静默滞留
+                _queue.put(item)
+            else:
+                _retry_counts.pop(item, None)
+                _mark_failed_best_effort(item, exc)
         finally:
             _queue.task_done()

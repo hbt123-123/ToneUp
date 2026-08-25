@@ -96,6 +96,8 @@ class AiPhotoViewModel @Inject constructor(
                 }
             } catch (e: AppException.Network) {
                 fail("网络不可用，上传失败", canRetryUpload = true)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 fail((e as? AppException)?.userMessage ?: "上传失败", canRetryUpload = true)
             }
@@ -165,6 +167,8 @@ class AiPhotoViewModel @Inject constructor(
                         startPolling(outcome.feedbackId)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 fail((e as? AppException)?.userMessage ?: "重试失败", canRetryUpload = true)
             }

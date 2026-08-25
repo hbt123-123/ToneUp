@@ -1,4 +1,4 @@
-"""Backup script for ToneUp backend data.
+﻿"""Backup script for ToneUp backend data.
 
 Creates a zip archive of the three critical data files (user_data.db,
 knowledge_tags.db, manifest.json) under data_root, and prunes old
@@ -15,7 +15,10 @@ is 7.
 from __future__ import annotations
 
 import argparse
+import sqlite3
+import shutil
 import sys
+import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +48,26 @@ def _collect_sources(data_root: Path) -> List[Tuple[str, Path]]:
     return sources
 
 
+def _snapshot_sqlite(src: Path, dst: Path) -> None:
+    """用 sqlite3 backup API 把 WAL 模式下的活动库复制成一致快照。
+
+    直接 zipfile.write() 正被 FastAPI worker 写入的 .db 可能打包出
+    缺 -wal 或半事务页的撕裂文件，灾难恢复时不可用。
+    """
+    src_conn = sqlite3.connect(str(src))
+    try:
+        dst_conn = sqlite3.connect(str(dst))
+        try:
+            src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+    except sqlite3.DatabaseError:
+        # 非 SQLite 文件或已损坏：退化为普通复制，备份任务不因单个坏文件中断
+        shutil.copy2(src, dst)
+    finally:
+        src_conn.close()
+
+
 def _zip_backup(data_root: Path, sources: List[Tuple[str, Path]]) -> Path:
     """Create a zip backup under data_root/backups/ and return its path."""
     backups_dir = data_root / "backups"
@@ -53,9 +76,15 @@ def _zip_backup(data_root: Path, sources: List[Tuple[str, Path]]) -> Path:
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     zip_path = backups_dir / f"backup-{ts}.zip"
 
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for _display_name, path in sources:
-            zf.write(path, arcname=path.name)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for _display_name, path in sources:
+                if path.suffix == ".db":
+                    snapshot = Path(tmp_dir) / path.name
+                    _snapshot_sqlite(path, snapshot)
+                    zf.write(snapshot, arcname=path.name)
+                else:
+                    zf.write(path, arcname=path.name)
 
     return zip_path
 
@@ -109,6 +138,13 @@ def backup(data_root: Path, keep: int = 7) -> int:
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+def _positive_int(value: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError("必须为 >= 1 的整数")
+    return n
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="ToneUp 数据备份与清理脚本"
@@ -121,9 +157,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--keep",
-        type=int,
+        type=_positive_int,
         default=7,
-        help="保留的最新备份数（默认：7）",
+        help="保留的最新备份数（默认：7，最小 1）",
     )
     return parser
 

@@ -57,9 +57,9 @@ private fun FillBlankItem(
     showPreview: Boolean,
     onValueChange: (String) -> Unit
 ) {
-    var previewText by remember(value) { mutableStateOf(value) }
+    // previewText 不以 value 为 key：否则每次输入都会同步重置，300ms 节流失效
+    var previewText by remember { mutableStateOf("") }
 
-    // 约 300ms 节流刷新预览
     LaunchedEffect(value) {
         if (value != previewText) {
             delay(LATEX_PREVIEW_THROTTLE_MS)

@@ -5,7 +5,6 @@ import com.toneup.app.data.remote.dto.QuestionDto
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * sub_questions / answer_text 防御性解析：
@@ -32,8 +31,12 @@ object SubQuestionParser {
                     if (label != null) OptionDto(label, text ?: "") else null
                 }
             }
-            is JsonObject -> raw.entries.map { (k, v) -> OptionDto(k, v.jsonPrimitive.content) }
-                .sortedBy { it.label }
+            is JsonObject -> raw.entries.mapNotNull { (k, v) ->
+                // 非字符串原语（数组/嵌套对象）安全降级：跳过该选项而非抛异常
+                val text = (v as? JsonPrimitive)?.takeIf { it.isString }?.content
+                    ?: return@mapNotNull null
+                OptionDto(k, text)
+            }.sortedBy { it.label }
             else -> null
         }
     }

@@ -121,6 +121,8 @@ def insert_attempt(
                 "SELECT id FROM practice_records WHERE user_id = ? AND client_request_id = ?",
                 (user_id, client_request_id),
             ).fetchone()
+            if row is None:
+                raise
             return int(row["id"]), True
         return int(cur.lastrowid), False
 

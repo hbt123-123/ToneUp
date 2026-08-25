@@ -30,7 +30,8 @@ android {
         release {
             buildConfigField("String", "BASE_URL", "\"https://api.toneup.example.com/\"")
             buildConfigField("boolean", "ENABLE_NETWORK_LOG", "false")
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -98,6 +99,7 @@ dependencies {
     implementation(libs.camera.camera2)
     implementation(libs.camera.lifecycle)
     implementation(libs.camera.view)
+    implementation(libs.androidx.exifinterface)
 
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)

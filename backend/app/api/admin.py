@@ -16,6 +16,7 @@ from app.schemas.common import envelope
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
+_HEALTH_TASK_CAP = 100
 _health_tasks: dict[str, dict] = {}
 _health_lock = threading.Lock()
 
@@ -117,6 +118,12 @@ def health(request: Request, bank_id: str | None = Query(None), user=Depends(req
     with _health_lock:
         _health_tasks[task_id] = {"status": "running", "results": None,
                                   "created_at": datetime.now(timezone.utc).isoformat()}
+        if len(_health_tasks) > _HEALTH_TASK_CAP:
+            stale_ids = sorted(
+                _health_tasks, key=lambda k: _health_tasks[k]["created_at"]
+            )[: len(_health_tasks) - _HEALTH_TASK_CAP]
+            for old_id in stale_ids:
+                _health_tasks.pop(old_id, None)
     t = threading.Thread(
         target=_run_health_check, args=(task_id, settings.data_root, bank_id), daemon=True
     )

@@ -14,6 +14,7 @@ from collections import defaultdict, deque
 from fastapi import Request
 
 from app.core.errors import RateLimitError
+from app.core.config import get_settings
 from app.core.request_context import get_request_id
 import structlog
 
@@ -48,6 +49,10 @@ def allow(key: str, limit: int, window_seconds: int) -> int:
     q = _windows[key]
     while q and q[0] <= now - window_seconds:
         q.popleft()
+    if not q:
+        # 窗口滑空即回收键，防止 _windows 随 ip/user 组合无界增长（内存泄漏）
+        _windows.pop(key, None)
+        q = deque()
     if len(q) >= limit:
         retry_after = max(1, int(window_seconds - (now - q[0])) + 1)
         logger.warning(
@@ -58,6 +63,7 @@ def allow(key: str, limit: int, window_seconds: int) -> int:
         )
         return retry_after
     q.append(now)
+    _windows[key] = q
     return 0
 
 

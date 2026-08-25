@@ -170,12 +170,15 @@ export function dequeueUnsubmitted(userId: number | string, clientRequestId: str
 
 /* ---------- 登出/切账号：清除全部 toneup:* 用户域键（§8.4） ---------- */
 
+/** 设备级偏好不随用户域清除（stores/ui.ts 的主题/侧栏/动效等） */
+const DEVICE_LEVEL_KEYS = new Set(['toneup:ui'])
+
 export function clearAllUserDomainData(): void {
   try {
     const doomed: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
-      if (key && key.startsWith('toneup:')) doomed.push(key)
+      if (key && key.startsWith('toneup:') && !DEVICE_LEVEL_KEYS.has(key)) doomed.push(key)
     }
     for (const key of doomed) safeRemove(key)
   } catch {

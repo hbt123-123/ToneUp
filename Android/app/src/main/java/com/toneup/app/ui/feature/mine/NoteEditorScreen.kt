@@ -1,5 +1,6 @@
 package com.toneup.app.ui.feature.mine
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -94,6 +95,9 @@ fun NoteEditorScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var confirmLeave by remember { mutableStateOf(false) }
+
+    // 系统返回手势/物理键与顶栏返回一致：dirty 时先确认
+    BackHandler(enabled = state.dirty) { confirmLeave = true }
 
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {

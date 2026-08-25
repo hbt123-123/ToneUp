@@ -65,8 +65,7 @@ class AiRepository @Inject constructor(
         val attemptPart = attemptId?.toString()?.toPlainBody()
 
         val (code, created) = EnvelopeUnwrapper.unwrapWithStatus(jsonProvider.json) {
-            val response = aiFeedbackApi.upload(filePart, bankPart, questionPart, attemptPart)
-            response.code() to (response.body() ?: throw AppException.Business("服务端返回为空"))
+            aiFeedbackApi.upload(filePart, bankPart, questionPart, attemptPart)
         }
         return if (code == 202 || created.status == "queued" || created.status == "processing") {
             AiUploadOutcome.Accepted(created.feedbackId, created.status)

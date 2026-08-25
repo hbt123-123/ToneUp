@@ -69,7 +69,6 @@ class AnalysisViewModel @Inject constructor(
                 applyResult(result)
                 loadQuestion(result)
                 startPollingIfPending()
-                loadNote()
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     attempt = Load.Failed((e as? AppException)?.userMessage ?: "加载失败")
@@ -166,11 +165,6 @@ class AnalysisViewModel @Inject constructor(
         runCatching { notesRepository.note(bankId, questionId) }.onSuccess { note ->
             _state.value = _state.value.copy(noteText = note?.noteText ?: "", noteDirty = false)
         }
-    }
-
-    private fun loadNote() {
-        val ready = (_state.value.attempt as? Load.Ready)?.value ?: return
-        viewModelScope.launch { loadNote(ready.bankId, ready.questionId) }
     }
 
     fun onNoteChange(text: String) {

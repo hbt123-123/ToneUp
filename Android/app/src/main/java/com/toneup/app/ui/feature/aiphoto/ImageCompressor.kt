@@ -3,6 +3,8 @@ package com.toneup.app.ui.feature.aiphoto
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import kotlin.math.max
 
@@ -28,21 +30,31 @@ object ImageCompressor {
         val bitmap = BitmapFactory.decodeFile(source.absolutePath, decodeOptions)
             ?: throw IllegalStateException("cannot decode image")
 
-        // 2. 精确缩放至最长边 ≤1600
-        val longEdge = max(bitmap.width, bitmap.height)
-        val scaled = if (longEdge > MAX_LONG_EDGE) {
-            val ratio = MAX_LONG_EDGE.toFloat() / longEdge
-            Bitmap.createScaledBitmap(
-                bitmap,
-                (bitmap.width * ratio).toInt().coerceAtLeast(1),
-                (bitmap.height * ratio).toInt().coerceAtLeast(1),
-                true
-            )
+        // 2. EXIF 方向校正（CameraX 竖拍 JPEG 通常带 90° 旋转标记，
+        //    不校正会导致上传图与预览方向不一致，影响 AI 诊断）
+        val rotationDegrees = readExifRotation(source)
+        val upright = if (rotationDegrees != 0f) {
+            val matrix = Matrix().apply { postRotate(rotationDegrees) }
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         } else {
             bitmap
         }
 
-        // 3. JPEG 压缩，超限逐级降质
+        // 3. 精确缩放至最长边 ≤1600
+        val longEdge = max(upright.width, upright.height)
+        val scaled = if (longEdge > MAX_LONG_EDGE) {
+            val ratio = MAX_LONG_EDGE.toFloat() / longEdge
+            Bitmap.createScaledBitmap(
+                upright,
+                (upright.width * ratio).toInt().coerceAtLeast(1),
+                (upright.height * ratio).toInt().coerceAtLeast(1),
+                true
+            )
+        } else {
+            upright
+        }
+
+        // 4. JPEG 压缩，超限逐级降质
         var quality = INITIAL_QUALITY
         do {
             output.outputStream().use { stream ->
@@ -51,12 +63,23 @@ object ImageCompressor {
             quality -= 10
         } while (output.length() > MAX_BYTES && quality >= 30)
 
-        if (scaled !== bitmap) {
-            scaled.recycle()
-            bitmap.recycle()
-        } else {
-            bitmap.recycle()
-        }
+        if (scaled !== upright) scaled.recycle()
+        if (upright !== bitmap) upright.recycle()
+        bitmap.recycle()
         return output
     }
+
+    private fun readExifRotation(source: File): Float = runCatching {
+        when (
+            ExifInterface(source.absolutePath).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        ) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+    }.getOrDefault(0f)
 }

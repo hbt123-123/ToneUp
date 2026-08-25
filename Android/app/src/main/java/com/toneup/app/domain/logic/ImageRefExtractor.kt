@@ -23,7 +23,9 @@ object ImageRefExtractor {
         }
         bareUrl.findAll(working).forEach { m ->
             found.add(normalizeUrl(m.groupValues[1]))
-            working = working.replaceRange(m.range, "")
+            // 按匹配值替换：findAll 是基于原串的惰性序列，replaceRange(m.range) 在
+            // 串被缩短后区间失效会删错位置（与上方 mdImage 分支保持一致）
+            working = working.replace(m.value, "")
         }
         return Result(working.trim(), found.toList())
     }

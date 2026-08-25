@@ -78,8 +78,9 @@ def test_insert_math_tags_when_list_returns_sorted_dicts(tmp_path):
     assert len(result) == 3, f"Expected 3 tags, got {len(result)}"
 
     # 检查是否按 id 升序（AUTOINCREMENT 保证插入顺序即为 id 顺序）
-    assert result[0]["tag_name"] in ("微积分", "线性代数", "概率论")
-    assert result[2]["tag_name"] in ("微积分", "线性代数", "概率论")
+    ids = [r["id"] for r in result]
+    assert ids == sorted(ids), f"Expected ascending ids, got {ids}"
+    assert [r["tag_name"] for r in result] == ["微积分", "线性代数", "概率论"]
 
 
 # ── Test 3: filter_valid_tag_ids('math', [1,999]) → [1]（不存在剔除）────────

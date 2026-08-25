@@ -31,15 +31,6 @@ def rewrite_image_refs(content: str | None, bank_id: str, enabled: bool = True) 
 
     rewritten = False
 
-    def _sub_img_tag(m: re.Match) -> str:
-        nonlocal rewritten
-        src = m.group(1)
-        ids = _PLACEHOLDER_RE.findall(src) or _BARE_ID_RE.findall(src)
-        if ids:
-            rewritten = True
-            return src  # src 内部替换在下方统一做
-        return m.group(0)
-
     def _replace_ids_in(text: str) -> str:
         nonlocal rewritten
 

@@ -42,12 +42,16 @@ export function usePolling<T>(
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = true
   let delay = intervalStartMs
+  /** 代次 token：start() 自增；await 恢复后代次不一致的结果/排程一律丢弃 */
+  let generation = 0
 
   async function tick(): Promise<void> {
+    const gen = generation
     if (stopped) return
     loading.value = true
     try {
       const result = await task()
+      if (gen !== generation) return // 期间发生 restart，过期结果不写回共享 ref
       data.value = result
       error.value = null
       if (!until?.(result)) {
@@ -57,6 +61,7 @@ export function usePolling<T>(
         stopped = true
       }
     } catch (err) {
+      if (gen !== generation) return
       error.value = err instanceof Error ? err.message : String(err)
       // 出错仍继续退避重试，除非已停止
       if (!stopped) {
@@ -64,11 +69,12 @@ export function usePolling<T>(
         timer = setTimeout(tick, delay)
       }
     } finally {
-      loading.value = false
+      if (gen === generation) loading.value = false
     }
   }
 
   function start(): void {
+    generation++
     stop()
     stopped = false
     delay = intervalStartMs
@@ -85,16 +91,19 @@ export function usePolling<T>(
   }
 
   async function manualRefresh(): Promise<void> {
+    const gen = generation
     loading.value = true
     try {
       const result = await task()
+      if (gen !== generation) return // restart 后过期结果不写回
       data.value = result
       error.value = null
       if (until?.(result)) stop()
     } catch (err) {
+      if (gen !== generation) return
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
-      loading.value = false
+      if (gen === generation) loading.value = false
     }
   }
 
