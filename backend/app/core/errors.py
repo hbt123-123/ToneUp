@@ -1,4 +1,4 @@
-﻿"""Application errors and exception handlers.
+"""Application errors and exception handlers.
 
 - AppError: 基类，封装 status_code, message, code
 - 子类：BadRequestError(400)/UnauthorizedError(401)/ForbiddenError(403)/NotFoundError(404)/ConflictError(409)/RateLimitError(429，额外属性 retry_after:int)

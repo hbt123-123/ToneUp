@@ -70,11 +70,24 @@ export const useAuthStore = defineStore('auth', () => {
       import('@/stores/practice'),
       import('@/stores/wrongbook'),
       import('@/stores/review'),
-    ]).then(([practiceMod, wrongbookMod, reviewMod]) => {
-      practiceMod.usePracticeStore().resetSession()
-      wrongbookMod.useWrongBookStore().reset()
-      reviewMod.useReviewStore().reset()
-    })
+    ])
+      .then(([practiceMod, wrongbookMod, reviewMod]) => {
+        practiceMod.usePracticeStore().resetSession()
+        wrongbookMod.useWrongBookStore().reset()
+        reviewMod.useReviewStore().reset()
+      })
+      .catch((err: unknown) => {
+        // chunk 加载失败也不能让残留缓存跨账号泄漏：降级为整页刷新（带节流防循环）
+        console.error('resetDomainStores failed, reloading', err)
+        try {
+          const last = Number(sessionStorage.getItem('toneup:chunk-reload-at') ?? 0)
+          if (Date.now() - last < 10_000) return
+          sessionStorage.setItem('toneup:chunk-reload-at', String(Date.now()))
+        } catch {
+          /* sessionStorage 不可用时直接刷新 */
+        }
+        window.location.reload()
+      })
   }
 
   return {

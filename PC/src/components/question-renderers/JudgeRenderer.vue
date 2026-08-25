@@ -20,6 +20,12 @@ const correctLabel = computed<'A' | 'B' | null>(() => {
   if (/^(B|错|错误|false)/i.test(raw.trim())) return 'B'
   return null
 })
+
+const correctAnswerText = computed<string>(() => {
+  if (correctLabel.value === 'A') return 'A（正确）'
+  if (correctLabel.value === 'B') return 'B（错误）'
+  return '暂无法解析正确答案'
+})
 </script>
 
 <template>
@@ -47,7 +53,7 @@ const correctLabel = computed<'A' | 'B' | null>(() => {
       </button>
     </div>
     <div v-if="ctx.showAnswer" class="answer-line text-secondary">
-      正确答案：{{ correctLabel === 'B' ? 'B（错误）' : correctLabel === 'A' ? 'A（正确）' : '暂无法解析正确答案' }}
+      正确答案：{{ correctAnswerText }}
     </div>
   </div>
 </template>

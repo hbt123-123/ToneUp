@@ -1,4 +1,4 @@
-﻿"""Backup script for ToneUp backend data.
+"""Backup script for ToneUp backend data.
 
 Creates a zip archive of the three critical data files (user_data.db,
 knowledge_tags.db, manifest.json) under data_root, and prunes old

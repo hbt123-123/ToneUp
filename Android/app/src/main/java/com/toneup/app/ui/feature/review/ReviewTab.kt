@@ -56,13 +56,15 @@ fun ReviewTab(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // FR-RV-03 暂缓成功短暂提示；服务端无撤销端点，不提供撤销动作
+    // FR-RV-03 暂缓成功短暂提示；服务端无撤销端点，不提供撤销动作。
+    // 展示完即消费，避免重进 Tab 时重放旧提示
     LaunchedEffect(state.lastSkipped) {
         state.lastSkipped?.let {
             snackbarHostState.showSnackbar(
                 message = "已暂缓 1 题（暂缓后不可撤销）",
                 duration = SnackbarDuration.Short
             )
+            viewModel.consumeSkipNotice()
         }
     }
 

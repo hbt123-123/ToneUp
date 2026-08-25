@@ -32,8 +32,8 @@ object SubQuestionParser {
                 }
             }
             is JsonObject -> raw.entries.mapNotNull { (k, v) ->
-                // 非字符串原语（数组/嵌套对象）安全降级：跳过该选项而非抛异常
-                val text = (v as? JsonPrimitive)?.takeIf { it.isString }?.content
+                // 数组/嵌套对象无法文本化，安全降级跳过；数值/布尔原语仍按字面值保留
+                val text = (v as? JsonPrimitive)?.content
                     ?: return@mapNotNull null
                 OptionDto(k, text)
             }.sortedBy { it.label }

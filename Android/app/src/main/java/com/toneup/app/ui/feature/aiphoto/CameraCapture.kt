@@ -152,9 +152,13 @@ fun CameraCaptureView(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     DisposableEffect(lifecycleOwner) {
+        var disposed = false
         var boundProvider: ProcessCameraProvider? = null
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
+            // listener 与 onDispose 同在主线程执行：disposed 标志保证离开组合后
+            // 迟到的 future 回调不会再绑定相机（否则预览将持续供帧至 activity 销毁）
+            if (disposed) return@addListener
             try {
                 val provider = providerFuture.get()
                 boundProvider = provider
@@ -173,6 +177,7 @@ fun CameraCaptureView(
             }
         }, ContextCompat.getMainExecutor(context))
         onDispose {
+            disposed = true
             // 离开组合即解绑相机，避免后台持续供帧耗电与重复绑定异常
             try {
                 boundProvider?.unbindAll()

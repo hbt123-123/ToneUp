@@ -1,4 +1,4 @@
-﻿"""Request context management with contextvars and middleware.
+"""Request context management with contextvars and middleware.
 
 - contextvar: request_id_var 用于在请求/响应周期中传递 request_id
 - 中间件：读取 X-Request-ID 头部，不存在则生成 uuid4().hex 并 set 到 contextvar

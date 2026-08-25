@@ -75,6 +75,11 @@ class ReviewViewModel @Inject constructor(
         }
     }
 
+    /** 提示消费完毕后清除，避免重进 Tab 时 LaunchedEffect 重放旧的暂缓提示 */
+    fun consumeSkipNotice() {
+        _state.value = _state.value.copy(lastSkipped = null)
+    }
+
     /** FR-RV-02 以复习模式进入刷题页 */
     fun startReview(onReady: (String) -> Unit) {
         val items = (_state.value.items as? Load.Ready)?.value ?: return

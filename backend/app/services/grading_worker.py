@@ -206,19 +206,26 @@ _retry_counts: dict[str, int] = {}
 
 
 def _mark_failed_best_effort(feedback_id: str, exc: Exception) -> None:
-    """重试耗尽后把仍停留在 queued 的行显式置为 failed；DB 不可用时仅记日志。"""
-    try:
-        settings = get_settings()
-        user_repo.ai_feedback_set_status(
-            str(settings.data_root / "user_data.db"),
-            feedback_id,
-            "failed",
-            expected_old_status="queued",
-            completed_at=datetime.now(timezone.utc).isoformat(),
-            error_message=str(exc)[:500],
-        )
-    except Exception:
-        logger.error("worker_loop_mark_failed_error", feedback_id=feedback_id)
+    """重试耗尽后把滞留 queued/processing 的行显式置为 failed；DB 不可用时仅记日志。
+
+    processing 分支覆盖"翻转成功但失败回写也失败"的窗口，
+    避免任务在本进程内永久滞留、只能等下次重启复位。
+    """
+    for old_status in ("queued", "processing"):
+        try:
+            settings = get_settings()
+            if user_repo.ai_feedback_set_status(
+                str(settings.data_root / "user_data.db"),
+                feedback_id,
+                "failed",
+                expected_old_status=old_status,
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                error_message=str(exc)[:500],
+            ):
+                return
+        except Exception:
+            logger.error("worker_loop_mark_failed_error", feedback_id=feedback_id)
+            return
 
 
 def _loop() -> None:

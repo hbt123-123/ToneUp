@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections import defaultdict, deque
 
@@ -43,28 +44,38 @@ def client_ip(request: Request, trusted_proxy_count: int = 0) -> str:
     return _normalize_ip(request.client.host if request.client else "unknown")
 
 
+_allow_lock = threading.Lock()
+
+
 def allow(key: str, limit: int, window_seconds: int) -> int:
-    """滑动窗口判定。返回 retry_after 秒数；0 表示放行。"""
+    """滑动窗口判定。返回 retry_after 秒数；0 表示放行。
+
+    同步依赖（线程池）与异步中间件并发调用，pop/重建与追加必须互斥，
+    否则并发下会互相覆盖窗口导致限流计数丢失。
+    """
     now = time.monotonic()
-    q = _windows[key]
-    while q and q[0] <= now - window_seconds:
-        q.popleft()
-    if not q:
-        # 窗口滑空即回收键，防止 _windows 随 ip/user 组合无界增长（内存泄漏）
-        _windows.pop(key, None)
-        q = deque()
-    if len(q) >= limit:
-        retry_after = max(1, int(window_seconds - (now - q[0])) + 1)
+    retry_after = 0
+    with _allow_lock:
+        q = _windows[key]
+        while q and q[0] <= now - window_seconds:
+            q.popleft()
+        if not q:
+            # 窗口滑空即回收键，防止 _windows 随 ip/user 组合无界增长（内存泄漏）
+            _windows.pop(key, None)
+            q = deque()
+        if len(q) >= limit:
+            retry_after = max(1, int(window_seconds - (now - q[0])) + 1)
+        else:
+            q.append(now)
+            _windows[key] = q
+    if retry_after:
         logger.warning(
             "rate_limited",
             key_kind=key.split("|", 1)[0],
             retry_after=retry_after,
             request_id=get_request_id(),
         )
-        return retry_after
-    q.append(now)
-    _windows[key] = q
-    return 0
+    return retry_after
 
 
 def rate_limit_dep(rule_name: str, limit: int, window_seconds: int, dimension: str = "ip"):
