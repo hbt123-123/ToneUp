@@ -27,7 +27,7 @@ from app.core.bank_registry import (
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REAL_DATA_ROOT = BACKEND_DIR / "data"
 CLI_SCRIPT = BACKEND_DIR / "scripts" / "validate_banks.py"
-ALL_BANK_IDS = {"math1", "math2", "english1", "english2"}
+ALL_BANK_IDS = {"math1", "math2", "english1", "english2", "politics1"}
 
 
 # ----------------------------------------------------------------------
@@ -106,7 +106,7 @@ def mut_duplicate_id(root: Path) -> str:
 def mut_unknown_subject(root: Path) -> str:
     """变体 f：math1 的 subject_id 指向不存在的科目。"""
     _rewrite_manifest(
-        root, lambda m: m["banks"][0].__setitem__("subject_id", "politics"))
+        root, lambda m: m["banks"][0].__setitem__("subject_id", "nonexistent"))
     return "math1"
 
 
@@ -115,14 +115,14 @@ def mut_unknown_subject(root: Path) -> str:
 # ----------------------------------------------------------------------
 class TestPristineLoad:
     def test_four_banks_all_enabled_no_warnings(self, tmp_path):
-        """Given 原样四库副本 When load Then 4 条全启用且 warnings 为空。"""
+        """Given 原样五库副本 When load Then 5 条全启用且 warnings 为空。"""
         reg = BankRegistry()
         warnings = reg.load(make_data_root(tmp_path))
 
         assert warnings == []
         assert set(reg.entries) == ALL_BANK_IDS
         assert all(e.enabled for e in reg.entries.values())
-        assert len(reg.subjects_raw) == 2
+        assert len(reg.subjects_raw) == 3
 
 
 class TestBadVariantMatrix:

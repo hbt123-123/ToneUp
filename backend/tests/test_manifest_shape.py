@@ -17,25 +17,28 @@ class TestManifestShape:
         data = _load_manifest()
         assert data is not None
 
-    def test_subjects_contain_math_and_english_with_type_counts(self):
-        """② subjects 含 math/english 且 math.types 有 3 个、english.types 有 1 个"""
+    def test_subjects_contain_math_english_politics_with_type_counts(self):
+        """② subjects 含 math/english/politics 且 math.types 有 3 个、english.types 有 1 个、politics.types 有 1 个"""
         data = _load_manifest()
         subjects = data["subjects"]
         subject_ids = {s["id"] for s in subjects}
         assert "math" in subject_ids
         assert "english" in subject_ids
+        assert "politics" in subject_ids
 
         math_subject = next(s for s in subjects if s["id"] == "math")
         english_subject = next(s for s in subjects if s["id"] == "english")
+        politics_subject = next(s for s in subjects if s["id"] == "politics")
 
         assert len(math_subject["types"]) == 3
         assert len(english_subject["types"]) == 1
+        assert len(politics_subject["types"]) == 1
 
-    def test_banks_exactly_four_with_seven_keys_each(self):
-        """③ banks 恰好 4 条且每条键集合==七键"""
+    def test_banks_exactly_five_with_seven_keys_each(self):
+        """③ banks 恰好 5 条且每条键集合==七键"""
         data = _load_manifest()
         banks = data["banks"]
-        assert len(banks) == 4
+        assert len(banks) == 5
 
         expected_keys = {"id", "subject_id", "type_id", "name", "path", "schema_version", "enabled"}
         for bank in banks:

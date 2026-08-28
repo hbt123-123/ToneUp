@@ -28,6 +28,7 @@ from app.core.config import get_settings
 QUESTION_TYPE_MAPPING: dict[str, dict[int, str]] = {
     "math": {1: "SINGLE", 2: "FILL_BLANK", 3: "SOLUTION"},
     "english": {1: "CLOZE", 2: "READING", 3: "ORDERING", 4: "TRANSLATION", 5: "ESSAY"},
+    "politics": {1: "SINGLE", 2: "MULTI", 3: "ESSAY"},
 }
 
 # 全部合法类型码枚举；MULTI/JUDGE 仅在此枚举中，不出现在任何 subject 映射里

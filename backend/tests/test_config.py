@@ -7,15 +7,14 @@ from app.core.config import Settings, get_settings, validate_startup
 # ------------------------------------------------------------------ #
 # Test 1 — JWT_SECRET 未设置（空）→ validate_startup() 抛 RuntimeError
 # ------------------------------------------------------------------ #
-def test_validate_startup_when_jwt_secret_missing_raises_runtimeerror(monkeypatch):
+def test_validate_startup_when_jwt_secret_missing_raises_runtimeerror():
     """JWT_SECRET 缺失或空时，启动校验应抛 RuntimeError。"""
-    monkeypatch.delenv("JWT_SECRET", raising=False)
-    get_settings.cache_clear()
+    settings = Settings(jwt_secret="")
     with pytest.raises(
         RuntimeError,
         match="JWT_SECRET must be set and at least 32 characters",
     ):
-        validate_startup()
+        validate_startup(settings)
 
 
 # ------------------------------------------------------------------ #
