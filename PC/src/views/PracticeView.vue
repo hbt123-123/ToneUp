@@ -214,6 +214,12 @@ async function goNext(): Promise<void> {
   if (!ok) appMessage.info('已经是最后一题了，可前往题号面板查看未答题')
 }
 
+async function goPrev(): Promise<void> {
+  if (practice.currentIndex > 0) {
+    await practice.prev()
+  }
+}
+
 /** 错答就近晃动反馈（§10.3）：判定结果变为 false 时触发一次，300ms 后复位 */
 const shakeKey = ref(0)
 let shakeTimer: ReturnType<typeof setTimeout> | null = null
@@ -607,6 +613,26 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- 浮动翻题箭头（仅宽屏；悬停显示，键盘 ←→ 已存在） -->
+    <div v-if="!isCompactOrNarrower" class="floating-arrows" :class="{ 'no-motion': !ui.motionEnabled }">
+      <button
+        class="arrow-btn arrow-left"
+        :disabled="practice.currentIndex <= 0"
+        @click="goPrev"
+        aria-label="上一题"
+      >
+        ←
+      </button>
+      <button
+        class="arrow-btn arrow-right"
+        :disabled="practice.currentIndex >= practice.orderedIds.length - 1"
+        @click="goNext"
+        aria-label="下一题"
+      >
+        →
+      </button>
+    </div>
+
     <!-- 窄屏抽屉：题号面板 / 解析 -->
     <n-drawer v-model:show="infoDrawerOpen" :width="420" placement="right">
       <n-drawer-content title="练习面板" closable>
@@ -868,6 +894,71 @@ export default { components: { NResultLite, HelpModal } }
   bottom: 56px;
   z-index: 40;
   box-shadow: var(--tu-shadow-pop);
+}
+
+/* 浮动翻题箭头：默认隐藏，悬停屏幕边缘时显现 */
+.floating-arrows {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.arrow-btn {
+  pointer-events: auto;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--tu-border);
+  background: var(--tu-surface);
+  color: var(--tu-text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--tu-duration-micro) var(--tu-ease),
+              color var(--tu-duration-micro) var(--tu-ease);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--tu-shadow-card);
+}
+
+.arrow-left {
+  left: 12px;
+}
+
+.arrow-right {
+  right: 12px;
+}
+
+.floating-arrows:hover .arrow-btn {
+  opacity: 1;
+}
+
+.arrow-btn:hover:not(:disabled) {
+  color: var(--tu-text);
+  border-color: var(--tu-text-secondary);
+}
+
+.arrow-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* 关闭动效时箭头常显（无淡入淡出） */
+.floating-arrows.no-motion .arrow-btn {
+  opacity: 0.7;
+  transition: none;
+}
+
+.floating-arrows.no-motion .arrow-btn:disabled {
+  opacity: 0.3;
 }
 
 .review-done {

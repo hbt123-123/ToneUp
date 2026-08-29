@@ -1,26 +1,43 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { NBadge, NButton, NCard, NEmpty, NSkeleton, NTag } from 'naive-ui'
+import { NSkeleton } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
 import { useReviewStore } from '@/stores/review'
 import { useStatsStore } from '@/stores/stats'
-import { formatPercent } from '@/utils/format'
+import { useUiStore } from '@/stores/ui'
 import { readProgress } from '@/utils/storage'
 
 /**
  * 首页（FR-HOME-01~05）：
- * 学习计划卡 / 连续打卡卡 / 继续上次刷题 / 学科入口卡 / 今日复习提醒。
+ * 顶部 Hero 海报区 + 功能卡片网格 + 滚动入场动画
  */
 const router = useRouter()
 const auth = useAuthStore()
 const catalog = useCatalogStore()
 const review = useReviewStore()
 const stats = useStatsStore()
+const ui = useUiStore()
 
 const booting = ref(true)
 const lastSession = ref<{ bankId: string; bankName: string; lastIndex: number } | null>(null)
+
+/** 格式化日期为中文格式：2026年8月28日 星期五 */
+const formattedDate = computed(() => {
+  const now = new Date()
+  const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+  return `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${weekdays[now.getDay()]}`
+})
+
+/** 连续打卡天数 */
+const streakDays = computed(() => stats.overview.streak_days ?? 0)
+
+/** 今日已刷题数 */
+const todayAttempts = computed(() => stats.overview.today_attempts ?? 0)
+
+/** 待复习题数 */
+const reviewCount = computed(() => review.remainingCount)
 
 onMounted(async () => {
   try {
@@ -44,15 +61,54 @@ onMounted(async () => {
     }
   } finally {
     booting.value = false
+    // 等 DOM 更新后初始化滚动动画
+    await nextTick()
+    initScrollAnimation()
   }
 })
 
-const subjects = computed(() => catalog.subjects)
+/* ---------- IntersectionObserver 滚动入场动画 ---------- */
 
-function openSubject(subjectId: string): void {
-  catalog.selectSubject(subjectId)
-  void router.push({ path: '/catalog', query: { subject: subjectId } })
+let observer: IntersectionObserver | null = null
+
+function initScrollAnimation(): void {
+  // motionEnabled 为 false 时跳过动画，卡片直接可见
+  if (!ui.motionEnabled) {
+    document.querySelectorAll<HTMLElement>('.card').forEach((el) => {
+      el.classList.add('visible')
+    })
+    return
+  }
+
+  observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible')
+          observer?.unobserve(entry.target)
+        }
+      }
+      // 全部卡片可见后断开 observer
+      const remaining = document.querySelectorAll('.card:not(.visible)')
+      if (remaining.length === 0) {
+        observer?.disconnect()
+        observer = null
+      }
+    },
+    { threshold: 0.1 },
+  )
+
+  document.querySelectorAll<HTMLElement>('.card').forEach((el) => {
+    observer?.observe(el)
+  })
 }
+
+onUnmounted(() => {
+  observer?.disconnect()
+  observer = null
+})
+
+/* ---------- 导航 ---------- */
 
 function continuePractice(): void {
   if (!lastSession.value) return
@@ -66,173 +122,219 @@ function continuePractice(): void {
 </script>
 
 <template>
-  <div class="content-inner home-view">
-    <div v-if="booting" class="skeleton-row">
-      <n-skeleton height="120px" width="100%" :sharp="false" />
-      <n-skeleton height="120px" width="100%" :sharp="false" />
-    </div>
+  <div class="home-view">
+    <!-- 骨架屏 -->
+    <template v-if="booting">
+      <div class="hero skeleton-hero">
+        <n-skeleton height="100%" width="100%" :sharp="false" />
+      </div>
+      <div class="card-grid skeleton-grid">
+        <n-skeleton height="140px" width="100%" :sharp="false" />
+        <n-skeleton height="140px" width="100%" :sharp="false" />
+        <n-skeleton height="140px" width="100%" :sharp="false" />
+        <n-skeleton height="140px" width="100%" :sharp="false" />
+      </div>
+    </template>
 
     <template v-else>
-      <div class="cards-grid">
-        <!-- 学习计划卡（FR-HOME-01） -->
-        <n-card title="今日目标" size="small" class="tu-card">
-          <template #header-extra>
-            <n-tag :type="(stats.overview.today_goal ?? 0) > 0 && (stats.overview.today_attempts ?? 0) >= stats.overview.today_goal! ? 'success' : 'info'" size="small">
-              {{ (stats.overview.today_attempts ?? 0) }}/{{ stats.overview.today_goal ?? '—' }}
-            </n-tag>
-          </template>
-          <p class="metric-big">{{ formatPercent(stats.overview.accuracy_rate) }}</p>
-          <p class="text-secondary">累计正确率 · 今日已刷 {{ stats.overview.today_attempts ?? 0 }} 题</p>
-        </n-card>
-
-        <!-- 连续打卡卡（FR-HOME-02，P0） -->
-        <n-card title="连续打卡" size="small" class="tu-card">
-          <p class="metric-big accent">{{ stats.overview.streak_days ?? 0 }}<span class="unit"> 天</span></p>
-          <p class="text-secondary">连续学习天数，坚持就是胜利</p>
-        </n-card>
-
-        <!-- 继续上次刷题（FR-HOME-03，P0） -->
-        <n-card title="继续上次刷题" size="small" class="tu-card">
-          <template v-if="lastSession">
-            <p class="session-name">{{ lastSession.bankName }}</p>
-            <p class="text-secondary">上次进行到第 {{ lastSession.lastIndex + 1 }} 题</p>
-            <n-button type="primary" @click="continuePractice">继续练习</n-button>
+      <!-- Part A: Hero 海报区 -->
+      <section class="hero">
+        <h1 class="hero-title">ToneUp</h1>
+        <p class="hero-date">{{ formattedDate }}</p>
+        <p class="hero-streak">
+          <template v-if="streakDays > 0">
+            已连续打卡 <strong>{{ streakDays }}</strong> 天
           </template>
           <template v-else>
-            <p class="text-secondary">还没有进行中的练习</p>
-            <n-button tertiary @click="router.push('/catalog')">去题库选题</n-button>
+            开始你的学习之旅
           </template>
-        </n-card>
-
-        <!-- 今日复习提醒（FR-HOME-05） -->
-        <n-card title="今日复习" size="small" class="tu-card">
-          <template #header-extra>
-            <n-badge v-if="review.remainingCount > 0" :value="review.remainingCount" type="warning" />
-          </template>
-          <template v-if="review.remainingCount > 0">
-            <p class="text-secondary">有 {{ review.remainingCount }} 题等待复习</p>
-            <n-button type="primary" secondary @click="router.push('/review/today')">开始复习</n-button>
-          </template>
-          <template v-else>
-            <p class="text-secondary">今日暂无到期复习，保持节奏 ✨</p>
-          </template>
-        </n-card>
-      </div>
-
-      <!-- 学科入口卡（FR-HOME-04，P0） -->
-      <section class="subjects">
-        <h2 class="section-title">学科入口</h2>
-        <div class="subject-grid">
-          <n-button
-            v-for="s in subjects"
-            :key="s.id"
-            class="subject-card option-row tu-card"
-            @click="openSubject(s.id)"
-          >
-            <div class="subject-inner">
-              <span class="icon" aria-hidden="true">{{ s.icon ?? '📘' }}</span>
-              <span class="name">{{ s.name }}</span>
-              <span class="desc text-secondary">
-                {{ catalog.banksOf(s.id, null).length }} 个题库
-              </span>
-            </div>
-          </n-button>
-          <n-empty
-            v-if="subjects.length === 0"
-            description="目录加载为空，请刷新或联系管理员"
-            class="span-all"
-          >
-            <template #extra>
-              <n-button size="small" @click="catalog.fetchCatalog(true)">重试</n-button>
-            </template>
-          </n-empty>
-        </div>
+        </p>
       </section>
+
+      <!-- Part B + D: 响应式卡片网格 -->
+      <div class="card-grid">
+        <!-- 卡片 1: 今日目标 → /catalog -->
+        <div class="card" @click="router.push('/catalog')">
+          <div class="card-icon">🎯</div>
+          <h3 class="card-title">今日目标</h3>
+          <p class="card-desc">继续刷题，坚持就是胜利</p>
+          <p class="card-meta">今日已刷 {{ todayAttempts }} 题</p>
+        </div>
+
+        <!-- 卡片 2: 继续上次 → /practice/:bankId -->
+        <div class="card" @click="continuePractice">
+          <div class="card-icon">📖</div>
+          <h3 class="card-title">继续上次</h3>
+          <template v-if="lastSession">
+            <p class="card-desc">上次做到第 {{ lastSession.lastIndex + 1 }} 题</p>
+            <p class="card-meta">{{ lastSession.bankName }}</p>
+          </template>
+          <template v-else>
+            <p class="card-desc">还没有进行中的练习</p>
+            <p class="card-meta">点击去题库选题</p>
+          </template>
+        </div>
+
+        <!-- 卡片 3: 学科入口 → /catalog -->
+        <div class="card" @click="router.push('/catalog')">
+          <div class="card-icon">📚</div>
+          <h3 class="card-title">学科入口</h3>
+          <p class="card-desc">
+            {{ catalog.subjects.length }} 个学科，2000+ 题
+          </p>
+          <p class="card-meta">浏览全部学科</p>
+        </div>
+
+        <!-- 卡片 4: 今日复习 → /review/today -->
+        <div class="card" @click="router.push('/review/today')">
+          <div class="card-icon">🔄</div>
+          <h3 class="card-title">今日复习</h3>
+          <template v-if="reviewCount > 0">
+            <p class="card-desc">{{ reviewCount }} 题待复习</p>
+            <p class="card-meta">点击开始复习</p>
+          </template>
+          <template v-else>
+            <p class="card-desc">今日暂无到期复习</p>
+            <p class="card-meta">保持节奏</p>
+          </template>
+        </div>
+      </div>
     </template>
   </div>
 </template>
 
 <style scoped>
 .home-view {
+  max-width: var(--tu-content-max-width);
+  margin: 0 auto;
+  padding: 0 20px 40px;
+}
+
+/* ---------- Part A: Hero 海报区 ---------- */
+
+.hero {
+  height: 40vh;
+  min-height: 280px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 -20px 32px;
+  background: var(--tu-gradient-hero);
+  border-radius: 0;
+  text-align: center;
 }
 
-.skeleton-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+.hero-title {
+  font-size: 48px;
+  font-weight: 800;
+  margin: 0;
+  color: var(--tu-text);
+  letter-spacing: -1px;
 }
 
-.cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
-}
-
-.metric-big {
-  font-size: 32px;
-  font-weight: 700;
-  margin: 4px 0;
-}
-
-.metric-big.accent {
-  color: var(--tu-accent);
-}
-
-.unit {
-  font-size: 14px;
-  font-weight: 400;
+.hero-date {
+  font-size: 16px;
+  margin: 0;
   color: var(--tu-text-secondary);
 }
 
-.session-name {
-  font-weight: 600;
-  margin-bottom: 2px;
+.hero-streak {
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0;
+  color: var(--tu-text);
 }
 
-.section-title {
-  font-size: 17px;
-  font-weight: 600;
-  margin: 0 0 12px;
+.hero-streak strong {
+  color: var(--tu-accent);
+  font-weight: 700;
 }
 
-.subject-grid {
+/* ---------- Part B + D: 卡片网格 ---------- */
+
+.card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
 }
 
-.subject-card {
-  height: auto;
-  padding: 18px;
+.card {
+  background: var(--tu-surface);
   border: 1px solid var(--tu-border);
-  text-align: left;
-  --n-height: auto;
+  border-radius: var(--tu-radius-card);
+  box-shadow: var(--tu-shadow-card);
+  padding: 24px;
+  cursor: pointer;
+  transition: all var(--tu-duration-page) var(--tu-ease);
+
+  /* Part C: 滚动动画初始状态 */
+  opacity: 0;
+  transform: translateY(20px);
 }
 
-.subject-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: flex-start;
+/* Part C: 滚动动画可见状态 */
+.card.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
-.icon {
-  font-size: 30px;
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--tu-shadow-pop);
 }
 
-.name {
-  font-size: 17px;
+/* hover 时不覆盖 visible 状态的 translateY(0) */
+.card.visible:hover {
+  transform: translateY(-2px);
+}
+
+.card-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+  line-height: 1;
+}
+
+.card-title {
+  font-size: 18px;
   font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--tu-text);
 }
 
-.desc {
+.card-desc {
+  font-size: 14px;
+  margin: 0 0 8px;
+  color: var(--tu-text-secondary);
+  line-height: 1.5;
+}
+
+.card-meta {
   font-size: 13px;
+  margin: 0;
+  color: var(--tu-text-disabled);
 }
 
-.span-all {
-  grid-column: 1 / -1;
+/* ---------- 骨架屏 ---------- */
+
+.skeleton-hero {
+  min-height: 280px;
+}
+
+.skeleton-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 768px) {
+  .hero-title {
+    font-size: 36px;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
