@@ -20,7 +20,7 @@ data class WrongbookUiState(
     val items: Load<List<WrongbookItemDto>> = Load.Loading,
     val catalog: CatalogDto? = null,
     val subjectId: String? = null,
-    val typeCode: String? = null
+    val bankId: String? = null
 )
 
 @HiltViewModel
@@ -42,14 +42,14 @@ class WrongbookViewModel @Inject constructor(
         refresh()
     }
 
-    /** FR-WB-01 汇总答错题目，按学科/题型筛选 */
-    fun refresh(subjectId: String? = _state.value.subjectId, typeCode: String? = _state.value.typeCode) {
+    /** FR-WB-01 汇总答错题目，按学科/题库筛选 */
+    fun refresh(subjectId: String? = _state.value.subjectId, bankId: String? = _state.value.bankId) {
         viewModelScope.launch {
-            _state.value = _state.value.copy(items = Load.Loading, subjectId = subjectId, typeCode = typeCode)
+            _state.value = _state.value.copy(items = Load.Loading, subjectId = subjectId, bankId = bankId)
             try {
                 val page = wrongbookRepository.wrongbook(
+                    bankId = bankId?.takeIf { it.isNotBlank() },
                     subjectId = subjectId?.takeIf { it.isNotBlank() },
-                    typeCode = typeCode,
                     page = 1,
                     pageSize = 50
                 )

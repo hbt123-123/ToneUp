@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -41,7 +40,6 @@ import com.toneup.app.ui.common.Load
 import com.toneup.app.ui.components.EmptyState
 import com.toneup.app.ui.components.ErrorRetryCard
 import com.toneup.app.ui.components.QuestionSkeleton
-import com.toneup.app.ui.components.formula.FormulaText
 import com.toneup.app.ui.navigation.Routes
 import androidx.navigation.NavHostController
 
@@ -73,14 +71,14 @@ fun WrongbookScreen(
             item {
                 FilterChip(
                     selected = state.subjectId.isNullOrBlank(),
-                    onClick = { viewModel.refresh("", state.typeCode) },
+                    onClick = { viewModel.refresh("", state.bankId) },
                     label = { Text("全部学科") }
                 )
             }
             items(state.catalog?.subjects ?: emptyList(), key = { it.id }) { subject ->
                 FilterChip(
                     selected = state.subjectId == subject.id,
-                    onClick = { viewModel.refresh(subject.id, state.typeCode) },
+                    onClick = { viewModel.refresh(subject.id, state.bankId) },
                     label = { Text(subject.name) }
                 )
             }
@@ -120,32 +118,25 @@ private fun WrongbookCard(item: WrongbookItemDto, onRedo: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = "${item.year} · ${item.typeCode} · 错 ${item.wrongCount} 次",
+                text = "题号 ${item.questionId} · 错 ${item.attemptCount} 次",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error
             )
-            FormulaText(text = item.content.take(150))
+            if (item.tags.isNotEmpty()) {
+                Text(
+                    text = item.tags.joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-            // FR-WB-04 掌握度展开详情
+            // FR-WB-04 展开详情
             AnimatedVisibility(
                 visible = expanded,
                 enter = fadeIn() + expandVertically()
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Spacer(Modifier.size(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.Star,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.size(6.dp))
-                        Text(
-                            text = "掌握度：${item.masteryLevel?.let { "Level $it" } ?: "未评估"}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
                     item.lastWrongAt?.let { lastWrong ->
                         Text(
                             text = "最近答错：$lastWrong",

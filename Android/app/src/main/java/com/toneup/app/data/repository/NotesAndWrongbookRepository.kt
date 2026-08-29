@@ -32,19 +32,19 @@ class NotesRepository @Inject constructor(
         EnvelopeUnwrapper.unwrap(jsonProvider.json) { notesApi.myNotes(page, pageSize) }
 }
 
-/** 错题本（临时端点，待后端对齐） */
+/** 错题本 */
 @Singleton
 class WrongbookRepository @Inject constructor(
     private val wrongbookApi: com.toneup.app.data.remote.api.WrongbookApi,
     private val jsonProvider: JsonProvider
 ) {
     suspend fun wrongbook(
+        bankId: String?,
         subjectId: String?,
-        typeCode: String?,
         page: Int,
         pageSize: Int = 20
     ): PageData<com.toneup.app.data.remote.dto.WrongbookItemDto> =
         EnvelopeUnwrapper.unwrap(jsonProvider.json) {
-            wrongbookApi.wrongbook(subjectId, typeCode, page, pageSize)
+            wrongbookApi.wrongbook(bankId, subjectId, page, pageSize)
         }
 }

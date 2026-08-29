@@ -24,15 +24,14 @@ data class AiFeedbackDetailDto(
     @SerialName("tag_ids") val tagIds: List<Long> = emptyList()
 )
 
-/** 错题本临时端点（自拟，待后端对齐）：GET /api/wrongbook */
+/** 错题本条目：GET /api/wrong-questions */
 @Serializable
 data class WrongbookItemDto(
+    val id: Long = 0,
     @SerialName("bank_id") val bankId: String,
     @SerialName("question_id") val questionId: Long,
-    @SerialName("type_code") val typeCode: String,
-    val year: Int = 0,
-    val content: String = "",
-    @SerialName("wrong_count") val wrongCount: Int = 1,
+    @SerialName("attempt_count") val attemptCount: Int = 1,
     @SerialName("last_wrong_at") val lastWrongAt: String? = null,
-    @SerialName("mastery_level") val masteryLevel: Int? = null
+    val tags: List<String> = emptyList(),
+    @SerialName("created_at") val createdAt: String? = null
 )

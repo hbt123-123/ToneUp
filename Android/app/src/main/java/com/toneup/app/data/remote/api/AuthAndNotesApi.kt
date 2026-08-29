@@ -45,12 +45,12 @@ interface NotesApi {
     ): ApiEnvelope<PageData<NoteListItemDto>>
 }
 
-/** 错题本临时端点（自拟，待后端对齐） */
+/** 错题本端点 */
 interface WrongbookApi {
-    @GET("api/wrongbook")
+    @GET("api/wrong-questions")
     suspend fun wrongbook(
+        @Query("bank_id") bankId: String? = null,
         @Query("subject_id") subjectId: String? = null,
-        @Query("type_code") typeCode: String? = null,
         @Query("page") page: Int = 1,
         @Query("page_size") pageSize: Int = 20
     ): ApiEnvelope<PageData<com.toneup.app.data.remote.dto.WrongbookItemDto>>
