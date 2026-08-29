@@ -123,6 +123,16 @@ fun StatsTab(viewModel: StatsViewModel = hiltViewModel()) {
                 }
             }
         }
+
+        // FR-ST-05 刷题趋势
+        item { Text("刷题趋势", style = MaterialTheme.typography.titleMedium) }
+        item {
+            // TODO: StatsUiState 暂未提供 dailyCounts，接入真实数据后替换 emptyList()
+            SevenDayTrendChart(
+                dailyCounts = emptyList(),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }
 
@@ -166,6 +176,58 @@ private fun AccuracyBarChart(entries: List<Pair<String, Double>>) {
                 }
                 Text(
                     "${(rate * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
+            }
+        }
+    }
+}
+
+/** 7天刷题趋势 — Canvas 条形图 */
+@Composable
+private fun SevenDayTrendChart(
+    dailyCounts: List<Pair<String, Int>>,
+    modifier: Modifier = Modifier
+) {
+    val barColor = MaterialTheme.colorScheme.primary
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+
+    if (dailyCounts.isEmpty()) {
+        EmptyState("暂无刷题趋势数据")
+        return
+    }
+
+    val maxCount = dailyCounts.maxOfOrNull { it.second }?.coerceAtLeast(1) ?: 1
+
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        dailyCounts.takeLast(7).forEach { (date, count) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    date,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.size(width = 72.dp, height = 16.dp),
+                    maxLines = 1
+                )
+                Box(Modifier.weight(1f).height(14.dp)) {
+                    Canvas(Modifier.fillMaxWidth().height(14.dp)) {
+                        drawRoundRect(
+                            color = trackColor,
+                            cornerRadius = CornerRadius(6f, 6f)
+                        )
+                        drawRoundRect(
+                            color = barColor,
+                            topLeft = Offset.Zero,
+                            size = Size(
+                                size.width * (count.toFloat() / maxCount).coerceIn(0f, 1f),
+                                size.height
+                            ),
+                            cornerRadius = CornerRadius(6f, 6f)
+                        )
+                    }
+                }
+                Text(
+                    "$count",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(start = 8.dp)
                 )
