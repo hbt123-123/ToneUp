@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NDropdown } from 'naive-ui'
+import { NDropdown, NModal } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
 import { usePracticeStore } from '@/stores/practice'
@@ -9,6 +9,7 @@ import { useReviewStore } from '@/stores/review'
 import { useStatsStore } from '@/stores/stats'
 import { useUiStore } from '@/stores/ui'
 import { useWrongBookStore } from '@/stores/wrongbook'
+import ThemeSwitcher from '@/components/common/ThemeSwitcher.vue'
 
 /** 顶栏（§4.1）：左面包屑，右用户菜单（退出、主题切换、动效开关） */
 const route = useRoute()
@@ -21,17 +22,21 @@ const review = useReviewStore()
 const wrongbook = useWrongBookStore()
 const practice = usePracticeStore()
 
+const showThemePanel = ref(false)
+
 type DropdownOption = { key: string; label?: string; type?: 'divider' }
 
 const userOptions = computed<DropdownOption[]>(() => [
-  { key: 'theme', label: `主题：${ui.isDark ? '暗色' : '浅色'}` },
-  { key: 'motion', label: `动效：${ui.motionEnabled ? '开' : '关'}` },
+  { key: 'themePanel', label: '🎨 主题设置' },
+  { key: 'theme', label: `🌓 ${ui.isDark ? '浅色模式' : '暗色模式'}` },
+  { key: 'motion', label: `✨ 动效：${ui.motionEnabled ? '开' : '关'}` },
   { key: 'divider', type: 'divider' },
   { key: 'logout', label: '退出登录' },
 ])
 
 function onUserAction(key: string | number): void {
-  if (key === 'theme') ui.toggleTheme()
+  if (key === 'themePanel') showThemePanel.value = true
+  else if (key === 'theme') ui.toggleTheme()
   else if (key === 'motion') {
     ui.motionEnabled = !ui.motionEnabled
     document.documentElement.classList.toggle('no-motion', !ui.motionEnabled)
@@ -68,6 +73,11 @@ const showBreadcrumbFlow = computed(() => ['catalog', 'practice'].includes(Strin
         </button>
       </n-dropdown>
     </div>
+
+    <!-- 主题设置弹窗 -->
+    <n-modal v-model:show="showThemePanel" preset="card" title="🎨 主题设置" style="width: 400px">
+      <ThemeSwitcher />
+    </n-modal>
   </header>
 </template>
 
