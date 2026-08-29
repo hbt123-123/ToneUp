@@ -93,11 +93,10 @@ Debug 构建入口：「我的」→「公式渲染 PoC（调试）」。内置 
 
 ## 与后端契约的临时约定 ⚠️
 
-以下两个端点在后端契约中缺失，客户端按自拟临时路径实现并收敛在仓库层单点，后端定稿后仅需修改对应 API 接口：
+以下端点在后端契约中缺失，客户端按自拟临时路径实现并收敛在仓库层单点，后端定稿后仅需修改对应 API 接口：
 
 | 功能 | 临时端点 | 代码位置 |
 | :-- | :-- | :-- |
-| 错题本列表（FR-WB-02） | `GET /api/wrongbook?subject_id&type_code&page&page_size` | `WrongbookApi` / `WrongbookRepository` |
 | 笔记聚合列表（FR-ME-02） | `GET /api/notes?page&page_size` | `NotesApi.myNotes` / `NotesRepository` |
 
 其余差异备忘：
