@@ -42,6 +42,27 @@
   /* 阴影 */
   --tu-shadow-card: 0 1px 3px rgba(20, 28, 52, 0.08), 0 4px 16px rgba(20, 28, 52, 0.06);
   --tu-shadow-pop: 0 8px 28px rgba(20, 28, 52, 0.18);
+
+  /* 扩展变量（来自 token-audit.md） */
+  --tu-text-on-accent: #ffffff;
+  --tu-accent-surface: rgba(124, 58, 237, 0.06);
+  --tu-accent-overlay: rgba(124, 58, 237, 0.12);
+  --tu-accent-hover-surface: rgba(124, 58, 237, 0.25);
+  --tu-accent-glow: rgba(124, 58, 237, 0.30);
+  --tu-accent-rail: rgba(124, 58, 237, 0.15);
+  --tu-accent-border: rgba(124, 58, 237, 0.35);
+  --tu-primary-surface: rgba(43, 58, 103, 0.12);
+  --tu-primary-overlay: rgba(43, 58, 103, 0.35);
+  --tu-success-surface: rgba(24, 160, 88, 0.08);
+  --tu-error-surface: rgba(208, 48, 80, 0.08);
+  --tu-surface-muted: #f0f1f5;
+  --tu-scrollbar-thumb: rgba(127, 127, 140, 0.3);
+  --tu-scrollbar-thumb-hover: rgba(127, 127, 140, 0.5);
+
+  /* 渐变占位符（T9: 真实资产由设计师后续替换） */
+  --tu-gradient-hero: linear-gradient(135deg, #f4f5fa 0%, #e8eaf0 100%);
+  --tu-gradient-card: #ffffff;
+  --tu-gradient-accent: var(--tu-accent);
 }
 
 html.dark {
@@ -53,6 +74,104 @@ html.dark {
   --tu-text-secondary: #a3aac0;
   --tu-text-disabled: #666d84;
   --tu-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* ===== 预设主题（data-theme 与 dark 正交） ===== */
+
+/* 1. 莫兰迪绿 */
+html[data-theme="morandi-green"] {
+  --tu-bg: #f0f4f3;
+  --tu-surface: #ffffff;
+  --tu-primary: #5a7a6a;
+  --tu-gradient-hero: #a8c5b8;
+  --tu-gradient-card: #d4e4dc;
+  --tu-gradient-accent: #5a7a6a;
+}
+html.dark[data-theme="morandi-green"] {
+  --tu-bg: #141a17;
+  --tu-surface: #1c2420;
+  --tu-text: #e6ece8;
+  --tu-text-secondary: #a3b0a9;
+  --tu-border: rgba(255, 255, 255, 0.12);
+}
+
+/* 2. 暖阳米 */
+html[data-theme="warm-beige"] {
+  --tu-bg: #faf5ef;
+  --tu-surface: #fffdf9;
+  --tu-primary: #8b6f47;
+  --tu-gradient-hero: #f0e0c0;
+  --tu-gradient-card: #faf0dc;
+  --tu-gradient-accent: #8b6f47;
+}
+html.dark[data-theme="warm-beige"] {
+  --tu-bg: #1a1610;
+  --tu-surface: #241f17;
+  --tu-text: #efe8dc;
+  --tu-text-secondary: #b3a894;
+  --tu-border: rgba(255, 255, 255, 0.12);
+}
+
+/* 3. 星空暗紫（深色主题，自动触发 dark） */
+html[data-theme="starry-purple"] {
+  color-scheme: dark;
+  --tu-bg: #1a1525;
+  --tu-surface: #241e33;
+  --tu-primary: #9b6dff;
+  --tu-text: #e6e0f5;
+  --tu-text-secondary: #a89fc4;
+  --tu-border: rgba(255, 255, 255, 0.12);
+  --tu-gradient-hero: #2d1f4e;
+  --tu-gradient-card: #3a2d5c;
+  --tu-gradient-accent: #9b6dff;
+}
+
+/* 4. 薄荷清新 */
+html[data-theme="mint-fresh"] {
+  --tu-bg: #f0faf6;
+  --tu-surface: #ffffff;
+  --tu-primary: #00b894;
+  --tu-gradient-hero: #b8f0e0;
+  --tu-gradient-card: #e0fff5;
+  --tu-gradient-accent: #00b894;
+}
+html.dark[data-theme="mint-fresh"] {
+  --tu-bg: #0f1a16;
+  --tu-surface: #16241f;
+  --tu-text: #e0f2ea;
+  --tu-text-secondary: #9fb8ae;
+  --tu-border: rgba(255, 255, 255, 0.12);
+}
+
+/* 5. 樱花粉 */
+html[data-theme="sakura-pink"] {
+  --tu-bg: #fff5f5;
+  --tu-surface: #ffffff;
+  --tu-primary: #e84393;
+  --tu-gradient-hero: #ffe0e8;
+  --tu-gradient-card: #fff0f3;
+  --tu-gradient-accent: #e84393;
+}
+html.dark[data-theme="sakura-pink"] {
+  --tu-bg: #1c1216;
+  --tu-surface: #261a20;
+  --tu-text: #f5e6ec;
+  --tu-text-secondary: #c0a3b0;
+  --tu-border: rgba(255, 255, 255, 0.12);
+}
+
+/* 6. 深海蓝（深色主题，自动触发 dark） */
+html[data-theme="deep-ocean"] {
+  color-scheme: dark;
+  --tu-bg: #0c1929;
+  --tu-surface: #142233;
+  --tu-primary: #00cec9;
+  --tu-text: #dceaf5;
+  --tu-text-secondary: #9fb4c8;
+  --tu-border: rgba(255, 255, 255, 0.12);
+  --tu-gradient-hero: #1a3a5c;
+  --tu-gradient-card: #1e4060;
+  --tu-gradient-accent: #00cec9;
 }
 
 /* 动效开关：关闭全部过渡动画 */

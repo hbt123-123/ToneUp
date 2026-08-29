@@ -52,7 +52,18 @@ bindWrongRecorder((entry) => {
 
 app.use(router)
 
-// 4. 挂载
+// 4. 挂载前同步应用持久化的颜色主题（避免闪烁）
+try {
+  const raw = localStorage.getItem('toneup:ui')
+  if (raw) {
+    const saved = JSON.parse(raw) as { colorTheme?: string }
+    if (saved.colorTheme) document.documentElement.dataset.theme = saved.colorTheme
+  }
+} catch {
+  /* ignore */
+}
+
+// 5. 挂载
 app.mount('#app')
 
 export default app
