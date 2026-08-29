@@ -79,7 +79,20 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # --- 路由注册 ---
-    from app.api import admin, ai_feedback, attempts, auth, catalog, images, notes, question_banks, reviews, stats
+    from app.api import (
+        admin,
+        ai_feedback,
+        attempts,
+        auth,
+        backgrounds,
+        catalog,
+        images,
+        notes,
+        question_banks,
+        reviews,
+        stats,
+        wrong_questions,
+    )
 
     app.include_router(auth.router)
     app.include_router(catalog.router)
@@ -91,6 +104,8 @@ def create_app() -> FastAPI:
     app.include_router(stats.router)
     app.include_router(ai_feedback.router)
     app.include_router(admin.router)
+    app.include_router(wrong_questions.router)
+    app.include_router(backgrounds.router)
 
     # --- 路由 ---
     @app.get("/api/health", include_in_schema=False)
