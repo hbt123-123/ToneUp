@@ -1,4 +1,4 @@
-"""21 端点契约核对（需求文档 §6.1-6.9 全集）+ OpenAPI 断言。"""
+"""端点契约核对（需求文档 §6.1-6.9 全集）+ OpenAPI 断言。"""
 from __future__ import annotations
 
 EXPECTED_ENDPOINTS = {
@@ -23,10 +23,16 @@ EXPECTED_ENDPOINTS = {
     ("POST", "/api/admin/catalog/reload"),
     ("GET", "/api/admin/health"),
     ("GET", "/api/admin/health/{task_id}"),
+    ("GET", "/api/wrong-questions"),
+    ("POST", "/api/wrong-questions"),
+    ("DELETE", "/api/wrong-questions/{wrong_id}"),
+    ("POST", "/api/wrong-questions/sync"),
+    ("POST", "/api/backgrounds/upload"),
+    ("GET", "/api/backgrounds/{filename}"),
 }
 
 
-def test_openapi_contains_exactly_21_contract_endpoints(client):
+def test_openapi_contains_all_contract_endpoints(client):
     schema = client.get("/openapi.json").json()
     actual = set()
     for path, methods in schema["paths"].items():
@@ -37,4 +43,4 @@ def test_openapi_contains_exactly_21_contract_endpoints(client):
     extra = {a for a in actual if a not in EXPECTED_ENDPOINTS}
     assert not missing, f"missing endpoints: {sorted(missing)}"
     assert not extra, f"unexpected endpoints: {sorted(extra)}"
-    assert len(EXPECTED_ENDPOINTS) == 21
+    assert len(EXPECTED_ENDPOINTS) == 27

@@ -45,7 +45,7 @@ def test_init_creates_five_tables_in_master(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table' AND name != 'sqlite_sequence' ORDER BY name"
         )
         tables = {row[0] for row in cur.fetchall()}
-        expected = {"users", "practice_records", "user_mastery", "user_notes", "ai_feedback"}
+        expected = {"users", "practice_records", "user_mastery", "user_notes", "ai_feedback", "wrong_questions"}
         assert tables == expected, f"Expected table set {expected}, got {tables}"
     finally:
         conn.close()
