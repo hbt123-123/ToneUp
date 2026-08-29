@@ -91,19 +91,17 @@ def migrate_wrongbook(dry_run=False):
                     
                     # Insert with ON CONFLICT UPDATE
                     cursor.execute("""
-                        INSERT INTO wrong_questions (user_id, bank_id, question_id, preview, attempt_count, last_wrong_at, tags)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO wrong_questions (user_id, bank_id, question_id, attempt_count, last_wrong_at, tags)
+                        VALUES (?, ?, ?, ?, ?, ?)
                         ON CONFLICT(user_id, bank_id, question_id)
                         DO UPDATE SET 
                             attempt_count = MAX(excluded.attempt_count, wrong_questions.attempt_count),
                             last_wrong_at = excluded.last_wrong_at,
-                            preview = COALESCE(NULLIF(excluded.preview, ''), wrong_questions.preview),
                             tags = excluded.tags
                     """, (
                         str(user_id),
                         bank_id,
                         question_id,
-                        preview,
                         attempt_count,
                         last_wrong_at,
                         tags
