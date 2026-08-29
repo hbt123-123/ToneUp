@@ -1,4 +1,4 @@
-"""用户库五表 DDL + WAL + 幂等索引初始化脚本。
+"""用户库六表 DDL + WAL + 幂等索引初始化脚本。
 
 D4 决策：users.role 默认 'user'；所有 DDL 使用 IF NOT EXISTS（幂等）。
 Usage:
@@ -8,10 +8,17 @@ Usage:
 
 import argparse
 import sqlite3
+import sys
+from pathlib import Path
+
+# Add backend directory to path for app.core imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.core.wrongbook_schema import WRONG_QUESTIONS_DDL, WRONG_QUESTIONS_INDEXES
 
 
 def init_user_db(db_path: str) -> None:
-    """Initialize the user database with five tables, WAL mode, and idempotent indexes.
+    """Initialize the user database with six tables, WAL mode, and idempotent indexes.
 
     Creates the following tables if they do not already exist (all DDL uses IF NOT EXISTS):
       - users
@@ -19,6 +26,7 @@ def init_user_db(db_path: str) -> None:
       - user_mastery
       - user_notes
       - ai_feedback
+      - wrong_questions
 
     After connecting, sets PRAGMA journal_mode=WAL and PRAGMA busy_timeout=5000.
 
@@ -131,6 +139,11 @@ def init_user_db(db_path: str) -> None:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_ai_feedback_user ON ai_feedback (user_id, created_at)"
         )
+
+        # ── wrong_questions ──────────────────────────────────────
+        cursor.execute(WRONG_QUESTIONS_DDL)
+        for idx_sql in WRONG_QUESTIONS_INDEXES:
+            cursor.execute(idx_sql)
 
         conn.commit()
     finally:
