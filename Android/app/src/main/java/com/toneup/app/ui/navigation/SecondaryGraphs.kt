@@ -17,6 +17,7 @@ import com.toneup.app.ui.feature.aiphoto.AiPhotoScreen
 import com.toneup.app.ui.feature.mine.FormulaPocScreen
 import com.toneup.app.ui.feature.mine.NoteEditorScreen
 import com.toneup.app.ui.feature.practice.PracticeScreen
+import com.toneup.app.ui.feature.practice.ReviewCheckScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
 import javax.inject.Inject
@@ -51,13 +52,35 @@ fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
         Routes.PRACTICE_PATTERN,
         arguments = listOf(
             navArgument("sessionId") { type = NavType.StringType },
-            navArgument("mode") { type = NavType.StringType; defaultValue = "practice" }
+            navArgument("mode") { type = NavType.StringType; defaultValue = "practice" },
+            navArgument("index") { type = NavType.IntType; defaultValue = -1 }
         )
-    ) {
+    ) { entry ->
+        val sessionId = entry.arguments?.getString("sessionId") ?: ""
         PracticeScreen(
+            initialIndex = entry.arguments?.getInt("index") ?: -1,
             onExit = { navController.popBackStack() },
             onOpenAnalysis = { attemptId ->
                 navController.navigate(Routes.analysis(attemptId))
+            },
+            onOpenReviewCheck = {
+                navController.navigate(Routes.reviewCheck(sessionId))
+            }
+        )
+    }
+    composable(
+        Routes.REVIEW_CHECK_PATTERN,
+        arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
+    ) { entry ->
+        val sessionId = entry.arguments?.getString("sessionId") ?: ""
+        ReviewCheckScreen(
+            sessionId = sessionId,
+            onBack = { navController.popBackStack() },
+            onSelectQuestion = { index ->
+                navController.navigate(Routes.practice(sessionId, index = index)) {
+                    popUpTo(Routes.practice(sessionId)) { inclusive = false }
+                    launchSingleTop = true
+                }
             }
         )
     }

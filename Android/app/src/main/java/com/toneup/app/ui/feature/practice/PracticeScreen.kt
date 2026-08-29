@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,6 +81,8 @@ import com.toneup.app.ui.feature.practice.renderers.FallbackRenderer
 fun PracticeScreen(
     onExit: () -> Unit,
     onOpenAnalysis: (Long) -> Unit,
+    onOpenReviewCheck: () -> Unit = {},
+    initialIndex: Int = -1,
     viewModel: PracticeViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -88,6 +92,13 @@ fun PracticeScreen(
     var showExitDialog by remember { mutableStateOf(false) }
 
     ImmersiveModeEffect()
+
+    // 从交卷检查页跳回指定题号（FR-PR-09）
+    LaunchedEffect(initialIndex) {
+        if (initialIndex >= 0 && initialIndex != state.currentIndex) {
+            viewModel.loadQuestion(initialIndex)
+        }
+    }
 
     val slot = state.slots.getOrNull(state.currentIndex) ?: return
 
@@ -108,9 +119,9 @@ fun PracticeScreen(
             Text(
                 text = buildString {
                     append(if (state.mode == "review") "今日复习 · " else "")
-                    append("${state.currentIndex + 1}/")
+                    append("第 ${state.currentIndex + 1}/")
                     append(if (state.knownTotal > 0) state.knownTotal.toString() else "?")
-                    append(" · 已答${state.answeredCount}")
+                    append(" 题 · 已答${state.answeredCount}")
                 },
                 style = MaterialTheme.typography.labelLarge
             )
@@ -166,29 +177,40 @@ fun PracticeScreen(
             },
             modifier = Modifier.weight(1f)
         ) {
-            AnimatedContent(
-                targetState = state.currentIndex,
-                transitionSpec = {
-                    if (!preferences.animationsEnabled) {
-                        fadeIn(tween(120)) togetherWith fadeOut(tween(120))
-                    } else if (targetState > initialState) {
-                        (slideInHorizontally(tween(220)) { it / 3 } + fadeIn(tween(220))) togetherWith
-                            (slideOutHorizontally(tween(220)) { -it / 3 } + fadeOut(tween(220)))
-                    } else {
-                        (slideInHorizontally(tween(220)) { -it / 3 } + fadeIn(tween(220))) togetherWith
-                            (slideOutHorizontally(tween(220)) { it / 3 } + fadeOut(tween(220)))
-                    }
-                },
-                label = "question"
-            ) { index ->
-                QuestionBody(
-                    index = index,
+            if (isReadingGroup(slot)) {
+                // 阅读题组：固定文章 + 翻动小题
+                ReadingGroupBody(
                     state = state,
                     viewModel = viewModel,
                     onOpenAnalysis = onOpenAnalysis,
-                    onRetryLoad = { viewModel.retryLoad(index) },
-                    onSkip = { viewModel.loadQuestion(index + 1) }
+                    onRetryLoad = { viewModel.retryLoad(state.currentIndex) }
                 )
+            } else {
+                // 普通单题
+                AnimatedContent(
+                    targetState = state.currentIndex,
+                    transitionSpec = {
+                        if (!preferences.animationsEnabled) {
+                            fadeIn(tween(120)) togetherWith fadeOut(tween(120))
+                        } else if (targetState > initialState) {
+                            (slideInHorizontally(tween(220)) { it / 3 } + fadeIn(tween(220))) togetherWith
+                                (slideOutHorizontally(tween(220)) { -it / 3 } + fadeOut(tween(220)))
+                        } else {
+                            (slideInHorizontally(tween(220)) { -it / 3 } + fadeIn(tween(220))) togetherWith
+                                (slideOutHorizontally(tween(220)) { it / 3 } + fadeOut(tween(220)))
+                        }
+                    },
+                    label = "question"
+                ) { index ->
+                    QuestionBody(
+                        index = index,
+                        state = state,
+                        viewModel = viewModel,
+                        onOpenAnalysis = onOpenAnalysis,
+                        onRetryLoad = { viewModel.retryLoad(index) },
+                        onSkip = { viewModel.loadQuestion(index + 1) }
+                    )
+                }
             }
         }
 
@@ -201,6 +223,7 @@ fun PracticeScreen(
             onSubmit = { haptics(Haptic.LIGHT_IMPACT); viewModel.submitCurrent(state.currentIndex) },
             onRetrySubmit = { viewModel.retrySubmit(state.currentIndex) },
             onOpenGrid = { showGridPanel = true },
+            onOpenReviewCheck = onOpenReviewCheck,
             attemptId = (slot.status as? PracticeStatus.Submitted)?.attemptId,
             onOpenAnalysis = onOpenAnalysis
         )
@@ -275,6 +298,110 @@ fun QuestionBody(
                     }
                 }
             }
+        }
+    }
+}
+
+/** 判断当前题是否为阅读题组（有 passage 的 CLOZE/READING） */
+private fun isReadingGroup(slot: QuestionSlot): Boolean {
+    val q = slot.question ?: return false
+    return q.typeCode in READING_GROUP_TYPES && !q.passage.isNullOrBlank()
+}
+
+private val READING_GROUP_TYPES = setOf(
+    QuestionType.Cloze.typeCode,
+    QuestionType.Reading.typeCode
+)
+
+/** 阅读题组：固定文章 + 翻动小题 */
+@Composable
+fun ReadingGroupBody(
+    state: PracticeUiState,
+    viewModel: PracticeViewModel,
+    onOpenAnalysis: (Long) -> Unit,
+    onRetryLoad: () -> Unit
+) {
+    val slot = state.slots.getOrNull(state.currentIndex) ?: return
+    val question = slot.question ?: return
+    val passage = question.passage ?: return
+
+    // 找到同一 passage 的所有题目
+    val passageQuestions = state.slots.filter { s ->
+        val q = s.question
+        q != null && q.typeCode in READING_GROUP_TYPES && q.passage == passage
+    }
+    val currentSubIndex = passageQuestions.indexOfFirst {
+        it.question?.questionId == question.questionId
+    }.coerceAtLeast(0)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        // 固定文章区域（可滚动，限高）
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 260.dp)
+                .padding(bottom = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp)
+            ) {
+                Text(
+                    "阅读文章",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(8.dp))
+                FormulaText(text = passage)
+            }
+        }
+
+        // 小题导航
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "第 ${currentSubIndex + 1}/${passageQuestions.size} 题",
+                style = MaterialTheme.typography.labelMedium
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        val prev = passageQuestions.getOrNull(currentSubIndex - 1)
+                        if (prev != null) viewModel.loadQuestion(state.slots.indexOf(prev))
+                    },
+                    enabled = currentSubIndex > 0
+                ) { Text("上一题") }
+                OutlinedButton(
+                    onClick = {
+                        val next = passageQuestions.getOrNull(currentSubIndex + 1)
+                        if (next != null) viewModel.loadQuestion(state.slots.indexOf(next))
+                    },
+                    enabled = currentSubIndex < passageQuestions.size - 1
+                ) { Text("下一题") }
+            }
+        }
+
+        // 当前小题内容（占剩余空间）
+        Box(modifier = Modifier.weight(1f)) {
+            QuestionBody(
+                index = state.currentIndex,
+                state = state,
+                viewModel = viewModel,
+                onOpenAnalysis = onOpenAnalysis,
+                onRetryLoad = onRetryLoad,
+                onSkip = {
+                    val next = passageQuestions.getOrNull(currentSubIndex + 1)
+                    if (next != null) viewModel.loadQuestion(state.slots.indexOf(next))
+                }
+            )
         }
     }
 }

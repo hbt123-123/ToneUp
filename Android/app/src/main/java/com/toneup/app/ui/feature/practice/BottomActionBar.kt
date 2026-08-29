@@ -35,6 +35,7 @@ fun BottomActionBar(
     onSubmit: () -> Unit,
     onRetrySubmit: () -> Unit,
     onOpenGrid: () -> Unit,
+    onOpenReviewCheck: () -> Unit,
     attemptId: Long?,
     onOpenAnalysis: (Long) -> Unit
 ) {
@@ -96,6 +97,14 @@ fun BottomActionBar(
                     color = MaterialTheme.colorScheme.error
                 )
             }
+        }
+
+        OutlinedButton(
+            onClick = onOpenReviewCheck,
+            enabled = !submitting,
+            modifier = Modifier.height(48.dp)
+        ) {
+            Text("交卷检查")
         }
 
         IconButton(onClick = onOpenGrid, enabled = !submitting) {

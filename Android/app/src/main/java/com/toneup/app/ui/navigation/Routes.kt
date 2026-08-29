@@ -11,10 +11,14 @@ object Routes {
     const val TAB_STATS = "tab_stats"
     const val TAB_MINE = "tab_mine"
 
-    /** 刷题页：practice/{sessionId}?mode={practice|review} */
-    const val PRACTICE_PATTERN = "practice/{sessionId}?mode={mode}"
-    fun practice(sessionId: String, mode: String = "practice") =
-        "practice/$sessionId?mode=$mode"
+    /** 刷题页：practice/{sessionId}?mode={practice|review}&index={index} */
+    const val PRACTICE_PATTERN = "practice/{sessionId}?mode={mode}&index={index}"
+    fun practice(sessionId: String, mode: String = "practice", index: Int = -1) =
+        "practice/$sessionId?mode=$mode&index=$index"
+
+    /** 交卷检查页：practice/{sessionId}/review */
+    const val REVIEW_CHECK_PATTERN = "practice/{sessionId}/review"
+    fun reviewCheck(sessionId: String) = "practice/$sessionId/review"
 
     /** 解析视图 */
     const val ANALYSIS_PATTERN = "analysis/{attemptId}"
