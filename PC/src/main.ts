@@ -52,16 +52,12 @@ bindWrongRecorder((entry) => {
 
 app.use(router)
 
-// 4. 挂载前同步应用主题（避免闪烁）；dev 环境无条件强制昔涟主题便于 UI 调试
+// 4. 挂载前同步应用持久化的颜色主题（避免闪烁）
 try {
-  if (import.meta.env.DEV) {
-    document.documentElement.dataset.theme = 'sakura-pink'
-  } else {
-    const raw = localStorage.getItem('toneup:ui')
-    if (raw) {
-      const saved = JSON.parse(raw) as { colorTheme?: string }
-      if (saved.colorTheme) document.documentElement.dataset.theme = saved.colorTheme
-    }
+  const raw = localStorage.getItem('toneup:ui')
+  if (raw) {
+    const saved = JSON.parse(raw) as { colorTheme?: string }
+    if (saved.colorTheme) document.documentElement.dataset.theme = saved.colorTheme
   }
 } catch {
   /* ignore */

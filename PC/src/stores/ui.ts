@@ -40,8 +40,7 @@ export const useUiStore = defineStore('ui', () => {
   const saved = loadPersist()
 
   const themeMode = ref<ThemeMode>(saved.themeMode ?? 'system')
-  // dev 环境强制昔涟主题，忽略 localStorage 旧值（便于 UI 美化调试）
-  const colorTheme = ref<ColorTheme>(import.meta.env.DEV ? 'sakura-pink' : (saved.colorTheme ?? ''))
+  const colorTheme = ref<ColorTheme>(saved.colorTheme ?? '')
   const sidebarCollapsed = ref(saved.sidebarCollapsed ?? false)
   const motionEnabled = ref(saved.motionEnabled ?? true)
   const shortcutBarVisible = ref(saved.shortcutBarVisible ?? true)

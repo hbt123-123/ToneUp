@@ -186,7 +186,7 @@ function continuePractice(): void {
             <button class="enter-btn">继续刷题 →</button>
           </div>
           <div class="feature-visual">
-            <span class="feature-icon icon-x2">📖</span>
+            <span class="feature-icon icon-x4">📖</span>
           </div>
         </div>
       </section>
