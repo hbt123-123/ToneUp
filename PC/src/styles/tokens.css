@@ -60,7 +60,7 @@
   --tu-scrollbar-thumb-hover: rgba(127, 127, 140, 0.5);
 
   /* 渐变占位符（T9: 真实资产由设计师后续替换） */
-  --tu-gradient-hero: linear-gradient(135deg, #f4f5fa 0%, #e8eaf0 100%);
+  --tu-gradient-hero: url('/background/day.png') center/cover no-repeat;
   --tu-gradient-card: #ffffff;
   --tu-gradient-accent: var(--tu-accent);
 }
@@ -74,6 +74,7 @@ html.dark {
   --tu-text-secondary: #a3aac0;
   --tu-text-disabled: #666d84;
   --tu-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+  --tu-gradient-hero: url('/background/night.png') center/cover no-repeat;
 }
 
 /* ===== 预设主题（data-theme 与 dark 正交） ===== */
@@ -143,18 +144,33 @@ html.dark[data-theme="mint-fresh"] {
   --tu-border: rgba(255, 255, 255, 0.12);
 }
 
-/* 5. 樱花粉 */
+/* 5. 昔涟（樱花粉系列）——动态视频背景 + SVG 装饰 */
 html[data-theme="sakura-pink"] {
-  --tu-bg: #fff5f5;
-  --tu-surface: #ffffff;
+  --tu-bg: #ffe4ec;
+  --tu-surface: rgba(255, 230, 240, 0.88);
   --tu-primary: #e84393;
-  --tu-gradient-hero: #ffe0e8;
-  --tu-gradient-card: #fff0f3;
+  --tu-text: #4a1a35;
+  --tu-text-secondary: #9a4a6a;
+  --tu-border: rgba(232, 67, 147, 0.22);
+  --tu-gradient-hero: url('/background/day.png') center/cover no-repeat;
+  --tu-gradient-card: rgba(255, 220, 235, 0.9);
   --tu-gradient-accent: #e84393;
+  --tu-accent-surface: rgba(232, 67, 147, 0.1);
+  --tu-accent-overlay: rgba(232, 67, 147, 0.15);
+  --tu-accent-hover-surface: rgba(232, 67, 147, 0.25);
+  --tu-accent-glow: rgba(232, 67, 147, 0.25);
+  --tu-accent-border: rgba(232, 67, 147, 0.3);
+  /* SVG 装饰素材路径 */
+  --tu-deco-1: url('/background/xilian/x1.svg');
+  --tu-deco-2: url('/background/xilian/x2.svg');
+  --tu-deco-3: url('/background/xilian/x3.svg');
+  --tu-deco-4: url('/background/xilian/x4.svg');
+  --tu-deco-5: url('/background/xilian/x5.svg');
+  --tu-deco-6: url('/background/xilian/x6.svg');
 }
 html.dark[data-theme="sakura-pink"] {
   --tu-bg: #1c1216;
-  --tu-surface: #261a20;
+  --tu-surface: rgba(38, 26, 32, 0.82);
   --tu-text: #f5e6ec;
   --tu-text-secondary: #c0a3b0;
   --tu-border: rgba(255, 255, 255, 0.12);

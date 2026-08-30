@@ -14,7 +14,7 @@ const themes = [
   { value: 'warm-beige', label: '暖阳米' },
   { value: 'starry-purple', label: '星空暗紫' },
   { value: 'mint-fresh', label: '薄荷清新' },
-  { value: 'sakura-pink', label: '樱花粉' },
+  { value: 'sakura-pink', label: '昔涟' },
   { value: 'deep-ocean', label: '深海蓝' },
 ] as const
 

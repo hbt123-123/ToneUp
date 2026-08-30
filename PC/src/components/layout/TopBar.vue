@@ -11,7 +11,7 @@ import { useUiStore } from '@/stores/ui'
 import { useWrongBookStore } from '@/stores/wrongbook'
 import ThemeSwitcher from '@/components/common/ThemeSwitcher.vue'
 
-/** 顶栏（§4.1）：左面包屑，右用户菜单（退出、主题切换、动效开关） */
+/** 顶栏（§4.1）：左面包屑，右用户菜单（主题切换、退出登录） */
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -29,7 +29,6 @@ type DropdownOption = { key: string; label?: string; type?: 'divider' }
 const userOptions = computed<DropdownOption[]>(() => [
   { key: 'themePanel', label: '🎨 主题设置' },
   { key: 'theme', label: `🌓 ${ui.isDark ? '浅色模式' : '暗色模式'}` },
-  { key: 'motion', label: `✨ 动效：${ui.motionEnabled ? '开' : '关'}` },
   { key: 'divider', type: 'divider' },
   { key: 'logout', label: '退出登录' },
 ])
@@ -37,15 +36,10 @@ const userOptions = computed<DropdownOption[]>(() => [
 function onUserAction(key: string | number): void {
   if (key === 'themePanel') showThemePanel.value = true
   else if (key === 'theme') ui.toggleTheme()
-  else if (key === 'motion') {
-    ui.motionEnabled = !ui.motionEnabled
-    document.documentElement.classList.toggle('no-motion', !ui.motionEnabled)
-    document.documentElement.classList.toggle('force-motion', ui.motionEnabled)
-  } else if (key === 'logout') {
+  else if (key === 'logout') {
     auth.logout()
     catalog.reset()
     stats.reset()
-    // 清理其余 per-user 状态，防止同浏览器换账号后残留上一用户的徽标/缓存
     review.reset()
     wrongbook.reset()
     practice.resetSession()

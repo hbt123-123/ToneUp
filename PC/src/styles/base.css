@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import './xilian.css';
 
 *,
 *::before,
@@ -11,6 +12,11 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+}
+
+/* 首页全屏分页滚动（§HomeView）：仅首页挂载期间启用，离开页面即恢复正常滚动 */
+html.home-snap {
+  scroll-snap-type: y mandatory;
 }
 
 body {

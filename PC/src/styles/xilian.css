@@ -1,0 +1,240 @@
+/**
+ * 昔涟（sakura-pink）主题专属样式（tokens.css 中 --tu-deco-* 素材的实际消费者）。
+ *
+ * 必须放在全局样式表的原因：@vue/compiler-sfc 编译 scoped 样式时，会把
+ * `:global(html[data-theme=…]) .后代` 折叠成只剩 `html[data-theme=…]`，
+ * 后代选择器被丢弃——规则直接命中 <html>，页面布局坍塌成 140×140（白屏），
+ * SVG 装饰全部失效。主题样式以 html 属性为开关，本就属于全局层。
+ */
+
+/* ================= SideNav ================= */
+
+/* 顶部装饰插画 */
+html[data-theme="sakura-pink"] .xilian-top-deco {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100%;
+  height: 80px;
+  background: var(--tu-deco-1) right top / auto 100% no-repeat;
+  opacity: 0.1;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 底部装饰插画 */
+html[data-theme="sakura-pink"] .xilian-bottom-deco {
+  display: block;
+  position: absolute;
+  bottom: 60px;
+  right: -20px;
+  width: 140px;
+  height: 140px;
+  background: var(--tu-deco-3) center / contain no-repeat;
+  opacity: 0.08;
+  pointer-events: none;
+  z-index: 0;
+  transition: transform 0.6s var(--tu-ease);
+}
+
+/* 侧边栏展开时底部装饰轻微旋转 */
+html[data-theme="sakura-pink"] .side-nav.visible .xilian-bottom-deco {
+  transform: rotate(-5deg) scale(1.05);
+}
+
+/* 侧边栏背景增加微妙的 SVG 纹理（用 x1 避免大文件卡顿） */
+html[data-theme="sakura-pink"] .side-nav {
+  background-color: var(--tu-sidebar-bg);
+  background-image: var(--tu-deco-1);
+  background-position: right bottom;
+  background-size: 200px auto;
+  background-repeat: no-repeat;
+}
+
+html.dark[data-theme="sakura-pink"] .side-nav {
+  background-color: rgba(35, 25, 30, 0.95);
+  background-image: linear-gradient(180deg, rgba(35, 25, 30, 0.95) 0%, rgba(26, 18, 22, 0.95) 100%);
+  background-position: center;
+  background-size: auto;
+  background-repeat: no-repeat;
+}
+
+/* 导航项 hover 时左侧出现小装饰 */
+html[data-theme="sakura-pink"] .side-nav .nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 4px;
+  height: 0;
+  background: var(--tu-accent);
+  border-radius: 0 2px 2px 0;
+  transform: translateY(-50%);
+  transition: height 0.3s var(--tu-ease);
+}
+
+html[data-theme="sakura-pink"] .side-nav .nav-item:hover::before,
+html[data-theme="sakura-pink"] .side-nav .nav-item.active::before {
+  height: 60%;
+}
+
+/* 激活项背景换为带透明度的粉色渐变 */
+html[data-theme="sakura-pink"] .side-nav .nav-item.active {
+  background: linear-gradient(90deg, rgba(232, 67, 147, 0.12) 0%, rgba(232, 67, 147, 0.03) 100%);
+  border-color: rgba(232, 67, 147, 0.25);
+}
+
+/* brand 标题在昔涟主题下的颜色 */
+html[data-theme="sakura-pink"] .side-nav .logo {
+  background: linear-gradient(135deg, #e84393 0%, #fd79a8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 触发条在昔涟主题下变粉 */
+html[data-theme="sakura-pink"] .nav-trigger .trigger-bar {
+  background: linear-gradient(180deg, #e84393 0%, #fd79a8 100%);
+}
+
+/* ================= HomeView ================= */
+
+/* 功能圆形图标区：昔涟主题下用 SVG 插画替代 emoji */
+html[data-theme="sakura-pink"] .home-view .feature-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+  font-size: 0; /* 隐藏 emoji 文本 */
+  background: center / contain no-repeat;
+  transition: transform 0.4s var(--tu-ease);
+}
+
+html[data-theme="sakura-pink"] .home-view .icon-x1 { background-image: var(--tu-deco-1); }
+html[data-theme="sakura-pink"] .home-view .icon-x2 { background-image: var(--tu-deco-2); }
+html[data-theme="sakura-pink"] .home-view .icon-x3 { background-image: var(--tu-deco-3); }
+html[data-theme="sakura-pink"] .home-view .icon-x4 { background-image: var(--tu-deco-4); }
+
+/* hover 时 SVG 图标轻微放大 */
+html[data-theme="sakura-pink"] .home-view .feature-section:hover .feature-icon {
+  transform: scale(1.08);
+}
+
+/* Hero 区：大型插画浮于海报上方，飘逸感 */
+html[data-theme="sakura-pink"] .home-view .hero-section::after {
+  content: '';
+  position: absolute;
+  right: 5%;
+  bottom: 0;
+  width: clamp(200px, 30vw, 360px);
+  height: clamp(200px, 30vw, 360px);
+  background: var(--tu-deco-1) center / contain no-repeat;
+  opacity: 0.12;
+  z-index: 0;
+  pointer-events: none;
+  animation: xilian-float 8s ease-in-out infinite;
+}
+
+@keyframes xilian-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+
+/* 功能区块装饰：移到角落（避免与中央 SVG 图标竞争视觉），每个 section 不同插画 */
+html[data-theme="sakura-pink"] .home-view .feature-section::before {
+  content: '';
+  position: absolute;
+  width: clamp(140px, 18vw, 220px);
+  height: clamp(140px, 18vw, 220px);
+  background: var(--tu-deco-2) center / contain no-repeat;
+  opacity: 0.07;
+  z-index: 0;
+  pointer-events: none;
+  transition: opacity 0.6s var(--tu-ease);
+}
+
+/* 第一个 feature（今日目标）：装饰在右下角 */
+html[data-theme="sakura-pink"] .home-view .feature-section:nth-of-type(2)::before {
+  right: 4vw;
+  bottom: 6vh;
+  background-image: var(--tu-deco-2);
+}
+
+/* 第二个 feature（继续上次）：装饰在左上角 */
+html[data-theme="sakura-pink"] .home-view .feature-section:nth-of-type(3)::before {
+  left: 4vw;
+  top: 8vh;
+  background-image: var(--tu-deco-3);
+}
+
+/* 第三个 feature（学科入口）：装饰在右上角 */
+html[data-theme="sakura-pink"] .home-view .feature-section:nth-of-type(4)::before {
+  right: 4vw;
+  top: 8vh;
+  background-image: var(--tu-deco-4);
+}
+
+/* 第四个 feature（今日复习）：装饰在左下角（用 x1 避免大文件） */
+html[data-theme="sakura-pink"] .home-view .feature-section:nth-of-type(5)::before {
+  left: 4vw;
+  bottom: 6vh;
+  background-image: var(--tu-deco-1);
+}
+
+/* hover 时装饰变清晰 */
+html[data-theme="sakura-pink"] .home-view .feature-section:hover::before {
+  opacity: 0.15;
+}
+
+/* 更多功能区：底部大背景装饰（用较小的 x3 避免卡顿） */
+html[data-theme="sakura-pink"] .home-view .more-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--tu-deco-3) center bottom / 50% auto no-repeat;
+  opacity: 0.05;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* 按钮在昔涟主题下加微妙 SVG 纹理 hover（用最小的 x1） */
+html[data-theme="sakura-pink"] .home-view .enter-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="sakura-pink"] .home-view .enter-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--tu-deco-1) center / 200% auto no-repeat;
+  opacity: 0;
+  transition: opacity 0.4s var(--tu-ease);
+}
+
+html[data-theme="sakura-pink"] .home-view .enter-btn:hover::after {
+  opacity: 0.12;
+}
+
+/* 更多卡片在昔涟主题下有装饰边角（用 x1 避免大文件） */
+html[data-theme="sakura-pink"] .home-view .more-card {
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="sakura-pink"] .home-view .more-card::after {
+  content: '';
+  position: absolute;
+  right: -20px;
+  bottom: -20px;
+  width: 80px;
+  height: 80px;
+  background: var(--tu-deco-1) center / contain no-repeat;
+  opacity: 0.06;
+  transition: opacity 0.4s var(--tu-ease), transform 0.4s var(--tu-ease);
+}
+
+html[data-theme="sakura-pink"] .home-view .more-card:hover::after {
+  opacity: 0.15;
+  transform: scale(1.2) rotate(-8deg);
+}
