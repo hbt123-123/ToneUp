@@ -143,7 +143,7 @@ function continuePractice(): void {
       <section class="section feature-section" @click="router.push('/catalog')">
         <div class="feature-inner feature-right">
           <div class="feature-visual">
-            <span class="feature-icon icon-x1">🎯</span>
+            <img class="feature-icon icon-target" src="/background/sky/icon_target_today.svg" alt="" draggable="false" />
           </div>
           <div class="feature-body">
             <p class="section-tag">01</p>
@@ -186,7 +186,7 @@ function continuePractice(): void {
             <button class="enter-btn">继续刷题 →</button>
           </div>
           <div class="feature-visual">
-            <span class="feature-icon icon-x4">📖</span>
+            <img class="feature-icon icon-book" src="/background/sky/icon_continue_book.svg" alt="" draggable="false" />
           </div>
         </div>
       </section>
@@ -195,7 +195,7 @@ function continuePractice(): void {
       <section class="section feature-section" @click="router.push('/catalog')">
         <div class="feature-inner feature-right">
           <div class="feature-visual">
-            <span class="feature-icon icon-x3">📚</span>
+            <img class="feature-icon icon-subjects" src="/background/sky/icon_subject_books.svg" alt="" draggable="false" />
           </div>
           <div class="feature-body">
             <p class="section-tag">03</p>
@@ -227,7 +227,7 @@ function continuePractice(): void {
             <button class="enter-btn">开始复习 →</button>
           </div>
           <div class="feature-visual">
-            <span class="feature-icon icon-x4">🔄</span>
+            <img class="feature-icon icon-review" src="/background/sky/icon_review_refresh.svg" alt="" draggable="false" />
           </div>
         </div>
       </section>
@@ -458,9 +458,18 @@ html.dark .feature-section:nth-child(even) {
   transform: scale(1.05);
 }
 
+/* 功能图标：SVG 贴纸图（PC/public/background/sky/icon_*.svg） */
 .feature-icon {
-  font-size: clamp(56px, 8vw, 88px);
-  line-height: 1;
+  width: 62%;
+  height: 62%;
+  object-fit: contain;
+  user-select: none;
+  filter: drop-shadow(0 4px 10px rgba(30, 60, 90, 0.18));
+  transition: transform 0.4s var(--tu-ease);
+}
+
+.feature-section:hover .feature-icon {
+  transform: scale(1.08) rotate(-3deg);
 }
 
 .feature-body {
@@ -627,10 +636,6 @@ html.dark .feature-section:nth-child(even) {
   .feature-visual {
     width: 120px;
     height: 120px;
-  }
-
-  .feature-icon {
-    font-size: 48px;
   }
 }
 

@@ -2,10 +2,10 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
-export type ColorTheme = '' | 'morandi-green' | 'warm-beige' | 'starry-purple' | 'mint-fresh' | 'sakura-pink' | 'deep-ocean'
+export type ColorTheme = '' | 'morandi-green' | 'warm-beige' | 'starry-purple' | 'mint-fresh' | 'sakura-pink' | 'sky-blue'
 
 /** 选中后会自动切换 dark 的深色主题集合 */
-const AUTO_DARK_THEMES = new Set<ColorTheme>(['starry-purple', 'deep-ocean'])
+const AUTO_DARK_THEMES = new Set<ColorTheme>(['starry-purple'])
 
 const UI_KEY = 'toneup:ui'
 
@@ -19,10 +19,17 @@ interface UiPersist {
   customBackgroundUrl?: string
 }
 
+/** 主题键改名迁移：深海蓝 → 天空蓝（2026-09 改造，旧存的 localStorage 值自动映射） */
+const THEME_KEY_MIGRATIONS: Record<string, ColorTheme> = { 'deep-ocean': 'sky-blue' }
+
 function loadPersist(): Partial<UiPersist> {
   try {
     const raw = localStorage.getItem(UI_KEY)
-    return raw ? (JSON.parse(raw) as Partial<UiPersist>) : {}
+    const saved = raw ? (JSON.parse(raw) as Partial<UiPersist>) : {}
+    if (saved.colorTheme && saved.colorTheme in THEME_KEY_MIGRATIONS) {
+      saved.colorTheme = THEME_KEY_MIGRATIONS[saved.colorTheme]
+    }
+    return saved
   } catch {
     return {}
   }
@@ -73,7 +80,8 @@ export const useUiStore = defineStore('ui', () => {
 
   function applyCustomBackground(url: string): void {
     if (url) {
-      document.documentElement.style.setProperty('--tu-gradient-hero', `url(${url})`)
+      // data URL 含 ";"/"," 等字符，必须加引号才是合法 CSS url()
+      document.documentElement.style.setProperty('--tu-gradient-hero', `url("${url}")`)
     } else {
       document.documentElement.style.removeProperty('--tu-gradient-hero')
     }

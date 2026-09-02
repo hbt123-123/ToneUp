@@ -103,8 +103,8 @@ function navTo(to: string): void {
 
   <!-- 侧边栏本体 -->
   <aside class="side-nav" :class="{ visible }" @mouseenter="cancelScheduledClose">
-    <!-- 昔涟主题装饰：顶部浮动插画 -->
-    <div class="xilian-top-deco" />
+    <!-- 主题装饰：顶部浮动插画（昔涟/天空蓝等） -->
+    <div class="side-deco-top" />
 
     <div class="brand">
       <span class="logo">ToneUp</span>
@@ -132,8 +132,8 @@ function navTo(to: string): void {
       </a>
     </nav>
 
-    <!-- 昔涟主题装饰：底部插画 -->
-    <div class="xilian-bottom-deco" />
+    <!-- 主题装饰：底部插画 -->
+    <div class="side-deco-bottom" />
 
     <div class="user-zone" :title="auth.user?.username">
       <n-avatar v-if="auth.user" round size="small" :style="{ backgroundColor: '#7c3aed' }">
@@ -322,13 +322,13 @@ html.dark .nav-item.active {
   color: var(--tu-text-secondary);
 }
 
-/* ---------- 昔涟主题装饰（默认隐藏，主题规则见 src/styles/xilian.css） ---------- */
+/* ---------- 主题装饰（默认隐藏，昔涟/天空蓝规则见 src/styles/*.css） ---------- */
 
-.xilian-top-deco {
+.side-deco-top {
   display: none;
 }
 
-.xilian-bottom-deco {
+.side-deco-bottom {
   display: none;
 }
 

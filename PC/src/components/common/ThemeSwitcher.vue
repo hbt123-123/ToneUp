@@ -3,7 +3,6 @@ import { ref } from 'vue'
 import { NButton, NSelect, useMessage } from 'naive-ui'
 import { useUiStore } from '@/stores/ui'
 import type { ColorTheme } from '@/stores/ui'
-import { requestForm } from '@/api/http'
 
 const ui = useUiStore()
 const message = useMessage()
@@ -15,15 +14,18 @@ const themes = [
   { value: 'starry-purple', label: '星空暗紫' },
   { value: 'mint-fresh', label: '薄荷清新' },
   { value: 'sakura-pink', label: '昔涟' },
-  { value: 'deep-ocean', label: '深海蓝' },
+  { value: 'sky-blue', label: '天空蓝' },
 ] as const
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const uploading = ref(false)
+const processing = ref(false)
 
 const MIN_WIDTH = 1920
 const MIN_HEIGHT = 1080
-const MAX_SIZE = 5 * 1024 * 1024
+/** base64 后约 3.3MB，保证 localStorage（约 5MB）装得下 */
+const MAX_STORE_BYTES = 2.5 * 1024 * 1024
+/** 尺寸达标但仍超限时逐级降质重编码 */
+const ENCODE_QUALITIES = [0.85, 0.72, 0.6, 0.45, 0.3]
 
 function onSelect(value: string) {
   ui.setColorTheme(value as ColorTheme)
@@ -41,9 +43,9 @@ async function onFileChange(event: Event) {
 
   try {
     const blob = await processImage(file)
-    await uploadBlob(blob)
+    applyCustomBackground(blob)
   } catch (err) {
-    message.error(err instanceof Error ? err.message : '上传失败')
+    message.error(err instanceof Error ? err.message : '应用失败')
   }
 }
 
@@ -60,6 +62,16 @@ function loadImage(file: File): Promise<HTMLImageElement> {
       reject(new Error('无法读取图片文件'))
     }
     img.src = url
+  })
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('图片处理失败'))),
+      'image/jpeg',
+      quality,
+    )
   })
 }
 
@@ -83,31 +95,40 @@ async function processImage(file: File): Promise<Blob> {
   const sy = (img.naturalHeight - sh) / 2
   ctx.drawImage(img, sx, sy, sw, sh, 0, 0, MIN_WIDTH, MIN_HEIGHT)
 
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error('图片处理失败'))),
-      'image/jpeg',
-      0.85,
-    )
-  })
-
-  if (blob.size > MAX_SIZE) {
-    throw new Error('文件过大，最大 5MB')
+  for (const q of ENCODE_QUALITIES) {
+    const blob = await canvasToBlob(canvas, q)
+    if (blob.size <= MAX_STORE_BYTES) return blob
   }
-  return blob
+  throw new Error('图片过大，压缩后仍超 2.5MB，请换一张')
 }
 
-async function uploadBlob(blob: Blob) {
-  uploading.value = true
+/**
+ * 纯前端自定义背景：data URL 直接写入 --tu-gradient-hero（首页 hero 层），
+ * 不经过任何后端接口；由 ui store 持久化到 localStorage。
+ */
+function applyCustomBackground(blob: Blob): void {
+  processing.value = true
   try {
-    const form = new FormData()
-    form.append('file', blob, 'background.jpg')
-    const res = await requestForm<{ url: string }>('/backgrounds/upload', form)
-    ui.setCustomBackgroundUrl(res.url)
-    message.success('自定义背景已应用')
-  } finally {
-    uploading.value = false
+    const reader = new FileReader()
+    reader.onload = () => {
+      ui.setCustomBackgroundUrl(String(reader.result))
+      message.success('自定义背景已应用（仅本机保存）')
+      processing.value = false
+    }
+    reader.onerror = () => {
+      message.error('图片读取失败')
+      processing.value = false
+    }
+    reader.readAsDataURL(blob)
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '应用失败')
+    processing.value = false
   }
+}
+
+function clearCustom(): void {
+  ui.clearCustomBackground()
+  message.success('已恢复默认首页背景')
 }
 </script>
 
@@ -121,8 +142,11 @@ async function uploadBlob(blob: Blob) {
       style="width: 140px"
       @update:value="onSelect"
     />
-    <n-button size="small" :loading="uploading" @click="openFilePicker">
+    <n-button size="small" :loading="processing" @click="openFilePicker">
       自定义背景
+    </n-button>
+    <n-button v-if="ui.customBackgroundUrl" size="small" quaternary @click="clearCustom">
+      恢复默认
     </n-button>
     <input
       ref="fileInput"

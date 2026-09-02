@@ -16,8 +16,9 @@ const ui = useUiStore()
 
 const theme = computed<GlobalTheme | null>(() => (ui.isDark ? darkTheme : null))
 
-/** 昔涟（sakura-pink）主题开启视频背景 */
+/** 昔涟（sakura-pink）主题开启视频背景；天空蓝（sky-blue）主题开启 webp 图片背景 */
 const isXilianTheme = computed(() => ui.colorTheme === 'sakura-pink')
+const isSkyTheme = computed(() => ui.colorTheme === 'sky-blue')
 
 watch(
   () => ui.isDark,
@@ -59,8 +60,12 @@ themeGuard.observe(document.documentElement, { attributes: true, attributeFilter
 onUnmounted(() => themeGuard.disconnect())
 
 const themeOverrides = computed(() => {
-  // 昔涟主题：body 底色用粉色，覆盖 Naive UI 默认注入的白色
-  const xilian = ui.colorTheme === 'sakura-pink'
+  // 带彩色底的主题：body 底色按主题+明暗覆盖 Naive UI 默认注入的白色 [浅色, 深色]
+  const THEME_BODY_COLORS: Record<string, [string, string]> = {
+    'sakura-pink': ['#ffe4ec', '#1c1216'],
+    'sky-blue': ['#dbeefc', '#0d1b26'],
+  }
+  const bodyColors = THEME_BODY_COLORS[ui.colorTheme]
   return {
     common: {
       primaryColor: '#2B3A67',
@@ -75,7 +80,7 @@ const themeOverrides = computed(() => {
       borderRadiusSmall: '3px',
       fontSize: '14px',
       lineHeight: '1.75',
-      ...(xilian ? { bodyColor: ui.isDark ? '#1c1216' : '#ffe4ec' } : {}),
+      ...(bodyColors ? { bodyColor: ui.isDark ? bodyColors[1] : bodyColors[0] } : {}),
     },
   }
 })
@@ -87,16 +92,22 @@ const themeOverrides = computed(() => {
       <n-dialog-provider>
         <n-global-style />
 
-        <!-- 昔涟主题动态背景：全屏循环 video，opacity 0.3 -->
+        <!-- 主题专属全屏背景：昔涟为循环视频，天空蓝为 webp 图片，透明度均 0.3 -->
         <transition name="bg-fade">
           <video
             v-if="isXilianTheme"
-            class="bg-video"
+            class="bg-media"
             src="/background/xilian/cyrene.webm"
             autoplay
             muted
             loop
             playsinline
+          />
+          <img
+            v-else-if="isSkyTheme"
+            class="bg-media bg-image"
+            src="/background/sky/∞.webp"
+            alt=""
           />
         </transition>
 
@@ -130,8 +141,8 @@ const themeOverrides = computed(() => {
   z-index: 1;
 }
 
-/* 昔涟主题全屏背景视频 */
-.bg-video {
+/* 主题全屏背景媒体（昔涟 video / 天空蓝 webp 图片） */
+.bg-media {
   position: fixed;
   inset: 0;
   width: 100vw;
@@ -140,6 +151,11 @@ const themeOverrides = computed(() => {
   opacity: 0.3;
   z-index: 0;
   pointer-events: none;
+}
+
+/* 天空蓝背景更实一些，星云细节更明显 */
+.bg-media.bg-image {
+  opacity: 0.45;
 }
 
 .bg-fade-enter-active,
@@ -192,7 +208,7 @@ const themeOverrides = computed(() => {
   width: 100%;
 }
 
-/* 昔涟主题下让 html 与 body 都锁定粉色底，覆盖 Naive UI 注入的 body 背景 */
+/* 带彩色底的主题：让 html 与 body 锁定对应底色，覆盖 Naive UI 注入的 body 背景 */
 html[data-theme="sakura-pink"],
 html[data-theme="sakura-pink"] body {
   background: #ffe4ec;
@@ -200,5 +216,13 @@ html[data-theme="sakura-pink"] body {
 html.dark[data-theme="sakura-pink"],
 html.dark[data-theme="sakura-pink"] body {
   background: #1c1216;
+}
+html[data-theme="sky-blue"],
+html[data-theme="sky-blue"] body {
+  background: #dbeefc;
+}
+html.dark[data-theme="sky-blue"],
+html.dark[data-theme="sky-blue"] body {
+  background: #0d1b26;
 }
 </style>

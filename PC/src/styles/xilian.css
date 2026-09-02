@@ -10,7 +10,7 @@
 /* ================= SideNav ================= */
 
 /* 顶部装饰插画 */
-html[data-theme="sakura-pink"] .xilian-top-deco {
+html[data-theme="sakura-pink"] .side-deco-top {
   display: block;
   position: absolute;
   top: 0;
@@ -24,7 +24,7 @@ html[data-theme="sakura-pink"] .xilian-top-deco {
 }
 
 /* 底部装饰插画 */
-html[data-theme="sakura-pink"] .xilian-bottom-deco {
+html[data-theme="sakura-pink"] .side-deco-bottom {
   display: block;
   position: absolute;
   bottom: 60px;
@@ -39,7 +39,7 @@ html[data-theme="sakura-pink"] .xilian-bottom-deco {
 }
 
 /* 侧边栏展开时底部装饰轻微旋转 */
-html[data-theme="sakura-pink"] .side-nav.visible .xilian-bottom-deco {
+html[data-theme="sakura-pink"] .side-nav.visible .side-deco-bottom {
   transform: rotate(-5deg) scale(1.05);
 }
 

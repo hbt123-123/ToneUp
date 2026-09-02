@@ -176,18 +176,34 @@ html.dark[data-theme="sakura-pink"] {
   --tu-border: rgba(255, 255, 255, 0.12);
 }
 
-/* 6. 深海蓝（深色主题，自动触发 dark） */
-html[data-theme="deep-ocean"] {
-  color-scheme: dark;
-  --tu-bg: #0c1929;
-  --tu-surface: #142233;
-  --tu-primary: #00cec9;
-  --tu-text: #dceaf5;
-  --tu-text-secondary: #9fb4c8;
+/* 6. 天空蓝（由深海蓝改造）——webp 全屏背景（AppLayout 注入，透明度 0.3）+ SVG 装饰 */
+html[data-theme="sky-blue"] {
+  --tu-bg: #dbeefc;
+  --tu-surface: rgba(255, 255, 255, 0.82);
+  --tu-primary: #1e88c7;
+  --tu-text: #163a52;
+  --tu-text-secondary: #4a7290;
+  --tu-border: rgba(14, 116, 180, 0.22);
+  /* hero 海报沿用日/夜图（dark 态由 html.dark 统一切换为 night.png） */
+  --tu-gradient-hero: url('/background/day.png') center/cover no-repeat;
+  --tu-gradient-card: rgba(255, 255, 255, 0.85);
+  --tu-gradient-accent: #0ea5e9;
+  --tu-accent-surface: rgba(14, 165, 233, 0.1);
+  --tu-accent-overlay: rgba(14, 165, 233, 0.15);
+  --tu-accent-hover-surface: rgba(14, 165, 233, 0.25);
+  --tu-accent-glow: rgba(14, 165, 233, 0.25);
+  --tu-accent-border: rgba(14, 165, 233, 0.3);
+  /* SVG 装饰素材路径 */
+  --tu-deco-sky: url('/background/sky/∞.svg');
+}
+html.dark[data-theme="sky-blue"] {
+  --tu-bg: #0d1b26;
+  --tu-surface: rgba(19, 34, 48, 0.85);
+  --tu-text: #dceefb;
+  --tu-text-secondary: #8fb4cc;
   --tu-border: rgba(255, 255, 255, 0.12);
+  /* 暗色态 hero 换夜空海报（覆盖本主题浅色块设置的 day.png） */
   --tu-gradient-hero: url('/background/night.png') center/cover no-repeat;
-  --tu-gradient-card: #1e4060;
-  --tu-gradient-accent: #00cec9;
 }
 
 /* 动效开关：关闭全部过渡动画 */

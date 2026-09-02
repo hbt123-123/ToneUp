@@ -1,0 +1,178 @@
+/**
+ * 天空蓝（sky-blue）主题专属样式（tokens.css 中 --tu-deco-sky 的消费者）。
+ *
+ * 与 xilian.css 相同的原因：@vue/compiler-sfc 编译 scoped 样式时会丢弃
+ * `:global(html[data-theme=…])` 之后的后代选择器，主题规则必须放全局。
+ * 全屏 webp 背景（透明度 0.3）由 AppLayout 按 data-theme 注入 <img> 实现。
+ */
+
+/* ================= SideNav ================= */
+
+/* 顶部装饰插画 */
+html[data-theme="sky-blue"] .side-deco-top {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100%;
+  height: 90px;
+  background: var(--tu-deco-sky) right top / auto 100% no-repeat;
+  opacity: 0.14;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 底部装饰插画 */
+html[data-theme="sky-blue"] .side-deco-bottom {
+  display: block;
+  position: absolute;
+  bottom: 60px;
+  right: -24px;
+  width: 150px;
+  height: 150px;
+  background: var(--tu-deco-sky) center / contain no-repeat;
+  opacity: 0.1;
+  pointer-events: none;
+  z-index: 0;
+  transition: transform 0.6s var(--tu-ease);
+}
+
+/* 侧边栏展开时底部装饰轻微上浮 */
+html[data-theme="sky-blue"] .side-nav.visible .side-deco-bottom {
+  transform: translateY(-6px) scale(1.04);
+}
+
+/* 侧边栏背景：天空蓝基调的半透明，透出全屏 webp 背景 */
+html[data-theme="sky-blue"] .side-nav {
+  background-color: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+html.dark[data-theme="sky-blue"] .side-nav {
+  background-color: rgba(13, 27, 38, 0.88);
+}
+
+/* 激活项背景换为带透明度的天空蓝渐变 */
+html[data-theme="sky-blue"] .side-nav .nav-item.active {
+  background: linear-gradient(90deg, rgba(14, 165, 233, 0.14) 0%, rgba(14, 165, 233, 0.03) 100%);
+  border-color: rgba(14, 165, 233, 0.28);
+}
+
+/* brand 标题在天空蓝主题下的颜色 */
+html[data-theme="sky-blue"] .side-nav .logo {
+  background: linear-gradient(135deg, #0ea5e9 0%, #7dd3fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+html.dark[data-theme="sky-blue"] .side-nav .logo {
+  background: linear-gradient(135deg, #7dd3fc 0%, #bae6fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 触发条在天空蓝主题下变蓝 */
+html[data-theme="sky-blue"] .nav-trigger .trigger-bar {
+  background: linear-gradient(180deg, #0ea5e9 0%, #7dd3fc 100%);
+}
+
+/* ================= HomeView ================= */
+
+/* Hero 区：装饰插画浮于海报上方（hero 背景透明，直接衬在 webp 背景上） */
+html[data-theme="sky-blue"] .home-view .hero-section::after {
+  content: '';
+  position: absolute;
+  right: 5%;
+  bottom: 0;
+  width: clamp(200px, 30vw, 360px);
+  height: clamp(200px, 30vw, 360px);
+  background: var(--tu-deco-sky) center / contain no-repeat;
+  opacity: 0.16;
+  z-index: 0;
+  pointer-events: none;
+  animation: sky-float 8s ease-in-out infinite;
+}
+
+@keyframes sky-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-14px); }
+}
+
+/* 功能区块装饰：同一插画左右交替 */
+html[data-theme="sky-blue"] .home-view .feature-section::before {
+  content: '';
+  position: absolute;
+  width: clamp(180px, 28vw, 340px);
+  height: clamp(180px, 28vw, 340px);
+  background: var(--tu-deco-sky) center / contain no-repeat;
+  opacity: 0.1;
+  z-index: 0;
+  pointer-events: none;
+  transition: opacity 0.6s var(--tu-ease);
+}
+
+html[data-theme="sky-blue"] .home-view .feature-section:nth-of-type(2)::before {
+  right: 2vw;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+html[data-theme="sky-blue"] .home-view .feature-section:nth-of-type(3)::before {
+  left: 2vw;
+  top: 50%;
+  transform: translateY(-50%) scaleX(-1);
+}
+
+html[data-theme="sky-blue"] .home-view .feature-section:nth-of-type(4)::before {
+  right: 2vw;
+  top: 50%;
+  transform: translateY(-50%) scale(0.9);
+}
+
+html[data-theme="sky-blue"] .home-view .feature-section:nth-of-type(5)::before {
+  left: 2vw;
+  top: 50%;
+  transform: translateY(-50%) scaleX(-1) scale(0.9);
+}
+
+/* hover 时装饰变清晰 */
+html[data-theme="sky-blue"] .home-view .feature-section:hover::before {
+  opacity: 0.18;
+}
+
+/* 更多功能区：底部大背景装饰 */
+html[data-theme="sky-blue"] .home-view .more-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--tu-deco-sky) center bottom / 52% auto no-repeat;
+  opacity: 0.08;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* 更多卡片在天空蓝主题下有装饰边角 */
+html[data-theme="sky-blue"] .home-view .more-card {
+  position: relative;
+  overflow: hidden;
+}
+
+html[data-theme="sky-blue"] .home-view .more-card::after {
+  content: '';
+  position: absolute;
+  right: -20px;
+  bottom: -20px;
+  width: 80px;
+  height: 80px;
+  background: var(--tu-deco-sky) center / contain no-repeat;
+  opacity: 0.08;
+  transition: opacity 0.4s var(--tu-ease), transform 0.4s var(--tu-ease);
+}
+
+html[data-theme="sky-blue"] .home-view .more-card:hover::after {
+  opacity: 0.18;
+  transform: scale(1.2) rotate(-8deg);
+}
