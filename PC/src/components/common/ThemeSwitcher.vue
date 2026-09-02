@@ -102,23 +102,19 @@ async function processImage(file: File): Promise<Blob> {
   throw new Error('图片过大，压缩后仍超 2.5MB，请换一张')
 }
 
-/**
- * 纯前端自定义背景：data URL 直接写入 --tu-gradient-hero（首页 hero 层），
- * 不经过任何后端接口；由 ui store 持久化到 localStorage。
- */
 function applyCustomBackground(blob: Blob): void {
   processing.value = true
+  const reader = new FileReader()
+  reader.onload = () => {
+    ui.setCustomBackgroundUrl(String(reader.result))
+    message.success('自定义背景已应用（仅本机保存）')
+    processing.value = false
+  }
+  reader.onerror = () => {
+    message.error('图片读取失败')
+    processing.value = false
+  }
   try {
-    const reader = new FileReader()
-    reader.onload = () => {
-      ui.setCustomBackgroundUrl(String(reader.result))
-      message.success('自定义背景已应用（仅本机保存）')
-      processing.value = false
-    }
-    reader.onerror = () => {
-      message.error('图片读取失败')
-      processing.value = false
-    }
     reader.readAsDataURL(blob)
   } catch (err) {
     message.error(err instanceof Error ? err.message : '应用失败')

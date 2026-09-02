@@ -81,7 +81,9 @@ export const useUiStore = defineStore('ui', () => {
   function applyCustomBackground(url: string): void {
     if (url) {
       // data URL 含 ";"/"," 等字符，必须加引号才是合法 CSS url()
-      document.documentElement.style.setProperty('--tu-gradient-hero', `url("${url}")`)
+      // 转义 url 中的双引号和反斜杠，防止 CSS 注入
+      const escapedUrl = url.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+      document.documentElement.style.setProperty('--tu-gradient-hero', `url("${escapedUrl}")`)
     } else {
       document.documentElement.style.removeProperty('--tu-gradient-hero')
     }
