@@ -16,9 +16,10 @@ const ui = useUiStore()
 
 const theme = computed<GlobalTheme | null>(() => (ui.isDark ? darkTheme : null))
 
-/** 昔涟（sakura-pink）主题开启视频背景；天空蓝（sky-blue）主题开启 webp 图片背景 */
+/** 昔涟（sakura-pink）主题开启视频背景；天空蓝（sky-blue）主题开启 webp 图片背景；流萤（firefly）主题开启 hh.svg 图片背景 */
 const isXilianTheme = computed(() => ui.colorTheme === 'sakura-pink')
 const isSkyTheme = computed(() => ui.colorTheme === 'sky-blue')
+const isFireflyTheme = computed(() => ui.colorTheme === 'firefly')
 
 watch(
   () => ui.isDark,
@@ -64,6 +65,7 @@ const themeOverrides = computed(() => {
   const THEME_BODY_COLORS: Record<string, [string, string]> = {
     'sakura-pink': ['#ffe4ec', '#1c1216'],
     'sky-blue': ['#dbeefc', '#0d1b26'],
+    'firefly': ['#eef4e6', '#10140c'],
   }
   const bodyColors = THEME_BODY_COLORS[ui.colorTheme]
   return {
@@ -107,6 +109,12 @@ const themeOverrides = computed(() => {
             v-else-if="isSkyTheme"
             class="bg-media bg-image"
             src="/background/sky/∞.webp"
+            alt=""
+          />
+          <img
+            v-else-if="isFireflyTheme"
+            class="bg-media bg-image"
+            src="/background/Firefly/hh.svg"
             alt=""
           />
         </transition>
@@ -224,5 +232,13 @@ html[data-theme="sky-blue"] body {
 html.dark[data-theme="sky-blue"],
 html.dark[data-theme="sky-blue"] body {
   background: #0d1b26;
+}
+html[data-theme="firefly"],
+html[data-theme="firefly"] body {
+  background: #eef4e6;
+}
+html.dark[data-theme="firefly"],
+html.dark[data-theme="firefly"] body {
+  background: #10140c;
 }
 </style>

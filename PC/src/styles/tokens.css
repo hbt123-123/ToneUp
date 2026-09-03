@@ -79,21 +79,34 @@ html.dark {
 
 /* ===== 预设主题（data-theme 与 dark 正交） ===== */
 
-/* 1. 莫兰迪绿 */
-html[data-theme="morandi-green"] {
-  --tu-bg: #f0f4f3;
-  --tu-surface: #ffffff;
-  --tu-primary: #5a7a6a;
+/* 1. 流萤（Firefly）——hh.svg 全屏夜色背景（AppLayout 注入，透明度 0.45）+ 萤光黄绿点缀 */
+html[data-theme="firefly"] {
+  --tu-bg: #eef4e6;
+  --tu-surface: rgba(255, 255, 255, 0.82);
+  --tu-primary: #7cb342;
+  --tu-text: #26321a;
+  --tu-text-secondary: #5a6e4a;
+  --tu-border: rgba(124, 179, 66, 0.24);
+  /* hero 海报沿用日/夜图（dark 态由下方覆盖为 night.png），全局主题背景 hh.svg 由 AppLayout 注入 */
   --tu-gradient-hero: url('/background/day.png') center/cover no-repeat;
-  --tu-gradient-card: #d4e4dc;
-  --tu-gradient-accent: #5a7a6a;
+  --tu-gradient-card: rgba(255, 255, 255, 0.85);
+  --tu-gradient-accent: #8bc34a;
+  --tu-accent-surface: rgba(139, 195, 74, 0.1);
+  --tu-accent-overlay: rgba(139, 195, 74, 0.15);
+  --tu-accent-hover-surface: rgba(139, 195, 74, 0.25);
+  --tu-accent-glow: rgba(139, 195, 74, 0.25);
+  --tu-accent-border: rgba(139, 195, 74, 0.3);
+  /* 装饰素材路径 */
+  --tu-deco-firefly: url('/background/Firefly/f5.png');
 }
-html.dark[data-theme="morandi-green"] {
-  --tu-bg: #141a17;
-  --tu-surface: #1c2420;
-  --tu-text: #e6ece8;
-  --tu-text-secondary: #a3b0a9;
+html.dark[data-theme="firefly"] {
+  --tu-bg: #10140c;
+  --tu-surface: rgba(24, 30, 18, 0.85);
+  --tu-text: #eaf2dc;
+  --tu-text-secondary: #a8b898;
   --tu-border: rgba(255, 255, 255, 0.12);
+  /* 暗色态 hero 换夜色海报（覆盖本主题浅色块设置的 day.png） */
+  --tu-gradient-hero: url('/background/night.png') center/cover no-repeat;
 }
 
 /* 2. 暖阳米 */

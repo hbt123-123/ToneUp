@@ -3,13 +3,14 @@ import { ref } from 'vue'
 import { NButton, NSelect, useMessage } from 'naive-ui'
 import { useUiStore } from '@/stores/ui'
 import type { ColorTheme } from '@/stores/ui'
+import { saveBackground } from '@/utils/backgroundStore'
 
 const ui = useUiStore()
 const message = useMessage()
 
 const themes = [
   { value: '', label: '默认' },
-  { value: 'morandi-green', label: '莫兰迪绿' },
+  { value: 'firefly', label: '流萤' },
   { value: 'warm-beige', label: '暖阳米' },
   { value: 'starry-purple', label: '星空暗紫' },
   { value: 'mint-fresh', label: '薄荷清新' },
@@ -20,11 +21,10 @@ const themes = [
 const fileInput = ref<HTMLInputElement | null>(null)
 const processing = ref(false)
 
-const MIN_WIDTH = 1920
-const MIN_HEIGHT = 1080
-/** base64 后约 3.3MB，保证 localStorage（约 5MB）装得下 */
-const MAX_STORE_BYTES = 2.5 * 1024 * 1024
-/** 尺寸达标但仍超限时逐级降质重编码 */
+/** 直接原样入库上限：≤10MB 不重编码，保留原始画质与 GIF 动画 */
+const MAX_STORE_BYTES = 10 * 1024 * 1024
+/** 超限重编码时的最长边与 JPEG 降质梯度 */
+const MAX_EDGE = 2560
 const ENCODE_QUALITIES = [0.85, 0.72, 0.6, 0.45, 0.3]
 
 function onSelect(value: string) {
@@ -40,12 +40,21 @@ async function onFileChange(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  if (!file.type.startsWith('image/')) {
+    message.error('请选择图片文件')
+    return
+  }
 
+  processing.value = true
   try {
     const blob = await processImage(file)
-    applyCustomBackground(blob)
+    await saveBackground(blob)
+    ui.setCustomBackgroundUrl(URL.createObjectURL(blob))
+    message.success('自定义背景已应用（仅本机保存）')
   } catch (err) {
     message.error(err instanceof Error ? err.message : '应用失败')
+  } finally {
+    processing.value = false
   }
 }
 
@@ -75,51 +84,38 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
   })
 }
 
+/**
+ * 放宽后的处理规则：
+ * - 不限分辨率与宽高比，≤10MB 的图直接原样保存（保留 GIF 动画、透明通道等）
+ * - 超过 10MB 才重编码：先限制最长边 2560，仍超限则逐级降质、再逐级缩边
+ */
 async function processImage(file: File): Promise<Blob> {
+  if (file.size <= MAX_STORE_BYTES) return file
+
   const img = await loadImage(file)
-
-  if (img.naturalWidth < MIN_WIDTH || img.naturalHeight < MIN_HEIGHT) {
-    throw new Error(`图片分辨率需 ≥ ${MIN_WIDTH}×${MIN_HEIGHT}`)
-  }
-
-  const canvas = document.createElement('canvas')
-  canvas.width = MIN_WIDTH
-  canvas.height = MIN_HEIGHT
+  const scale = Math.min(1, MAX_EDGE / Math.max(img.naturalWidth, img.naturalHeight))
+  let canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('浏览器不支持 Canvas')
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
 
-  const scale = Math.max(MIN_WIDTH / img.naturalWidth, MIN_HEIGHT / img.naturalHeight)
-  const sw = MIN_WIDTH / scale
-  const sh = MIN_HEIGHT / scale
-  const sx = (img.naturalWidth - sw) / 2
-  const sy = (img.naturalHeight - sh) / 2
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, MIN_WIDTH, MIN_HEIGHT)
-
-  for (const q of ENCODE_QUALITIES) {
-    const blob = await canvasToBlob(canvas, q)
-    if (blob.size <= MAX_STORE_BYTES) return blob
+  while (true) {
+    for (const q of ENCODE_QUALITIES) {
+      const blob = await canvasToBlob(canvas, q)
+      if (blob.size <= MAX_STORE_BYTES) return blob
+    }
+    if (canvas.width <= 640) break
+    const next = document.createElement('canvas')
+    next.width = Math.round(canvas.width * 0.7)
+    next.height = Math.round(canvas.height * 0.7)
+    const nctx = next.getContext('2d')
+    if (!nctx) break
+    nctx.drawImage(canvas, 0, 0, next.width, next.height)
+    canvas = next
   }
-  throw new Error('图片过大，压缩后仍超 2.5MB，请换一张')
-}
-
-function applyCustomBackground(blob: Blob): void {
-  processing.value = true
-  const reader = new FileReader()
-  reader.onload = () => {
-    ui.setCustomBackgroundUrl(String(reader.result))
-    message.success('自定义背景已应用（仅本机保存）')
-    processing.value = false
-  }
-  reader.onerror = () => {
-    message.error('图片读取失败')
-    processing.value = false
-  }
-  try {
-    reader.readAsDataURL(blob)
-  } catch (err) {
-    message.error(err instanceof Error ? err.message : '应用失败')
-    processing.value = false
-  }
+  throw new Error('图片过大，压缩后仍超出存储限制，请换一张')
 }
 
 function clearCustom(): void {
@@ -147,7 +143,7 @@ function clearCustom(): void {
     <input
       ref="fileInput"
       type="file"
-      accept="image/jpeg,image/png,image/webp"
+      accept="image/*"
       style="display: none"
       @change="onFileChange"
     />

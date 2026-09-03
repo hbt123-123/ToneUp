@@ -32,6 +32,48 @@ const streakDays = computed(() => stats.overview.streak_days ?? 0)
 const todayAttempts = computed(() => stats.overview.today_attempts ?? 0)
 const reviewCount = computed(() => review.remainingCount)
 
+/** 各主题的功能区专属图标目录（键与 ui store 的 ColorTheme 对应） */
+const THEME_ICON_DIRS: Record<string, string> = {
+  firefly: '/background/Firefly',
+  'warm-beige': '/background/warmbeige',
+  'starry-purple': '/background/starrypurple',
+  'mint-fresh': '/background/mintfresh',
+  'sky-blue': '/background/sky',
+  'sakura-pink': '/background/xilian',
+}
+
+/** 各主题图标文件名（Firefly 为混合格式，昔涟用 x1–x4 SVG，其余主题统一命名） */
+const THEME_ICON_FILES: Record<string, { target: string; book: string; subjects: string; review: string }> = {
+  firefly: { target: 'f1.png', book: 'f2.gif', subjects: 'f3.gif', review: 'f4.jpeg' },
+  'sakura-pink': { target: 'x1.svg', book: 'x2.svg', subjects: 'x3.svg', review: 'x4.svg' },
+}
+
+const FALLBACK_ICONS = {
+  target: '/background/sky/icon_target_today.svg',
+  book: '/background/sky/icon_continue_book.svg',
+  subjects: '/background/sky/icon_subject_books.svg',
+  review: '/background/sky/icon_review_refresh.svg',
+}
+
+/** 功能区图标：有专属素材目录的主题用专属图标，默认主题（空串）回退到天空蓝 SVG */
+const featureIconSrc = computed(() => {
+  const theme = ui.colorTheme
+  const dir = THEME_ICON_DIRS[theme]
+  if (!dir) return FALLBACK_ICONS
+  const files = THEME_ICON_FILES[theme] ?? {
+    target: 'icon_target_today.png',
+    book: 'icon_continue_book.png',
+    subjects: 'icon_subject_books.png',
+    review: 'icon_review_refresh.png',
+  }
+  return {
+    target: `${dir}/${files.target}`,
+    book: `${dir}/${files.book}`,
+    subjects: `${dir}/${files.subjects}`,
+    review: `${dir}/${files.review}`,
+  }
+})
+
 onMounted(async () => {
   // 全屏分页滚动吸附挂在真正的滚动容器 html 上（仅首页挂载期间启用）
   document.documentElement.classList.add('home-snap')
@@ -143,7 +185,7 @@ function continuePractice(): void {
       <section class="section feature-section" @click="router.push('/catalog')">
         <div class="feature-inner feature-right">
           <div class="feature-visual">
-            <img class="feature-icon icon-target" src="/background/sky/icon_target_today.svg" alt="" draggable="false" />
+            <img class="feature-icon icon-target" :src="featureIconSrc.target" alt="" draggable="false" />
           </div>
           <div class="feature-body">
             <p class="section-tag">01</p>
@@ -186,7 +228,7 @@ function continuePractice(): void {
             <button class="enter-btn">继续刷题 →</button>
           </div>
           <div class="feature-visual">
-            <img class="feature-icon icon-book" src="/background/sky/icon_continue_book.svg" alt="" draggable="false" />
+            <img class="feature-icon icon-book" :src="featureIconSrc.book" alt="" draggable="false" />
           </div>
         </div>
       </section>
@@ -195,7 +237,7 @@ function continuePractice(): void {
       <section class="section feature-section" @click="router.push('/catalog')">
         <div class="feature-inner feature-right">
           <div class="feature-visual">
-            <img class="feature-icon icon-subjects" src="/background/sky/icon_subject_books.svg" alt="" draggable="false" />
+            <img class="feature-icon icon-subjects" :src="featureIconSrc.subjects" alt="" draggable="false" />
           </div>
           <div class="feature-body">
             <p class="section-tag">03</p>
@@ -227,7 +269,7 @@ function continuePractice(): void {
             <button class="enter-btn">开始复习 →</button>
           </div>
           <div class="feature-visual">
-            <img class="feature-icon icon-review" src="/background/sky/icon_review_refresh.svg" alt="" draggable="false" />
+            <img class="feature-icon icon-review" :src="featureIconSrc.review" alt="" draggable="false" />
           </div>
         </div>
       </section>
