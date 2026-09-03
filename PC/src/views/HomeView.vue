@@ -32,20 +32,18 @@ const streakDays = computed(() => stats.overview.streak_days ?? 0)
 const todayAttempts = computed(() => stats.overview.today_attempts ?? 0)
 const reviewCount = computed(() => review.remainingCount)
 
-/** 各主题的功能区专属图标目录（键与 ui store 的 ColorTheme 对应） */
-const THEME_ICON_DIRS: Record<string, string> = {
-  firefly: '/background/Firefly',
-  'warm-beige': '/background/warmbeige',
-  'starry-purple': '/background/starrypurple',
-  'mint-fresh': '/background/mintfresh',
-  'sky-blue': '/background/sky',
-  'sakura-pink': '/background/xilian',
-}
-
-/** 各主题图标文件名（Firefly 为混合格式，昔涟用 x1–x4 SVG，其余主题统一命名） */
-const THEME_ICON_FILES: Record<string, { target: string; book: string; subjects: string; review: string }> = {
-  firefly: { target: 'f1.png', book: 'f2.gif', subjects: 'f3.gif', review: 'f4.jpeg' },
-  'sakura-pink': { target: 'x1.svg', book: 'x2.svg', subjects: 'x3.svg', review: 'x4.svg' },
+/**
+ * 各主题功能区图标配置（键与 ui store 的 ColorTheme 对应）。
+ * files 省略时使用统一命名（icon_target_today / icon_continue_book / icon_subject_books / icon_review_refresh + ext）。
+ * 新增主题：在对应素材目录放好 4 张图标后，加一行 `'theme-key': { dir: '…', ext: 'png' }` 即可。
+ */
+const THEME_ICONS: Record<string, { dir: string; ext?: string; files?: { target: string; book: string; subjects: string; review: string } }> = {
+  firefly: { dir: '/background/Firefly', files: { target: 'f1.png', book: 'f2.gif', subjects: 'f3.gif', review: 'f4.jpeg' } },
+  'warm-beige': { dir: '/background/warmbeige', ext: 'png' },
+  'starry-purple': { dir: '/background/starrypurple', ext: 'png' },
+  'mint-fresh': { dir: '/background/mintfresh', ext: 'png' },
+  'sky-blue': { dir: '/background/sky', ext: 'svg' },
+  'sakura-pink': { dir: '/background/xilian', files: { target: 'x1.svg', book: 'x2.svg', subjects: 'x3.svg', review: 'x4.svg' } },
 }
 
 const FALLBACK_ICONS = {
@@ -57,20 +55,19 @@ const FALLBACK_ICONS = {
 
 /** 功能区图标：有专属素材目录的主题用专属图标，默认主题（空串）回退到天空蓝 SVG */
 const featureIconSrc = computed(() => {
-  const theme = ui.colorTheme
-  const dir = THEME_ICON_DIRS[theme]
-  if (!dir) return FALLBACK_ICONS
-  const files = THEME_ICON_FILES[theme] ?? {
-    target: 'icon_target_today.png',
-    book: 'icon_continue_book.png',
-    subjects: 'icon_subject_books.png',
-    review: 'icon_review_refresh.png',
+  const conf = THEME_ICONS[ui.colorTheme]
+  if (!conf) return FALLBACK_ICONS
+  const names = conf.files ?? {
+    target: `icon_target_today.${conf.ext ?? 'png'}`,
+    book: `icon_continue_book.${conf.ext ?? 'png'}`,
+    subjects: `icon_subject_books.${conf.ext ?? 'png'}`,
+    review: `icon_review_refresh.${conf.ext ?? 'png'}`,
   }
   return {
-    target: `${dir}/${files.target}`,
-    book: `${dir}/${files.book}`,
-    subjects: `${dir}/${files.subjects}`,
-    review: `${dir}/${files.review}`,
+    target: `${conf.dir}/${names.target}`,
+    book: `${conf.dir}/${names.book}`,
+    subjects: `${conf.dir}/${names.subjects}`,
+    review: `${conf.dir}/${names.review}`,
   }
 })
 

@@ -23,7 +23,10 @@ interface UiPersist {
   customBackgroundUrl?: string
 }
 
-/** 主题键改名迁移：深海蓝 → 天空蓝（2026-09 改造，旧存的 localStorage 值自动映射） */
+/**
+ * 主题键改名迁移表：旧键 → 新键（loadPersist 时自动映射旧 localStorage 值）。
+ * 主题重命名时在此追加一行即可，如 `'old-key': 'new-key'`。
+ */
 const THEME_KEY_MIGRATIONS: Record<string, ColorTheme> = { 'deep-ocean': 'sky-blue', 'morandi-green': 'firefly' }
 
 function loadPersist(): Partial<UiPersist> {
@@ -120,14 +123,17 @@ export const useUiStore = defineStore('ui', () => {
         const blob = await (await fetch(customBackgroundUrl.value)).blob()
         await saveBackground(blob)
         setCustomBackgroundUrl(URL.createObjectURL(blob))
-      } catch {
-        /* 迁移失败则本次会话继续用 base64，下次启动重试 */
+      } catch (err) {
+        // 迁移失败则本次会话继续用 base64，下次启动重试；打日志便于排查损坏数据
+        console.warn('[ui] 自定义背景 base64 → IndexedDB 迁移失败，将在下次启动重试', err)
       }
     })()
   } else if (saved.customBackground) {
     void loadBackground()
       .then((blob) => (blob ? setCustomBackgroundUrl(URL.createObjectURL(blob)) : undefined))
-      .catch(() => undefined)
+      .catch((err) => {
+        console.warn('[ui] IndexedDB 自定义背景读取失败，已回退默认背景', err)
+      })
   }
 
   watch(

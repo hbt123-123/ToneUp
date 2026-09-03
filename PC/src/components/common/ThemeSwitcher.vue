@@ -23,9 +23,13 @@ const processing = ref(false)
 
 /** 直接原样入库上限：≤10MB 不重编码，保留原始画质与 GIF 动画 */
 const MAX_STORE_BYTES = 10 * 1024 * 1024
+/** GIF 上限：Canvas 重编码会丢失动画帧，GIF 一律原样保存，只设更大的体积上限 */
+const MAX_GIF_STORE_BYTES = 50 * 1024 * 1024
 /** 超限重编码时的最长边与 JPEG 降质梯度 */
 const MAX_EDGE = 2560
 const ENCODE_QUALITIES = [0.85, 0.72, 0.6, 0.45, 0.3]
+/** 允许的图片扩展名（与 MIME 检查互补，防伪造 Content-Type） */
+const ALLOWED_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|avif|svg)$/i
 
 function onSelect(value: string) {
   ui.setColorTheme(value as ColorTheme)
@@ -40,7 +44,7 @@ async function onFileChange(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  if (!file.type.startsWith('image/')) {
+  if (!file.type.startsWith('image/') || !ALLOWED_EXTENSIONS.test(file.name)) {
     message.error('请选择图片文件')
     return
   }
@@ -87,9 +91,14 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
 /**
  * 放宽后的处理规则：
  * - 不限分辨率与宽高比，≤10MB 的图直接原样保存（保留 GIF 动画、透明通道等）
- * - 超过 10MB 才重编码：先限制最长边 2560，仍超限则逐级降质、再逐级缩边
+ * - GIF 走 Canvas 重编码会丢失动画帧，一律原样保存（上限 50MB）
+ * - 其他格式超 10MB 才重编码：先限制最长边 2560，仍超限则逐级降质、再逐级缩边
  */
 async function processImage(file: File): Promise<Blob> {
+  if (file.type === 'image/gif' || /\.gif$/i.test(file.name)) {
+    if (file.size <= MAX_GIF_STORE_BYTES) return file
+    throw new Error('GIF 文件过大（上限 50MB），无法保留动画压缩，请换一张')
+  }
   if (file.size <= MAX_STORE_BYTES) return file
 
   const img = await loadImage(file)

@@ -48,7 +48,7 @@ html[data-theme="firefly"] .user-btn {
 html[data-theme="firefly"] .user-btn:hover {
   background: var(--tu-accent-hover-surface);
   border-color: var(--tu-gradient-accent);
-  box-shadow: 0 0 0 3px var(--tu-accent-glow), 0 2px 10px rgba(139, 195, 74, 0.25);
+  box-shadow: 0 0 0 3px var(--tu-accent-glow), 0 2px 10px var(--tu-accent-glow);
   transform: translateY(-1px);
 }
 

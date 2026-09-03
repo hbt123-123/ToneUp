@@ -12,17 +12,26 @@ const DB_VERSION = 1
 const STORE = 'backgrounds'
 const KEY = 'custom-hero'
 
+/** 复用同一连接：openDb 只执行一次，避免每次操作都重建数据库连接 */
+let dbPromise: Promise<IDBDatabase> | null = null
+
 function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) {
-        req.result.createObjectStore(STORE)
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION)
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(STORE)) {
+          req.result.createObjectStore(STORE)
+        }
       }
-    }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error ?? new Error('IndexedDB 打开失败'))
-  })
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => {
+        dbPromise = null // 失败后允许下次重试
+        reject(req.error ?? new Error('IndexedDB 打开失败'))
+      }
+    })
+  }
+  return dbPromise
 }
 
 async function withStore<T>(
@@ -30,15 +39,11 @@ async function withStore<T>(
   fn: (store: IDBObjectStore) => IDBRequest<T>,
 ): Promise<T> {
   const db = await openDb()
-  try {
-    return await new Promise<T>((resolve, reject) => {
-      const req = fn(db.transaction(STORE, mode).objectStore(STORE))
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error ?? new Error('IndexedDB 操作失败'))
-    })
-  } finally {
-    db.close()
-  }
+  return new Promise<T>((resolve, reject) => {
+    const req = fn(db.transaction(STORE, mode).objectStore(STORE))
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB 操作失败'))
+  })
 }
 
 /** 保存自定义背景图（覆盖旧图） */
