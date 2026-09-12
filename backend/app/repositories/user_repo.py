@@ -6,9 +6,10 @@
 """
 
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Iterator, Optional
+from typing import Iterator, List, Optional
 
 __all__ = [
     "UserExistsError",
@@ -26,6 +27,16 @@ __all__ = [
     "ai_feedback_create",
     "ai_feedback_set_status",
     "ai_feedback_get",
+    "notes_list_public",
+    "notes_list_mine",
+    "note_increment_likes",
+    "note_decrement_likes",
+    "note_is_liked_by",
+    "notes_get_by_id",
+    "notes_update",
+    "notes_delete",
+    "note_add_like",
+    "note_remove_like",
 ]
 
 
@@ -254,18 +265,18 @@ def notes_upsert(
     note_text: str,
     now_iso: str,
 ) -> None:
-    """笔记 upsert：存在则整段替换文本并刷新 updated_at。"""
+    note_id = int(uuid.uuid4().int % (2**31))
     with user_connection(db_path) as conn:
         with conn:
             conn.execute(
                 """
-                INSERT INTO user_notes (user_id, bank_id, question_id, note_text, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO user_notes (id, user_id, bank_id, question_id, note_text, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (user_id, bank_id, question_id)
                 DO UPDATE SET note_text = excluded.note_text,
                               updated_at = excluded.updated_at
                 """,
-                (user_id, bank_id, question_id, note_text, now_iso),
+                (note_id, user_id, bank_id, question_id, note_text, now_iso),
             )
 
 
@@ -346,3 +357,166 @@ def ai_feedback_get(db_path: str, feedback_id: str) -> Optional[sqlite3.Row]:
             "SELECT * FROM ai_feedback WHERE id = ?",
             (feedback_id,),
         ).fetchone()
+
+
+def notes_list_public(
+    db_path: str,
+    bank_id: str,
+    question_id: int,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[List[sqlite3.Row], int]:
+    with user_connection(db_path) as conn:
+        total = conn.execute(
+            """
+            SELECT COUNT(*) FROM user_notes
+            WHERE bank_id = ? AND question_id = ? AND visibility = 'public'
+            """,
+            (bank_id, question_id),
+        ).fetchone()[0]
+        offset = (page - 1) * page_size
+        rows = conn.execute(
+            """
+            SELECT * FROM user_notes
+            WHERE bank_id = ? AND question_id = ? AND visibility = 'public'
+            ORDER BY updated_at DESC LIMIT ? OFFSET ?
+            """,
+            (bank_id, question_id, page_size, offset),
+        ).fetchall()
+    return rows, total
+
+
+def notes_list_mine(
+    db_path: str,
+    user_id: int,
+    bank_id: str | None = None,
+    question_id: int | None = None,
+) -> Optional[sqlite3.Row]:
+    conditions: list[str] = ["user_id = ?"]
+    args: list[object] = [user_id]
+    if bank_id is not None:
+        conditions.append("bank_id = ?")
+        args.append(bank_id)
+    if question_id is not None:
+        conditions.append("question_id = ?")
+        args.append(question_id)
+    where_sql = " AND ".join(conditions)
+    with user_connection(db_path) as conn:
+        return conn.execute(
+            f"SELECT * FROM user_notes WHERE {where_sql}",
+            args,
+        ).fetchone()
+
+
+def note_increment_likes(db_path: str, note_id: int) -> None:
+    with user_connection(db_path) as conn:
+        with conn:
+            conn.execute(
+                "UPDATE user_notes SET like_count = like_count + 1 WHERE id = ?",
+                (note_id,),
+            )
+
+
+def note_decrement_likes(db_path: str, note_id: int) -> None:
+    with user_connection(db_path) as conn:
+        with conn:
+            conn.execute(
+                "UPDATE user_notes SET like_count = MAX(0, like_count - 1) WHERE id = ?",
+                (note_id,),
+            )
+
+
+def note_is_liked_by(db_path: str, note_id: int, user_id: int) -> bool:
+    with user_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM note_likes WHERE note_id = ? AND user_id = ?",
+            (note_id, user_id),
+        ).fetchone()
+    return row is not None
+
+
+def notes_get_by_id(db_path: str, note_id: int) -> Optional[sqlite3.Row]:
+    """按 note id 查询单条笔记，无则 None。"""
+    with user_connection(db_path) as conn:
+        return conn.execute(
+            "SELECT * FROM user_notes WHERE id = ?",
+            (note_id,),
+        ).fetchone()
+
+
+def notes_update(
+    db_path: str,
+    note_id: int,
+    user_id: int,
+    note_text: Optional[str] = None,
+    visibility: Optional[str] = None,
+    now_iso: Optional[str] = None,
+) -> bool:
+    """更新笔记内容/可见性，仅限本人。返回是否生效。"""
+    parts: list[str] = []
+    params: list[object] = []
+    if note_text is not None:
+        parts.append("note_text = ?")
+        params.append(note_text)
+    if visibility is not None:
+        parts.append("visibility = ?")
+        params.append(visibility)
+    if now_iso is not None:
+        parts.append("updated_at = ?")
+        params.append(now_iso)
+    if not parts:
+        return True
+    params.extend([note_id, user_id])
+    with user_connection(db_path) as conn:
+        with conn:
+            cur = conn.execute(
+                f"UPDATE user_notes SET {', '.join(parts)} WHERE id = ? AND user_id = ?",
+                params,
+            )
+    return cur.rowcount == 1
+
+
+def notes_delete(db_path: str, note_id: int, user_id: int) -> bool:
+    """删除笔记，仅限本人。返回是否生效。"""
+    with user_connection(db_path) as conn:
+        with conn:
+            cur = conn.execute(
+                "DELETE FROM user_notes WHERE id = ? AND user_id = ?",
+                (note_id, user_id),
+            )
+    return cur.rowcount == 1
+
+
+def note_add_like(db_path: str, note_id: int, user_id: int, now_iso: str) -> bool:
+    """点赞笔记，返回是否成功（重复返回 False）。"""
+    with user_connection(db_path) as conn:
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT INTO note_likes (note_id, user_id, created_at) VALUES (?, ?, ?)",
+                    (note_id, user_id, now_iso),
+                )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def note_remove_like(db_path: str, note_id: int, user_id: int) -> bool:
+    """取消点赞，返回是否成功（未点赞返回 False）。"""
+    with user_connection(db_path) as conn:
+        with conn:
+            cur = conn.execute(
+                "DELETE FROM note_likes WHERE note_id = ? AND user_id = ?",
+                (note_id, user_id),
+            )
+    return cur.rowcount == 1
+
+
+def note_get_like_count(db_path: str, note_id: int) -> int:
+    """获取笔记当前点赞数。"""
+    with user_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT like_count FROM user_notes WHERE id = ?",
+            (note_id,),
+        ).fetchone()
+    return row["like_count"] if row else 0

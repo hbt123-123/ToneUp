@@ -36,6 +36,7 @@ class NotesRepository @Inject constructor(
 @Singleton
 class WrongbookRepository @Inject constructor(
     private val wrongbookApi: com.toneup.app.data.remote.api.WrongbookApi,
+    private val wrongQuestionApi: com.toneup.app.data.remote.api.WrongQuestionApi,
     private val jsonProvider: JsonProvider
 ) {
     suspend fun wrongbook(
@@ -47,4 +48,10 @@ class WrongbookRepository @Inject constructor(
         EnvelopeUnwrapper.unwrap(jsonProvider.json) {
             wrongbookApi.wrongbook(bankId, subjectId, page, pageSize)
         }
+
+    suspend fun removeWrongQuestion(id: Long) {
+        EnvelopeUnwrapper.unwrapUnit(jsonProvider.json) {
+            wrongQuestionApi.removeWrongQuestion(id)
+        }
+    }
 }

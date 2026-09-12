@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,19 +23,28 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -45,19 +53,23 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,9 +84,19 @@ import com.toneup.app.ui.components.performHaptic
 import com.toneup.app.ui.components.question.QuestionContext
 import com.toneup.app.ui.components.question.RendererRegistry
 import com.toneup.app.ui.feature.practice.renderers.FallbackRenderer
+import com.toneup.app.ui.feature.practice.renderers.GradingResultBar
+import com.toneup.app.domain.logic.CorrectAnswerParser
+import com.toneup.app.domain.model.AnswerValue
+import com.toneup.app.ui.theme.CorrectGreen
+import com.toneup.app.ui.theme.WrongRed
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import kotlinx.coroutines.launch
 
 /**
- * 刷题页（PR）：沉浸模式、极简顶栏、题型分发渲染、底部操作栏、
+ * 刷题页（PR）：沉浸模式、新顶栏（返回+计时+重做+设置）、
+ * 新底栏（答题卡+交卷+答案+收藏+翻页）、题型分发渲染、
  * 边缘手势切题（共享轴 X）、题号面板、待同步横幅。
  */
 @Composable
@@ -82,14 +104,22 @@ fun PracticeScreen(
     onExit: () -> Unit,
     onOpenAnalysis: (Long) -> Unit,
     onOpenReviewCheck: () -> Unit = {},
+    onOpenSummary: () -> Unit = {},
     initialIndex: Int = -1,
-    viewModel: PracticeViewModel = hiltViewModel()
+    viewModel: PracticeViewModel = hiltViewModel(),
+    featureApis: PracticeFeatureApis? = null
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val preferences = LocalToneUpPreferences.current
     val haptics = rememberHapticsPerformer(preferences.hapticsEnabled)
     var showGridPanel by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
+    var showSubmitDialog by remember { mutableStateOf(false) }
+
+    // 收藏状态
+    val isFavorited by viewModel.isFavorited.collectAsStateWithLifecycle()
+    // 背题模式（显示答案）状态
+    val showAnswerMode by viewModel.showAnswer.collectAsStateWithLifecycle()
 
     ImmersiveModeEffect()
 
@@ -103,51 +133,24 @@ fun PracticeScreen(
     val slot = state.slots.getOrNull(state.currentIndex) ?: return
 
     Column(Modifier.fillMaxSize()) {
-        // 顶部极简栏（FR-PR-01）
-        Row(
-            modifier = Modifier
-                .statusBarsPadding()
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = {
+        // ===== 新顶栏 =====
+        EnhancedTopBar(
+            onBack = {
                 if (slot.status is PracticeStatus.Editing) showExitDialog = true else onExit()
-            }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出刷题")
-            }
-            Text(
-                text = buildString {
-                    append(if (state.mode == "review") "今日复习 · " else "")
-                    append("第 ${state.currentIndex + 1}/")
-                    append(if (state.knownTotal > 0) state.knownTotal.toString() else "?")
-                    append(" 题 · 已答${state.answeredCount}")
-                },
-                style = MaterialTheme.typography.labelLarge
-            )
-            Spacer(Modifier.size(10.dp))
-            LinearProgressIndicator(
-                progress = {
-                    if (state.knownTotal > 0) {
-                        ((state.currentIndex + 1f) / state.knownTotal).coerceIn(0f, 1f)
-                    } else 0f
-                },
-                modifier = Modifier.weight(1f).height(4.dp)
-            )
-            Spacer(Modifier.size(10.dp))
-            IconButton(
-                onClick = {
-                    viewModel.toggleMark(state.currentIndex)
-                    haptics(Haptic.LIGHT_IMPACT)
-                }
-            ) {
-                Icon(
-                    imageVector = if (slot.marked) Icons.Filled.Star else Icons.Outlined.StarOutline,
-                    contentDescription = if (slot.marked) "取消标记" else "标记本题",
-                    tint = if (slot.marked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-                )
-            }
-        }
+            },
+            elapsedSeconds = viewModel.elapsedSeconds.collectAsStateWithLifecycle().value,
+            onRedo = {
+                viewModel.redoQuestion()
+                haptics(Haptic.LIGHT_IMPACT)
+            },
+            onSettings = { /* TODO: 设置入口 */ },
+            questionTypeLabel = slot.question?.let { resolveTypeLabel(it.typeCode) },
+            currentIndex = state.currentIndex,
+            knownTotal = state.knownTotal,
+            progress = if (state.knownTotal > 0) {
+                ((state.currentIndex + 1f) / state.knownTotal).coerceIn(0f, 1f)
+            } else 0f
+        )
 
         // 待同步横幅（§8.3）
         if (state.pendingSyncCount > 0) {
@@ -183,7 +186,8 @@ fun PracticeScreen(
                     state = state,
                     viewModel = viewModel,
                     onOpenAnalysis = onOpenAnalysis,
-                    onRetryLoad = { viewModel.retryLoad(state.currentIndex) }
+                    onRetryLoad = { viewModel.retryLoad(state.currentIndex) },
+                    featureApis = featureApis
                 )
             } else {
                 // 普通单题
@@ -202,39 +206,65 @@ fun PracticeScreen(
                     },
                     label = "question"
                 ) { index ->
-                    QuestionBody(
-                        index = index,
-                        state = state,
-                        viewModel = viewModel,
-                        onOpenAnalysis = onOpenAnalysis,
-                        onRetryLoad = { viewModel.retryLoad(index) },
-                        onSkip = { viewModel.loadQuestion(index + 1) }
-                    )
+                    Column(Modifier.fillMaxSize()) {
+                        // 背题模式：在题干下方直接展示答案
+                        if (showAnswerMode) {
+                            AnswerModeOverlay(
+                                slot = state.slots.getOrNull(index),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        QuestionBody(
+                            index = index,
+                            state = state,
+                            viewModel = viewModel,
+                            onOpenAnalysis = onOpenAnalysis,
+                            onRetryLoad = { viewModel.retryLoad(index) },
+                            onSkip = { viewModel.loadQuestion(index + 1) },
+                            showAnswerMode = showAnswerMode,
+                            featureApis = featureApis
+                        )
+                    }
                 }
             }
         }
 
-        BottomActionBar(
-            slot = slot,
+        // ===== 新底栏 =====
+        EnhancedBottomBar(
             canPrev = state.currentIndex > 0,
             hasNext = canGoNext,
-            onPrev = { viewModel.loadQuestion(state.currentIndex - 1) },
-            onNext = { viewModel.loadQuestion(state.currentIndex + 1) },
-            onSubmit = { haptics(Haptic.LIGHT_IMPACT); viewModel.submitCurrent(state.currentIndex) },
-            onRetrySubmit = { viewModel.retrySubmit(state.currentIndex) },
+            onPrev = {
+                viewModel.loadQuestion(state.currentIndex - 1)
+                haptics(Haptic.LIGHT_IMPACT)
+            },
+            onNext = {
+                viewModel.loadQuestion(state.currentIndex + 1)
+                haptics(Haptic.LIGHT_IMPACT)
+            },
             onOpenGrid = { showGridPanel = true },
-            onOpenReviewCheck = onOpenReviewCheck,
-            attemptId = (slot.status as? PracticeStatus.Submitted)?.attemptId,
-            onOpenAnalysis = onOpenAnalysis
+            onSubmit = { showSubmitDialog = true },
+            showAnswerMode = showAnswerMode,
+            onToggleAnswerMode = {
+                viewModel.toggleAnswerMode()
+                haptics(Haptic.LIGHT_IMPACT)
+            },
+            isFavorited = isFavorited,
+            onToggleFavorite = {
+                viewModel.toggleFavorite()
+                haptics(Haptic.LIGHT_IMPACT)
+            }
         )
     }
 
+    // ===== 题号面板 =====
     if (showGridPanel) {
         QuestionGridPanel(
             slots = state.slots,
             currentIndex = state.currentIndex,
             knownTotal = state.knownTotal,
             hasMore = state.hasMore,
+            favoritedIds = state.favoritedIds,
             onSelect = { index ->
                 showGridPanel = false
                 viewModel.loadQuestion(index)
@@ -243,6 +273,7 @@ fun PracticeScreen(
         )
     }
 
+    // ===== 退出确认对话框 =====
     if (showExitDialog) {
         AlertDialog(
             onDismissRequest = { showExitDialog = false },
@@ -259,7 +290,329 @@ fun PracticeScreen(
             }
         )
     }
+
+    // ===== 交卷确认对话框 =====
+    if (showSubmitDialog) {
+        val stats = viewModel.submitPaperStats()
+        SubmitConfirmDialog(
+            stats = stats,
+            onConfirm = {
+                showSubmitDialog = false
+                onOpenSummary()
+            },
+            onDismiss = { showSubmitDialog = false }
+        )
+    }
 }
+
+// ===== 顶栏 =====
+
+@Composable
+private fun EnhancedTopBar(
+    onBack: () -> Unit,
+    elapsedSeconds: Int,
+    onRedo: () -> Unit,
+    onSettings: () -> Unit,
+    questionTypeLabel: String?,
+    currentIndex: Int,
+    knownTotal: Int,
+    progress: Float
+) {
+    Column(
+        modifier = Modifier
+            .statusBarsPadding()
+            .fillMaxWidth()
+    ) {
+        // 第一行：返回 | 计时 | 重做 | 设置
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出刷题")
+            }
+
+            // 计时器 HH:mm:ss
+            Text(
+                text = formatElapsed(elapsedSeconds),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            Spacer(Modifier.weight(1f))
+
+            // 重做按钮
+            TextButton(onClick = onRedo) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = "重做",
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("重做", style = MaterialTheme.typography.labelMedium)
+            }
+
+            // 设置齿轮
+            IconButton(onClick = onSettings) {
+                Icon(Icons.Filled.Settings, contentDescription = "设置")
+            }
+        }
+
+        // 第二行：题型标签 + 当前题号/总数
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (questionTypeLabel != null) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    Text(
+                        text = questionTypeLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+            Text(
+                text = "当前题号 ${currentIndex + 1}/" +
+                    if (knownTotal > 0) knownTotal.toString() else "?",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        // 进度条
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .padding(horizontal = 16.dp)
+        )
+    }
+}
+
+/** 将秒数格式化为 HH:mm:ss */
+private fun formatElapsed(seconds: Int): String {
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return "%02d:%02d:%02d".format(h, m, s)
+}
+
+/** 根据题型 code 返回中文标签 */
+private fun resolveTypeLabel(typeCode: String): String = when (typeCode) {
+    QuestionType.Single.typeCode -> "单选题"
+    QuestionType.Multi.typeCode -> "多选题"
+    QuestionType.Judge.typeCode -> "判断题"
+    QuestionType.Cloze.typeCode -> "完形填空"
+    QuestionType.Reading.typeCode -> "阅读理解"
+    QuestionType.Ordering.typeCode -> "排序题"
+    QuestionDto.TYPE_ESSAY -> "主观题"
+    else -> "其他"
+}
+
+// ===== 底栏 =====
+
+@Composable
+private fun EnhancedBottomBar(
+    canPrev: Boolean,
+    hasNext: Boolean,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onOpenGrid: () -> Unit,
+    onSubmit: () -> Unit,
+    showAnswerMode: Boolean,
+    onToggleAnswerMode: () -> Unit,
+    isFavorited: Boolean,
+    onToggleFavorite: () -> Unit
+) {
+    Surface(
+        tonalElevation = 3.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+        ) {
+            // 上一行：功能按钮（答题卡 | 交卷 | 答案 | 收藏）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BottomToolButton(
+                    icon = Icons.Filled.AccountBox,
+                    label = "答题卡",
+                    onClick = onOpenGrid
+                )
+                BottomToolButton(
+                    icon = Icons.Filled.DateRange,
+                    label = "交卷",
+                    onClick = onSubmit
+                )
+                BottomToolButton(
+                    icon = Icons.Filled.Visibility,
+                    label = "答案",
+                    onClick = onToggleAnswerMode,
+                    tint = if (showAnswerMode) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface
+                )
+                BottomToolButton(
+                    icon = if (isFavorited) Icons.Filled.Star else Icons.Outlined.StarOutline,
+                    label = "收藏",
+                    onClick = onToggleFavorite,
+                    tint = if (isFavorited) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            // 下一行：上一题 | 下一题
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedButton(
+                    onClick = onPrev,
+                    enabled = canPrev,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Text("上一题")
+                }
+                OutlinedButton(
+                    onClick = onNext,
+                    enabled = hasNext,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                ) {
+                    Text("下一题")
+                }
+            }
+        }
+    }
+}
+
+/** 底栏单个工具按钮（图标+文字） */
+@Composable
+private fun BottomToolButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 4.dp)
+    ) {
+        IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+            Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = tint
+        )
+    }
+}
+
+// ===== 交卷确认对话框 =====
+
+@Composable
+private fun SubmitConfirmDialog(
+    stats: PaperStats,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("确认交卷") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "已答 ${stats.answeredCount} / 未答 ${stats.unansweredCount} / 标记 ${stats.markedCount}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (stats.unansweredCount > 0) {
+                    Text(
+                        text = "还有${stats.unansweredCount}题未作答，确定交卷吗？",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("确认交卷") }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+// ===== 背题模式答案遮层 =====
+
+@Composable
+private fun AnswerModeOverlay(
+    slot: QuestionSlot?,
+    modifier: Modifier = Modifier
+) {
+    val question = slot?.question
+    if (question == null || slot.status is PracticeStatus.Loading) return
+
+    val answerText = question.answerText?.trim().orEmpty()
+    if (answerText.isEmpty()) return
+
+    Surface(
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text(
+                    text = "参考答案",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+                Text(
+                    text = answerText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+// ===== 题目主体 =====
 
 /** 单题主体：loading 骨架 / error 重试 / 渲染器分发（FR-PR-05） */
 @Composable
@@ -269,7 +622,9 @@ fun QuestionBody(
     viewModel: PracticeViewModel,
     onOpenAnalysis: (Long) -> Unit,
     onRetryLoad: () -> Unit,
-    onSkip: () -> Unit
+    onSkip: () -> Unit,
+    showAnswerMode: Boolean = false,
+    featureApis: PracticeFeatureApis? = null
 ) {
     val slot = state.slots.getOrNull(index) ?: return
     Column(
@@ -289,8 +644,108 @@ fun QuestionBody(
                 val question = slot.question
                 if (question != null) {
                     FormulaText(text = question.content, modifier = Modifier.fillMaxWidth())
+
+                    if (slot.status is PracticeStatus.Submitted) {
+                        val isCorrect = slot.answer != null && run {
+                            val myLabels = when (val a = slot.answer) {
+                                is AnswerValue.Choice -> listOf(a.label)
+                                is AnswerValue.MultiChoice -> a.labels
+                                else -> emptyList()
+                            }
+                            val correctLabels = when (question.typeCode) {
+                                QuestionType.Multi.typeCode -> CorrectAnswerParser.multiLabels(question.answerText).toSet()
+                                else -> setOfNotNull(CorrectAnswerParser.singleLabel(question.answerText))
+                            }
+                            myLabels.isNotEmpty() && myLabels.all { it in correctLabels } &&
+                                correctLabels.all { it in myLabels }
+                        }
+                        val myAnswer = when (val a = slot.answer) {
+                            is AnswerValue.Choice -> a.label
+                            is AnswerValue.MultiChoice -> a.labels.joinToString(", ")
+                            else -> ""
+                        }
+                        val correctAnswer = question.answerText?.trim().orEmpty()
+                        GradingResultBar(
+                            isCorrect = isCorrect,
+                            myAnswer = myAnswer,
+                            correctAnswer = correctAnswer
+                        )
+
+                        if (!isCorrect && featureApis != null) {
+                            val scope = rememberCoroutineScope()
+                            val snackbarHostState = remember { SnackbarHostState() }
+                            var removed by remember { mutableStateOf(false) }
+                            Spacer(Modifier.height(8.dp))
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = if (removed) "已从错题本移除" else "此题已加入错题本",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                    if (!removed) {
+                                        TextButton(onClick = {
+                                            scope.launch {
+                                                try {
+                                                    featureApis.wrongQuestionApi.removeWrongQuestion(question.questionId)
+                                                    removed = true
+                                                    val result = snackbarHostState.showSnackbar(
+                                                        message = "已移除",
+                                                        actionLabel = "撤销",
+                                                        duration = SnackbarDuration.Short
+                                                    )
+                                                    if (result == SnackbarResult.ActionPerformed) {
+                                                        removed = false
+                                                    }
+                                                } catch (_: Exception) { }
+                                            }
+                                        }) {
+                                            Text("⊗ 移除错题本")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (featureApis != null) {
+                            Spacer(Modifier.height(8.dp))
+                            FeedbackForm(
+                                bankId = question.bankId,
+                                questionId = question.questionId,
+                                feedbackApi = featureApis.feedbackApi,
+                                onSubmit = { },
+                                onDismiss = { }
+                            )
+                        }
+
+                        if (featureApis != null) {
+                            Spacer(Modifier.height(12.dp))
+                            NotesSharePanel(
+                                questionId = question.questionId,
+                                bankId = question.bankId,
+                                notesSharedApi = featureApis.notesSharedApi,
+                                myNoteText = "",
+                                myNoteVisibility = false,
+                                onMyNoteVisibilityChange = { },
+                                onMyNoteSave = { }
+                            )
+                        }
+                    }
+
                     val renderer = RendererRegistry.rendererFor(question.typeCode)
-                    val questionContext = buildContext(question, slot, viewModel, index, onSkip)
+                    val questionContext = buildContext(
+                        question, slot, viewModel, index, onSkip, showAnswerMode
+                    )
                     if (renderer != null) {
                         renderer(questionContext)
                     } else {
@@ -319,7 +774,8 @@ fun ReadingGroupBody(
     state: PracticeUiState,
     viewModel: PracticeViewModel,
     onOpenAnalysis: (Long) -> Unit,
-    onRetryLoad: () -> Unit
+    onRetryLoad: () -> Unit,
+    featureApis: PracticeFeatureApis? = null
 ) {
     val slot = state.slots.getOrNull(state.currentIndex) ?: return
     val question = slot.question ?: return
@@ -400,7 +856,8 @@ fun ReadingGroupBody(
                 onSkip = {
                     val next = passageQuestions.getOrNull(currentSubIndex + 1)
                     if (next != null) viewModel.loadQuestion(state.slots.indexOf(next))
-                }
+                },
+                featureApis = featureApis
             )
         }
     }
@@ -411,12 +868,13 @@ private fun buildContext(
     slot: QuestionSlot,
     viewModel: PracticeViewModel,
     index: Int,
-    onSkip: () -> Unit
+    onSkip: () -> Unit,
+    showAnswerMode: Boolean = false
 ): QuestionContext = QuestionContext(
     question = question,
     answer = slot.answer,
-    readonly = slot.status is PracticeStatus.Submitted,
-    disabled = slot.status == PracticeStatus.Submitting,
+    readonly = slot.status is PracticeStatus.Submitted || showAnswerMode,
+    disabled = slot.status == PracticeStatus.Submitting || showAnswerMode,
     showAnswer = slot.status is PracticeStatus.Submitted && question.typeCode in OBJECTIVE_TYPES,
     showAnalysis = slot.status is PracticeStatus.Submitted,
     onAnswerChange = { viewModel.onAnswerChange(index, it) },
@@ -435,7 +893,7 @@ private val OBJECTIVE_TYPES = setOf(
     QuestionType.Ordering.typeCode
 )
 
-/** FR-PR-09 题号面板：已答/未答/已标记三态着色 + 未答筛选由列表顺序体现 */
+/** FR-PR-09 题号面板：6 态着色 + 图例 + 筛选 + 收藏星标 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuestionGridPanel(
@@ -443,47 +901,174 @@ fun QuestionGridPanel(
     currentIndex: Int,
     knownTotal: Int,
     hasMore: Boolean,
+    favoritedIds: Set<Long> = emptySet(),
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var activeFilter by remember { mutableStateOf(GridFilter.All) }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(6),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.heightIn(max = 380.dp).padding(bottom = 24.dp)
+        Column(
+            modifier = Modifier
+                .padding(bottom = 24.dp)
+                .navigationBarsPadding()
         ) {
-            // 分页模式下展示未装载的题号（含 hasMore 时的“更多”占位），点击由 ensureSlot 装载
-            val panelCount = maxOf(slots.size, if (knownTotal > 0) knownTotal else 0) +
-                if (hasMore) 1 else 0
-            items(panelCount) { index ->
-                val slotState = slots.getOrNull(index)
-                val answered = slotState?.answer?.isEmpty == false ||
-                    slotState?.status is PracticeStatus.Submitted
-                Surface(
-                    shape = CircleShape,
-                    color = when {
+            // 六态图例
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LegendItem(color = MaterialTheme.colorScheme.outline, label = "当前")
+                LegendItem(color = MaterialTheme.colorScheme.primaryContainer, label = "已答")
+                LegendItem(color = MaterialTheme.colorScheme.surfaceVariant, label = "未答")
+                LegendItem(color = CorrectGreen, label = "答对")
+                LegendItem(color = WrongRed, label = "答错")
+                LegendItemStar(label = "已收藏")
+            }
+
+            // 筛选 Chips
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                GridFilter.entries.forEach { filter ->
+                    FilterChip(
+                        selected = activeFilter == filter,
+                        onClick = { activeFilter = filter },
+                        label = { Text(filter.label, style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+            }
+
+            // 题号网格
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(6),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.heightIn(max = 340.dp)
+            ) {
+                val panelCount = maxOf(slots.size, if (knownTotal > 0) knownTotal else 0) +
+                    if (hasMore) 1 else 0
+                items(panelCount) { index ->
+                    val slotState = slots.getOrNull(index)
+                    val answered = slotState?.answer?.isEmpty == false ||
+                        slotState?.status is PracticeStatus.Submitted
+                    val isFavorited = slotState?.question?.questionId?.let { it in favoritedIds } == true
+                    val correct = slotState?.let { isQuestionCorrect(it) }
+
+                    // 筛选逻辑
+                    val matchesFilter = when (activeFilter) {
+                        GridFilter.All -> true
+                        GridFilter.Wrong -> correct == false
+                        GridFilter.Favorited -> isFavorited
+                        GridFilter.Unanswered -> !answered
+                    }
+                    if (!matchesFilter) return@items
+
+                    val bgColor = when {
+                        correct == true -> CorrectGreen
+                        correct == false -> WrongRed
                         slotState?.marked == true -> MaterialTheme.colorScheme.tertiaryContainer
                         answered -> MaterialTheme.colorScheme.primaryContainer
                         else -> MaterialTheme.colorScheme.surfaceVariant
-                    },
-                    modifier = Modifier.size(40.dp),
-                    onClick = { onSelect(index) },
-                    border = if (index == currentIndex) {
-                        BorderStroke(2.dp, MaterialTheme.colorScheme.outline)
-                    } else null
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            if (slotState == null) "+" else "${index + 1}",
-                            style = MaterialTheme.typography.labelLarge
-                        )
+                    }
+                    val textColor = when {
+                        correct == true || correct == false -> MaterialTheme.colorScheme.surface
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = bgColor,
+                        modifier = Modifier.size(40.dp),
+                        onClick = { onSelect(index) },
+                        border = if (index == currentIndex) {
+                            BorderStroke(2.dp, MaterialTheme.colorScheme.outline)
+                        } else null
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                if (slotState == null) "+" else "${index + 1}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = textColor
+                            )
+                            if (isFavorited) {
+                                Icon(
+                                    imageVector = Icons.Filled.Star,
+                                    contentDescription = "已收藏",
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(12.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/** 图例：纯色圆点 + 标签 */
+@Composable
+private fun LegendItem(color: androidx.compose.ui.graphics.Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            shape = CircleShape,
+            color = color,
+            modifier = Modifier.size(10.dp)
+        ) {}
+        Spacer(Modifier.width(3.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** 图例：星标圆点 + 标签 */
+@Composable
+private fun LegendItemStar(label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = Icons.Filled.Star,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.size(10.dp)
+        )
+        Spacer(Modifier.width(3.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** 判断题目是否答对 */
+private fun isQuestionCorrect(slot: QuestionSlot): Boolean {
+    val question = slot.question ?: return false
+    if (slot.status !is PracticeStatus.Submitted) return false
+    val answer = slot.answer ?: return false
+    val myLabels = when (answer) {
+        is AnswerValue.Choice -> listOf(answer.label)
+        is AnswerValue.MultiChoice -> answer.labels
+        else -> return false
+    }
+    if (myLabels.isEmpty()) return false
+    val correctLabels = when (question.typeCode) {
+        QuestionType.Multi.typeCode -> CorrectAnswerParser.multiLabels(question.answerText).toSet()
+        else -> setOfNotNull(CorrectAnswerParser.singleLabel(question.answerText))
+    }
+    return myLabels.all { it in correctLabels } && correctLabels.all { it in myLabels }
+}
+
+/** 筛选枚举 */
+private enum class GridFilter(val label: String) {
+    All("全部"),
+    Wrong("只看错题"),
+    Favorited("只看收藏"),
+    Unanswered("只看未答")
 }
 
 /**

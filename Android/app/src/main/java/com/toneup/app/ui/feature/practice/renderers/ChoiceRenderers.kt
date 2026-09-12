@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -58,6 +60,19 @@ fun MultiRenderer(context: QuestionContext) {
     val correctLabels = CorrectAnswerParser.multiLabels(context.question.answerText).toSet()
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            modifier = Modifier.padding(bottom = 2.dp)
+        ) {
+            Text(
+                text = "多选",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
+
         options.forEach { option ->
             OptionCard(
                 option = option,
@@ -74,7 +89,7 @@ fun MultiRenderer(context: QuestionContext) {
                         AnswerValue.MultiChoice(next.sorted())
                     )
                 },
-                multiSelectCounter = selected.size
+                multiSelectMode = true
             )
         }
 
@@ -90,9 +105,9 @@ fun MultiRenderer(context: QuestionContext) {
             Spacer(Modifier.padding(horizontal = 8.dp))
             Button(
                 onClick = context.onSubmitRequest,
-                enabled = !context.readonly && !context.disabled
+                enabled = !context.readonly && !context.disabled && selected.isNotEmpty()
             ) {
-                Text("确认本组选择")
+                Text("提交")
             }
         }
     }

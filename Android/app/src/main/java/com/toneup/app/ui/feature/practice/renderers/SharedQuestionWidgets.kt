@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +21,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -53,7 +56,7 @@ fun OptionCard(
     enabled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    multiSelectCounter: Int? = null
+    multiSelectMode: Boolean = false
 ) {
     val borderColor = when {
         correct == true -> CorrectGreen
@@ -71,10 +74,10 @@ fun OptionCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .clickable(enabled = enabled, role = if (multiSelectMode) Role.Checkbox else Role.RadioButton, onClick = onClick)
             .border(1.dp, borderColor, RoundedCornerShape(12.dp))
             .semantics {
-                role = Role.RadioButton
+                role = if (multiSelectMode) Role.Checkbox else Role.RadioButton
                 contentDescription = buildString {
                     append("选项 ${option.label}")
                     if (selected) append("，已选中")
@@ -89,11 +92,20 @@ fun OptionCard(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.Top
         ) {
-            Text(
-                text = option.label,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
+            if (multiSelectMode) {
+                Icon(
+                    imageVector = if (selected) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
+                    contentDescription = null,
+                    tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp)
+                )
+            } else {
+                Text(
+                    text = option.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             Spacer(Modifier.size(12.dp))
             Box(Modifier.weight(1f)) {
                 FormulaText(text = option.text)
@@ -109,7 +121,7 @@ fun OptionCard(
                     contentDescription = "错误",
                     tint = WrongRed
                 )
-                multiSelectCounter != null && selected -> Icon(
+                multiSelectMode && selected -> Icon(
                     Icons.Filled.CheckCircle,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
@@ -214,3 +226,50 @@ fun answerStateLabel(isCorrect: Boolean?): String = when (isCorrect) {
 
 val CorrectColor: Color @Composable get() = CorrectGreen
 val WrongColor: Color @Composable get() = WrongRed
+
+/** 提交后判分反馈条：绿底正确 / 红底错误，左右分栏显示我的答案与参考答案 */
+@Composable
+fun GradingResultBar(
+    isCorrect: Boolean,
+    myAnswer: String,
+    correctAnswer: String,
+    modifier: Modifier = Modifier
+) {
+    val bgColor = if (isCorrect) CorrectGreen.copy(alpha = 0.12f) else WrongRed.copy(alpha = 0.12f)
+    val borderColor = if (isCorrect) CorrectGreen else WrongRed
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = bgColor,
+        border = BorderStroke(1.dp, borderColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isCorrect) "回答正确" else "回答错误",
+                style = MaterialTheme.typography.titleSmall,
+                color = if (isCorrect) CorrectGreen else WrongRed,
+                modifier = Modifier.weight(1f)
+            )
+            Column(horizontalAlignment = Alignment.End) {
+                if (myAnswer.isNotBlank()) {
+                    Text(
+                        text = "我的答案 $myAnswer",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isCorrect) CorrectGreen else WrongRed
+                    )
+                }
+                Text(
+                    text = "参考答案 $correctAnswer",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CorrectGreen
+                )
+            }
+        }
+    }
+}

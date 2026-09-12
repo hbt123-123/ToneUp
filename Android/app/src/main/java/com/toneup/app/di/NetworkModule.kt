@@ -7,11 +7,16 @@ import com.toneup.app.data.remote.api.AttemptApi
 import com.toneup.app.data.remote.api.AiFeedbackApi
 import com.toneup.app.data.remote.api.AuthApi
 import com.toneup.app.data.remote.api.CatalogApi
+import com.toneup.app.data.remote.api.FavoritesApi
+import com.toneup.app.data.remote.api.FeedbackApi
 import com.toneup.app.data.remote.api.NotesApi
+import com.toneup.app.data.remote.api.NotesSharedApi
 import com.toneup.app.data.remote.api.QuestionApi
 import com.toneup.app.data.remote.api.ReviewApi
+import com.toneup.app.data.remote.api.SectionsApi
 import com.toneup.app.data.remote.api.StatsApi
 import com.toneup.app.data.remote.api.WrongbookApi
+import com.toneup.app.data.remote.api.WrongQuestionApi
 import com.toneup.app.data.remote.interceptor.AuthInterceptor
 import com.toneup.app.data.remote.interceptor.SanitizedLoggingInterceptor
 import dagger.Module
@@ -97,6 +102,11 @@ object NetworkModule {
     @Provides @Singleton fun statsApi(retrofit: Retrofit): StatsApi = retrofit.create(StatsApi::class.java)
     @Provides @Singleton fun notesApi(retrofit: Retrofit): NotesApi = retrofit.create(NotesApi::class.java)
     @Provides @Singleton fun wrongbookApi(retrofit: Retrofit): WrongbookApi = retrofit.create(WrongbookApi::class.java)
+    @Provides @Singleton fun sectionsApi(retrofit: Retrofit): SectionsApi = retrofit.create(SectionsApi::class.java)
+    @Provides @Singleton fun feedbackApi(retrofit: Retrofit): FeedbackApi = retrofit.create(FeedbackApi::class.java)
+    @Provides @Singleton fun notesSharedApi(retrofit: Retrofit): NotesSharedApi = retrofit.create(NotesSharedApi::class.java)
+    @Provides @Singleton fun wrongQuestionApi(retrofit: Retrofit): WrongQuestionApi = retrofit.create(WrongQuestionApi::class.java)
+    @Provides @Singleton fun favoritesApi(retrofit: Retrofit): FavoritesApi = retrofit.create(FavoritesApi::class.java)
 
     @Provides
     @Singleton

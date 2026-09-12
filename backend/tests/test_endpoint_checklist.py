@@ -9,6 +9,7 @@ EXPECTED_ENDPOINTS = {
     ("GET", "/api/question-banks/{bank_id}"),
     ("GET", "/api/question-banks/{bank_id}/questions"),
     ("GET", "/api/question-banks/{bank_id}/questions/{question_id}"),
+    ("GET", "/api/question-banks/{bank_id}/sections"),
     ("GET", "/api/images/{image_id}"),
     ("POST", "/api/attempts"),
     ("GET", "/api/attempts/{attempt_id}"),
@@ -18,11 +19,21 @@ EXPECTED_ENDPOINTS = {
     ("GET", "/api/stats/weaknesses"),
     ("GET", "/api/questions/{question_id}/notes"),
     ("PUT", "/api/questions/{question_id}/notes"),
+    ("PUT", "/api/notes/{note_id}"),
+    ("DELETE", "/api/notes/{note_id}"),
+    ("POST", "/api/notes/{note_id}/like"),
+    ("DELETE", "/api/notes/{note_id}/like"),
+    ("PUT", "/api/favorites"),
+    ("DELETE", "/api/favorites"),
+    ("GET", "/api/favorites/banks"),
     ("POST", "/api/ai/feedback"),
     ("GET", "/api/ai/feedback/{feedback_id}"),
     ("POST", "/api/admin/catalog/reload"),
     ("GET", "/api/admin/health"),
     ("GET", "/api/admin/health/{task_id}"),
+    ("GET", "/api/admin/question-feedback"),
+    ("POST", "/api/question-feedback"),
+    ("PUT", "/api/admin/question-feedback/status"),
     ("GET", "/api/wrong-questions"),
     ("POST", "/api/wrong-questions"),
     ("DELETE", "/api/wrong-questions/{wrong_id}"),
@@ -43,4 +54,4 @@ def test_openapi_contains_all_contract_endpoints(client):
     extra = {a for a in actual if a not in EXPECTED_ENDPOINTS}
     assert not missing, f"missing endpoints: {sorted(missing)}"
     assert not extra, f"unexpected endpoints: {sorted(extra)}"
-    assert len(EXPECTED_ENDPOINTS) == 27
+    assert len(EXPECTED_ENDPOINTS) == 38

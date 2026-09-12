@@ -197,7 +197,7 @@ def test_sync_conflict_takes_max(client, user_db_path):
     resp = client.post(
         "/api/wrong-questions/sync",
         json={"items": [
-            {"bank_id": "bank-a", "question_id": 1, "wrong_count": 5, "last_practice_at": "2026-09-01T00:00:00+00:00"},
+            {"bank_id": "bank-a", "question_id": 1, "wrong_count": 5, "last_practice_at": "2099-09-01T00:00:00+00:00"},
         ]},
         headers=headers,
     )
@@ -206,7 +206,7 @@ def test_sync_conflict_takes_max(client, user_db_path):
     assert lst["total"] == 1
     item = lst["items"][0]
     assert item["attempt_count"] == 5
-    assert item["last_wrong_at"] == "2026-09-01T00:00:00+00:00"
+    assert item["last_wrong_at"] == "2099-09-01T00:00:00+00:00"
 
 
 def test_sync_requires_items_list(client, user_db_path):

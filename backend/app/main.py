@@ -86,10 +86,13 @@ def create_app() -> FastAPI:
         auth,
         backgrounds,
         catalog,
+        favorites,
+        feedback,
         images,
         notes,
         question_banks,
         reviews,
+        sections,
         stats,
         wrong_questions,
     )
@@ -100,12 +103,16 @@ def create_app() -> FastAPI:
     app.include_router(images.router)
     app.include_router(attempts.router)
     app.include_router(notes.router)
+    app.include_router(notes._extra_router)
+    app.include_router(favorites.router)
     app.include_router(reviews.router)
     app.include_router(stats.router)
     app.include_router(ai_feedback.router)
     app.include_router(admin.router)
     app.include_router(wrong_questions.router)
     app.include_router(backgrounds.router)
+    app.include_router(sections.router)
+    app.include_router(feedback.router)
 
     # --- 路由 ---
     @app.get("/api/health", include_in_schema=False)

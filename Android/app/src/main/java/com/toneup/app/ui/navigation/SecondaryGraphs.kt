@@ -2,6 +2,7 @@ package com.toneup.app.ui.navigation
 
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
@@ -17,7 +18,10 @@ import com.toneup.app.ui.feature.aiphoto.AiPhotoScreen
 import com.toneup.app.ui.feature.mine.FormulaPocScreen
 import com.toneup.app.ui.feature.mine.NoteEditorScreen
 import com.toneup.app.ui.feature.practice.PracticeScreen
+import com.toneup.app.ui.feature.practice.PracticeFeatureApis
 import com.toneup.app.ui.feature.practice.ReviewCheckScreen
+import com.toneup.app.ui.feature.practice.SummaryScreen
+import com.toneup.app.ui.feature.sectionlist.SectionListScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.UUID
 import javax.inject.Inject
@@ -47,6 +51,33 @@ class RedoSessionHelper @Inject constructor(
     }
 }
 
+/** 分组列表练习会话助手 */
+@HiltViewModel
+class SectionListSessionHelper @Inject constructor(
+    private val registry: PracticeSessionRegistry
+) : ViewModel() {
+    fun createSectionPracticeSession(
+        bankId: String,
+        year: Int?,
+        typeCodeFilter: String?,
+        title: String = "分组练习",
+        onReady: (String) -> Unit
+    ) {
+        val sessionId = "sec_" + UUID.randomUUID().toString().take(8)
+        registry.register(
+            PracticeSession(
+                sessionId = sessionId,
+                bankId = bankId,
+                title = title,
+                mode = PracticeSession.MODE_PRACTICE,
+                year = year,
+                typeCodeFilter = typeCodeFilter
+            )
+        )
+        onReady(sessionId)
+    }
+}
+
 fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
     composable(
         Routes.PRACTICE_PATTERN,
@@ -65,7 +96,11 @@ fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
             },
             onOpenReviewCheck = {
                 navController.navigate(Routes.reviewCheck(sessionId))
-            }
+            },
+            onOpenSummary = {
+                navController.navigate(Routes.SUMMARY)
+            },
+            featureApis = hiltViewModel()
         )
     }
     composable(
@@ -82,6 +117,25 @@ fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
                     launchSingleTop = true
                 }
             }
+        )
+    }
+    composable(Routes.SUMMARY) {
+        val viewModel: com.toneup.app.ui.feature.practice.PracticeViewModel = hiltViewModel()
+        val stats = viewModel.submitPaperStats()
+        val totalTime = viewModel.elapsedSeconds.collectAsStateWithLifecycle().value
+        SummaryScreen(
+            stats = stats,
+            totalTime = totalTime,
+            onReviewWrong = {
+                navController.popBackStack()
+            },
+            onPracticeAgain = {
+                navController.popBackStack()
+            },
+            onBackToList = {
+                navController.popBackStack()
+            },
+            onBack = { navController.popBackStack() }
         )
     }
 }
@@ -136,5 +190,33 @@ fun NavGraphBuilder.addSecondaryGraphs(navController: NavHostController) {
         composable(Routes.FORMULA_POC) {
             FormulaPocScreen(onBack = { navController.popBackStack() })
         }
+    }
+}
+
+fun NavGraphBuilder.addSectionListGraph(navController: NavHostController) {
+    composable(
+        Routes.SECTION_LIST_PATTERN,
+        arguments = listOf(navArgument("bankId") { type = NavType.StringType })
+    ) { entry ->
+        val bankId = entry.arguments?.getString("bankId") ?: ""
+        val helper: SectionListSessionHelper = hiltViewModel(entry)
+        SectionListScreen(
+            onNavigateToPractice = { navBankId, year, typeCode, count ->
+                helper.createSectionPracticeSession(
+                    bankId = navBankId,
+                    year = year,
+                    typeCodeFilter = typeCode,
+                    title = buildString {
+                        append("分组练习")
+                        year?.let { append(" $it年") }
+                        typeCode?.let { append(" $it") }
+                        count?.let { append(" $it题") }
+                    }
+                ) { sessionId ->
+                    navController.navigate(Routes.practice(sessionId))
+                }
+            },
+            viewModel = hiltViewModel(entry)
+        )
     }
 }

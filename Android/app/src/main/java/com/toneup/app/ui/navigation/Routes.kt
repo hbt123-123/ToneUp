@@ -41,5 +41,12 @@ object Routes {
             append("&attemptId=").append(attemptId ?: -1L)
         }
 
+    /** 分组列表页：sectionList/{bankId} */
+    const val SECTION_LIST_PATTERN = "sectionList/{bankId}"
+    fun sectionList(bankId: String) = "sectionList/$bankId"
+
+    /** 练习小结页 */
+    const val SUMMARY = "summary"
+
     const val FORMULA_POC = "formula_poc" // debug-only PoC 页
 }

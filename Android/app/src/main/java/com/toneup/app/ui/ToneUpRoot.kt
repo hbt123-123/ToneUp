@@ -26,6 +26,7 @@ import com.toneup.app.ui.navigation.Routes
 import com.toneup.app.ui.navigation.addAnalysisGraph
 import com.toneup.app.ui.navigation.addPracticeGraph
 import com.toneup.app.ui.navigation.addSecondaryGraphs
+import com.toneup.app.ui.navigation.addSectionListGraph
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -150,6 +151,7 @@ private fun ToneUpNavGraph(
                 addPracticeGraph(navController)
                 addAnalysisGraph(navController)
                 addSecondaryGraphs(navController)
+                addSectionListGraph(navController)
             }
         }
     }

@@ -15,10 +15,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.wrongbook_schema import WRONG_QUESTIONS_DDL, WRONG_QUESTIONS_INDEXES
+from app.core.favorites_schema import FAVORITE_QUESTIONS_DDL, FAVORITE_QUESTIONS_INDEXES
 
 
 def init_user_db(db_path: str) -> None:
-    """Initialize the user database with six tables, WAL mode, and idempotent indexes.
+    """Initialize the user database with seven tables, WAL mode, and idempotent indexes.
 
     Creates the following tables if they do not already exist (all DDL uses IF NOT EXISTS):
       - users
@@ -27,6 +28,7 @@ def init_user_db(db_path: str) -> None:
       - user_notes
       - ai_feedback
       - wrong_questions
+      - favorite_questions
 
     After connecting, sets PRAGMA journal_mode=WAL and PRAGMA busy_timeout=5000.
 
@@ -94,11 +96,14 @@ def init_user_db(db_path: str) -> None:
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_notes (
-                user_id             INTEGER NOT NULL,
-                bank_id             TEXT    NOT NULL,
-                question_id         INTEGER NOT NULL,
-                note_text           TEXT    NOT NULL,
-                updated_at          TEXT    NOT NULL,
+                id                INTEGER NOT NULL,
+                user_id           INTEGER NOT NULL,
+                bank_id           TEXT    NOT NULL,
+                question_id       INTEGER NOT NULL,
+                note_text         TEXT    NOT NULL,
+                updated_at        TEXT    NOT NULL,
+                visibility        TEXT    NOT NULL DEFAULT 'public',
+                like_count        INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (user_id, bank_id, question_id)
             )
             """
@@ -143,6 +148,11 @@ def init_user_db(db_path: str) -> None:
         # ── wrong_questions ──────────────────────────────────────
         cursor.execute(WRONG_QUESTIONS_DDL)
         for idx_sql in WRONG_QUESTIONS_INDEXES:
+            cursor.execute(idx_sql)
+
+        # ── favorite_questions ───────────────────────────────
+        cursor.execute(FAVORITE_QUESTIONS_DDL)
+        for idx_sql in FAVORITE_QUESTIONS_INDEXES:
             cursor.execute(idx_sql)
 
         conn.commit()

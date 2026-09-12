@@ -7,6 +7,8 @@ import com.toneup.app.data.local.ConnectivityMonitor
 import com.toneup.app.data.local.DraftEntry
 import com.toneup.app.data.local.SessionDataStoreManager
 import com.toneup.app.data.local.SessionManager
+import com.toneup.app.data.remote.api.FavoriteRequest
+import com.toneup.app.data.remote.api.FavoritesApi
 import com.toneup.app.data.remote.dto.QuestionDto
 import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.PracticeRepository
@@ -15,10 +17,12 @@ import com.toneup.app.data.repository.PracticeSessionRegistry
 import com.toneup.app.data.repository.QuestionRef
 import com.toneup.app.data.repository.QuestionRepository
 import com.toneup.app.domain.logic.AnswerCodec
+import com.toneup.app.domain.logic.CorrectAnswerParser
 import com.toneup.app.domain.logic.PracticeEvent
 import com.toneup.app.domain.logic.PracticeStateMachine
 import com.toneup.app.domain.logic.PracticeStatus
 import com.toneup.app.domain.model.AnswerValue
+import com.toneup.app.domain.model.QuestionType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,6 +31,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+data class PaperStats(
+    val totalCount: Int,
+    val answeredCount: Int,
+    val unansweredCount: Int,
+    val markedCount: Int,
+    val wrongCount: Int = 0
+)
 
 /** 每题的 UI 快照 */
 data class QuestionSlot(
@@ -47,7 +59,8 @@ data class PracticeUiState(
     val currentIndex: Int = 0,
     val knownTotal: Int = -1,
     val hasMore: Boolean = false,
-    val pendingSyncCount: Int = 0
+    val pendingSyncCount: Int = 0,
+    val favoritedIds: Set<Long> = emptySet()
 ) {
     val answeredCount: Int
         get() = slots.count {
@@ -63,7 +76,8 @@ class PracticeViewModel @Inject constructor(
     private val practiceRepository: PracticeRepository,
     private val sessionDataStoreManager: SessionDataStoreManager,
     private val sessionManager: SessionManager,
-    private val connectivityMonitor: ConnectivityMonitor
+    private val connectivityMonitor: ConnectivityMonitor,
+    private val favoritesApi: FavoritesApi
 ) : ViewModel() {
 
     val sessionId: String = savedStateHandle.get<String>("sessionId") ?: ""
@@ -79,8 +93,18 @@ class PracticeViewModel @Inject constructor(
     private var questionShownAtMs: Long = System.currentTimeMillis()
 
     /** 按题维护防抖 Job：切题时上一题的待写草稿仍会独立落盘 */
-    private val draftFlushJobs = mutableMapOf<Long, Job>()
-    private val essayFlushJobs = mutableMapOf<Long, Job>()
+    private val draftFlushJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
+    private val essayFlushJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
+
+    private val _elapsedSeconds = MutableStateFlow(0)
+    val elapsedSeconds: StateFlow<Int> = _elapsedSeconds
+    private var timerJob: Job? = null
+
+    private val _isFavorited = MutableStateFlow(false)
+    val isFavorited: StateFlow<Boolean> = _isFavorited
+
+    private val _showAnswer = MutableStateFlow(false)
+    val showAnswer: StateFlow<Boolean> = _showAnswer
 
     init {
         val size = session?.let { s ->
@@ -93,9 +117,16 @@ class PracticeViewModel @Inject constructor(
             knownTotal = session?.fixedRefs?.size ?: -1,
             hasMore = session?.hasMore ?: false
         )
+        loadFavoritedIds()
         observeConnectivity()
         refreshPending()
         loadQuestion(0)
+        timerJob = viewModelScope.launch {
+            while (true) {
+                delay(1000)
+                _elapsedSeconds.value++
+            }
+        }
     }
 
     /** 槽位列表按需扩容 */
@@ -126,6 +157,19 @@ class PracticeViewModel @Inject constructor(
         }
     }
 
+    private fun loadFavoritedIds() {
+        viewModelScope.launch {
+            val userId = sessionManager.currentUserId() ?: return@launch
+            runCatching {
+                val data = sessionDataStoreManager.storeFor(userId).data.first()
+                val ids = data.markedKeys.mapNotNull { key ->
+                    key.substringAfterLast(":").toLongOrNull()
+                }.toSet()
+                _state.value = _state.value.copy(favoritedIds = ids)
+            }
+        }
+    }
+
     // ---------- 题目装载与预取 ----------
 
     /** 进入第 N 题；同时静默预取 N±1（FR-PR-08，§8.5） */
@@ -141,6 +185,13 @@ class PracticeViewModel @Inject constructor(
             _state.value = _state.value.copy(currentIndex = index)
         }
         viewModelScope.launch { ensureSlot(index) }
+        viewModelScope.launch {
+            delay(50)
+            val q = slotAt(index)?.question
+            if (q != null) {
+                _isFavorited.value = _state.value.favoritedIds.contains(q.questionId)
+            }
+        }
         // 相邻预取：不越界、失败静默
         if (index + 1 < slotCount()) {
             viewModelScope.launch { runCatching { ensureSlot(index + 1) } }
@@ -239,6 +290,82 @@ class PracticeViewModel @Inject constructor(
         submitCurrent(index)
     }
 
+    fun redoQuestion() {
+        val index = _state.value.currentIndex
+        val slot = slotAt(index) ?: return
+        val question = slot.question ?: return
+        updateSlot(index) {
+            it.copy(
+                answer = null,
+                status = PracticeStatus.Idle,
+                gradingStatus = null,
+                errorHint = null,
+                marked = false
+            )
+        }
+        viewModelScope.launch {
+            clearDraft(question.bankId, question.questionId)
+        }
+    }
+
+    fun toggleFavorite() {
+        val newFavorited = !_isFavorited.value
+        _isFavorited.value = newFavorited
+        val bankId = sessionBankId()
+        val questionId = currentQuestion()?.questionId ?: return
+        viewModelScope.launch {
+            try {
+                val body = FavoriteRequest(bankId = bankId, questionId = questionId)
+                if (newFavorited) {
+                    favoritesApi.addFavorite(body)
+                } else {
+                    favoritesApi.removeFavorite(body)
+                }
+            } catch (_: Exception) {
+                _isFavorited.value = !newFavorited
+            }
+        }
+    }
+
+    fun toggleAnswerMode() {
+        _showAnswer.value = !_showAnswer.value
+    }
+
+    fun submitPaperStats(): PaperStats {
+        val slots = _state.value.slots
+        val total = _state.value.knownTotal.coerceAtLeast(slots.size)
+        val answered = slots.count { slot ->
+            slot.answer != null && !slot.answer.isEmpty
+        }
+        val wrong = slots.count { slot ->
+            slot.question != null && slot.answer != null && !slot.answer.isEmpty &&
+                !isSlotCorrect(slot)
+        }
+        return PaperStats(
+            totalCount = total,
+            answeredCount = answered,
+            unansweredCount = total - answered,
+            markedCount = slots.count { it.marked },
+            wrongCount = wrong
+        )
+    }
+
+    private fun isSlotCorrect(slot: QuestionSlot): Boolean {
+        val question = slot.question ?: return false
+        val answer = slot.answer ?: return false
+        val myLabels = when (answer) {
+            is AnswerValue.Choice -> listOf(answer.label)
+            is AnswerValue.MultiChoice -> answer.labels
+            else -> return false
+        }
+        if (myLabels.isEmpty()) return false
+        val correctLabels = when (question.typeCode) {
+            QuestionType.Multi.typeCode -> CorrectAnswerParser.multiLabels(question.answerText).toSet()
+            else -> setOfNotNull(CorrectAnswerParser.singleLabel(question.answerText))
+        }
+        return myLabels.all { it in correctLabels } && correctLabels.all { it in myLabels }
+    }
+
     // ---------- 作答与草稿 ----------
 
     fun onAnswerChange(index: Int, answer: AnswerValue) {
@@ -311,6 +438,7 @@ class PracticeViewModel @Inject constructor(
     // ---------- 提交 ----------
 
     fun submitCurrent(index: Int) {
+        if (_showAnswer.value) return
         val slot = slotAt(index) ?: return
         val question = slot.question ?: return
         val answer = slot.answer ?: return
@@ -377,6 +505,7 @@ class PracticeViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        timerJob?.cancel()
         draftFlushJobs.values.forEach { it.cancel() }
         essayFlushJobs.values.forEach { it.cancel() }
     }
