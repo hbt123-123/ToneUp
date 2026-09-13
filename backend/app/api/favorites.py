@@ -28,8 +28,7 @@ def add_favorite(body: dict = Body(...), user=Depends(get_current_user)):
     if question_id is None or not isinstance(question_id, int):
         raise BadRequestError("question_id must be an integer")
     db = _db()
-    if not favorites_repo.is_favorited(db, user["id"], bank_id, question_id):
-        favorites_repo.toggle_favorite(db, user["id"], bank_id, question_id)
+    favorites_repo.add_favorite(db, user["id"], bank_id, question_id)
     return envelope({"favorited": True})
 
 
@@ -45,8 +44,7 @@ def remove_favorite(body: dict = Body(...), user=Depends(get_current_user)):
     if question_id is None or not isinstance(question_id, int):
         raise BadRequestError("question_id must be an integer")
     db = _db()
-    if favorites_repo.is_favorited(db, user["id"], bank_id, question_id):
-        favorites_repo.toggle_favorite(db, user["id"], bank_id, question_id)
+    favorites_repo.remove_favorite(db, user["id"], bank_id, question_id)
     return envelope({"favorited": False})
 
 

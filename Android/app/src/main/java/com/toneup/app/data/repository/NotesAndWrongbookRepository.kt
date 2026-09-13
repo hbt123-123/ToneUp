@@ -1,5 +1,7 @@
 package com.toneup.app.data.repository
 
+import com.toneup.app.data.remote.api.WrongbookApi
+import com.toneup.app.data.remote.api.WrongQuestionApi
 import com.toneup.app.data.remote.api.NotesApi
 import com.toneup.app.data.remote.dto.NoteDto
 import com.toneup.app.data.remote.dto.NoteListItemDto

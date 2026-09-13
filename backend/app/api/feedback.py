@@ -50,10 +50,6 @@ def create_feedback(body: dict = Body(...), user=Depends(get_current_user)):
 
     # 限流：最近 1 小时内该用户的反馈数
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=_RATE_WINDOW_HOURS)).isoformat()
-    rows, _ = feedback_repo.list_feedback(
-        db, user_id=user["id"], created_after=cutoff, page=1, page_size=1,
-    )
-    # 用精确计数
     with user_connection(db) as conn:
         count = conn.execute(
             "SELECT COUNT(*) FROM question_feedback WHERE user_id = ? AND created_at >= ?",

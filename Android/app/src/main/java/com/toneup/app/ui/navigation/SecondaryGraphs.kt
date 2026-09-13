@@ -119,8 +119,9 @@ fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
             }
         )
     }
-    composable(Routes.SUMMARY) {
-        val viewModel: com.toneup.app.ui.feature.practice.PracticeViewModel = hiltViewModel()
+    composable(Routes.SUMMARY) { entry ->
+        val practiceEntry = checkNotNull(navController.previousBackStackEntry)
+        val viewModel: com.toneup.app.ui.feature.practice.PracticeViewModel = hiltViewModel(practiceEntry)
         val stats = viewModel.submitPaperStats()
         val totalTime = viewModel.elapsedSeconds.collectAsStateWithLifecycle().value
         SummaryScreen(

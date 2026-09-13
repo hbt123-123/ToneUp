@@ -232,11 +232,15 @@ fun FeedbackForm(
                             Spacer(Modifier.width(8.dp))
                             Button(
                                 onClick = {
+                                    if (content.trim().isEmpty()) {
+                                        errorMsg = "请填写反馈内容"
+                                        return@Button
+                                    }
                                     submitting = true
                                     errorMsg = null
                                     scope.launch {
                                         try {
-                                            feedbackApi.submitFeedback(
+                                            val envelope = feedbackApi.submitFeedback(
                                                 FeedbackRequest(
                                                     bankId = bankId,
                                                     questionId = questionId,
@@ -244,6 +248,11 @@ fun FeedbackForm(
                                                     content = content.trim()
                                                 )
                                             )
+                                            if (!envelope.success) {
+                                                submitting = false
+                                                errorMsg = envelope.message ?: "提交失败"
+                                                return@scope
+                                            }
                                             submitting = false
                                             android.widget.Toast
                                                 .makeText(context, "反馈已提交", android.widget.Toast.LENGTH_SHORT)

@@ -10,10 +10,39 @@ __all__ = [
     "toggle_favorite",
     "is_favorited",
     "list_favorite_banks",
+    "add_favorite",
+    "remove_favorite",
 ]
 
 
-def toggle_favorite(
+def add_favorite(
+    db_path: str,
+    user_id: int,
+    bank_id: str,
+    question_id: int,
+) -> None:
+    """收藏题目（幂等：已收藏则忽略）。"""
+    with user_connection(db_path) as conn:
+        with conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO favorite_questions (user_id, bank_id, question_id, created_at) VALUES (?, ?, ?, ?)",
+                (user_id, bank_id, question_id, datetime.now(timezone.utc).isoformat()),
+            )
+
+
+def remove_favorite(
+    db_path: str,
+    user_id: int,
+    bank_id: str,
+    question_id: int,
+) -> None:
+    """取消收藏（幂等：未收藏则忽略）。"""
+    with user_connection(db_path) as conn:
+        with conn:
+            conn.execute(
+                "DELETE FROM favorite_questions WHERE user_id = ? AND bank_id = ? AND question_id = ?",
+                (user_id, bank_id, question_id),
+            )
     db_path: str,
     user_id: int,
     bank_id: str,

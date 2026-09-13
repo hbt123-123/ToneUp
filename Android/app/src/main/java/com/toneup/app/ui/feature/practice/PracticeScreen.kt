@@ -646,19 +646,21 @@ fun QuestionBody(
                     FormulaText(text = question.content, modifier = Modifier.fillMaxWidth())
 
                     if (slot.status is PracticeStatus.Submitted) {
-                        val isCorrect = slot.answer != null && run {
-                            val myLabels = when (val a = slot.answer) {
-                                is AnswerValue.Choice -> listOf(a.label)
-                                is AnswerValue.MultiChoice -> a.labels
-                                else -> emptyList()
+                        val isCorrect = if (question.typeCode in listOf(QuestionType.Choice.typeCode, QuestionType.MultiChoice.typeCode)) {
+                            slot.answer != null && run {
+                                val myLabels = when (val a = slot.answer) {
+                                    is AnswerValue.Choice -> listOf(a.label)
+                                    is AnswerValue.MultiChoice -> a.labels
+                                    else -> emptyList()
+                                }
+                                val correctLabels = when (question.typeCode) {
+                                    QuestionType.Multi.typeCode -> CorrectAnswerParser.multiLabels(question.answerText).toSet()
+                                    else -> setOfNotNull(CorrectAnswerParser.singleLabel(question.answerText))
+                                }
+                                myLabels.isNotEmpty() && myLabels.all { it in correctLabels } &&
+                                    correctLabels.all { it in myLabels }
                             }
-                            val correctLabels = when (question.typeCode) {
-                                QuestionType.Multi.typeCode -> CorrectAnswerParser.multiLabels(question.answerText).toSet()
-                                else -> setOfNotNull(CorrectAnswerParser.singleLabel(question.answerText))
-                            }
-                            myLabels.isNotEmpty() && myLabels.all { it in correctLabels } &&
-                                correctLabels.all { it in myLabels }
-                        }
+                        } else null
                         val myAnswer = when (val a = slot.answer) {
                             is AnswerValue.Choice -> a.label
                             is AnswerValue.MultiChoice -> a.labels.joinToString(", ")
@@ -670,10 +672,7 @@ fun QuestionBody(
                             myAnswer = myAnswer,
                             correctAnswer = correctAnswer
                         )
-
-                        if (!isCorrect && featureApis != null) {
-                            val scope = rememberCoroutineScope()
-                            val snackbarHostState = remember { SnackbarHostState() }
+                        if (isCorrect == false && featureApis != null) {
                             var removed by remember { mutableStateOf(false) }
                             Spacer(Modifier.height(8.dp))
                             Surface(
@@ -694,23 +693,12 @@ fun QuestionBody(
                                         color = MaterialTheme.colorScheme.onErrorContainer
                                     )
                                     if (!removed) {
-                                        TextButton(onClick = {
-                                            scope.launch {
-                                                try {
-                                                    featureApis.wrongQuestionApi.removeWrongQuestion(question.questionId)
-                                                    removed = true
-                                                    val result = snackbarHostState.showSnackbar(
-                                                        message = "已移除",
-                                                        actionLabel = "撤销",
-                                                        duration = SnackbarDuration.Short
-                                                    )
-                                                    if (result == SnackbarResult.ActionPerformed) {
-                                                        removed = false
-                                                    }
-                                                } catch (_: Exception) { }
-                                            }
-                                        }) {
+                                        TextButton(onClick = { removed = false }) {
                                             Text("⊗ 移除错题本")
+                                        }
+                                    } else {
+                                        TextButton(onClick = { removed = true }) {
+                                            Text("撤销")
                                         }
                                     }
                                 }
@@ -737,7 +725,7 @@ fun QuestionBody(
                                 myNoteText = "",
                                 myNoteVisibility = false,
                                 onMyNoteVisibilityChange = { },
-                                onMyNoteSave = { }
+                                onMyNoteSave = { /* 待接入笔记存储 */ }
                             )
                         }
                     }

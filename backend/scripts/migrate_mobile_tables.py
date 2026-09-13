@@ -67,14 +67,17 @@ def migrate_mobile_tables(db_path: str) -> None:
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS favorite_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
                 bank_id TEXT NOT NULL,
                 question_id INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
-                PRIMARY KEY(user_id, bank_id, question_id)
+                UNIQUE(user_id, bank_id, question_id)
             )
             """
         )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_favorite_questions_user ON favorite_questions(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_favorite_questions_user_bank ON favorite_questions(user_id, bank_id)")
 
         # ── user_notes 新增列（幂等）───────────────────────
         for column_def in [
@@ -89,6 +92,11 @@ def migrate_mobile_tables(db_path: str) -> None:
                 )
             except sqlite3.OperationalError:
                 pass
+        # 回填已有行的 id（ALTER 新增列为 NULL）
+        try:
+            cursor.execute("UPDATE user_notes SET id = rowid WHERE id IS NULL")
+        except sqlite3.OperationalError:
+            pass
 
         conn.commit()
     finally:

@@ -3,9 +3,6 @@ package com.toneup.app.ui.feature.sectionlist
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.toneup.app.data.local.ConnectivityMonitor
-import com.toneup.app.data.local.SessionDataStoreManager
-import com.toneup.app.data.local.SessionManager
 import com.toneup.app.data.remote.dto.SectionItem
 import com.toneup.app.data.remote.dto.SectionsResponse
 import com.toneup.app.data.repository.AppException
@@ -53,7 +50,7 @@ data class SectionListUiState(
                 FilterTab.ALL -> byTab
                 FilterTab.UNDONE -> byTab.filter { it.done == 0 }
                 FilterTab.WRONG -> byTab.filter { it.wrong > 0 }
-                FilterTab.FAVORITE -> byTab.filter { it.favorited }
+                FilterTab.FAVORITE -> byTab.filter { it.favorited > 0 }
             }
         }
 }
@@ -62,9 +59,6 @@ data class SectionListUiState(
 class SectionListViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val sectionRepository: SectionRepository,
-    private val sessionManager: SessionManager?,
-    private val connectivityMonitor: ConnectivityMonitor?,
-    private val sessionDataStoreManager: SessionDataStoreManager?
 ) : ViewModel() {
 
     val bankId: String = savedStateHandle.get<String>("bankId") ?: ""

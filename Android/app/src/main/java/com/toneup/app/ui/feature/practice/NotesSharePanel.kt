@@ -105,17 +105,23 @@ private fun SharedNotesTab(
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(questionId) {
-        loading = true
-        error = null
-        try {
-            val result = notesSharedApi.getNotes(questionId, bankId, scope = "public")
-            notes = result.data?.items ?: emptyList()
-        } catch (e: Exception) {
-            error = e.message ?: "加载失败"
-        } finally {
-            loading = false
+    fun loadNotes() {
+        scope.launch {
+            loading = true
+            error = null
+            try {
+                val result = notesSharedApi.getNotes(questionId, bankId, scope = "public")
+                notes = result.data?.items ?: emptyList()
+            } catch (e: Exception) {
+                error = e.message ?: "加载失败"
+            } finally {
+                loading = false
+            }
         }
+    }
+
+    LaunchedEffect(questionId) {
+        loadNotes()
     }
 
     when {
@@ -142,20 +148,7 @@ private fun SharedNotesTab(
                     color = MaterialTheme.colorScheme.error
                 )
                 Spacer(Modifier.height(8.dp))
-                TextButton(onClick = {
-                    loading = true
-                    error = null
-                    scope.launch {
-                        try {
-                            val result = notesSharedApi.getNotes(questionId, bankId, scope = "public")
-                            notes = result.data?.items ?: emptyList()
-                        } catch (e: Exception) {
-                            error = e.message ?: "加载失败"
-                        } finally {
-                            loading = false
-                        }
-                    }
-                }) {
+                TextButton(onClick = { loadNotes() }) {
                     Text("重试")
                 }
             }
@@ -191,7 +184,6 @@ private fun SharedNotesTab(
                                     } else {
                                         notesSharedApi.likeNote(note.noteId)
                                     }
-                                    // 乐观更新
                                     notes = notes.map {
                                         if (it.noteId == note.noteId) {
                                             it.copy(
@@ -200,7 +192,9 @@ private fun SharedNotesTab(
                                             )
                                         } else it
                                     }
-                                } catch (_: Exception) { }
+                                } catch (e: Exception) {
+                                    error = e.message ?: "操作失败"
+                                }
                             }
                         }
                     )

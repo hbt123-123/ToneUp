@@ -38,5 +38,5 @@ data class FavoriteBanksResponse(
 @Serializable
 data class FavoriteBankItem(
     @SerialName("bank_id") val bankId: String,
-    @SerialName("count") val count: Int
+    @SerialName("favorite_count") val count: Int
 )

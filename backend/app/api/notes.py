@@ -54,7 +54,7 @@ def get_notes(
                 "visibility": row["visibility"],
                 "like_count": row["like_count"],
                 "user_id": row["user_id"],
-                "created_at": row["updated_at"],
+                "updated_at": row["updated_at"],
                 "is_liked_by_me": user_repo.note_is_liked_by(db, row["id"], user["id"]),
             }
             items.append(item)
@@ -69,7 +69,7 @@ def get_notes(
                 "visibility": row["visibility"],
                 "like_count": row["like_count"],
                 "user_id": row["user_id"],
-                "created_at": row["updated_at"],
+                "updated_at": row["updated_at"],
                 "is_liked_by_me": user_repo.note_is_liked_by(db, row["id"], user["id"]),
             }]
         else:
@@ -99,11 +99,7 @@ def put_notes(
         raise BadRequestError("visibility must be 'public' or 'private'")
     db = _db()
     now_iso = _now_iso()
-    user_repo.notes_upsert(db, user["id"], bank_id, question_id, note_text, now_iso)
-    # 更新 visibility
-    row = user_repo.notes_get(db, user["id"], bank_id, question_id)
-    if row and row["visibility"] != visibility:
-        user_repo.notes_update(db, row["id"], user["id"], visibility=visibility, now_iso=now_iso)
+    user_repo.notes_upsert(db, user["id"], bank_id, question_id, note_text, visibility, now_iso)
     return envelope({"question_id": question_id, "bank_id": bank_id, "saved": True})
 
 
@@ -158,15 +154,13 @@ def like_note(note_id: int, user=Depends(get_current_user)):
     row = user_repo.notes_get_by_id(db, note_id)
     if row is None:
         raise NotFoundError("note not found")
-    added = user_repo.note_add_like(db, note_id, user["id"], _now_iso())
-    if not added:
+    liked, new_count = user_repo.note_toggle_like(db, note_id, user["id"], _now_iso())
+    if not liked:
         raise ConflictError("already liked")
-    user_repo.note_increment_likes(db, note_id)
-    new_count = user_repo.note_get_like_count(db, note_id)
     return envelope({"liked": True, "like_count": new_count})
 
 
-# ── DELETE /api/notes/{note_id}/like ──────────────────────────────────────────
+# ── DELETE /api/notes/{note_id}/like ──────────────────────────────────
 
 @_extra_router.delete("/{note_id}/like")
 def unlike_note(note_id: int, user=Depends(get_current_user)):
@@ -175,9 +169,7 @@ def unlike_note(note_id: int, user=Depends(get_current_user)):
     row = user_repo.notes_get_by_id(db, note_id)
     if row is None:
         raise NotFoundError("note not found")
-    removed = user_repo.note_remove_like(db, note_id, user["id"])
-    if not removed:
+    liked, new_count = user_repo.note_toggle_like(db, note_id, user["id"], _now_iso())
+    if liked:
         raise NotFoundError("not liked")
-    user_repo.note_decrement_likes(db, note_id)
-    new_count = user_repo.note_get_like_count(db, note_id)
     return envelope({"liked": False, "like_count": new_count})

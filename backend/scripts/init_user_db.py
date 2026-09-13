@@ -96,7 +96,7 @@ def init_user_db(db_path: str) -> None:
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS user_notes (
-                id                INTEGER NOT NULL,
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id           INTEGER NOT NULL,
                 bank_id           TEXT    NOT NULL,
                 question_id       INTEGER NOT NULL,
@@ -105,6 +105,37 @@ def init_user_db(db_path: str) -> None:
                 visibility        TEXT    NOT NULL DEFAULT 'public',
                 like_count        INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (user_id, bank_id, question_id)
+            )
+            """
+        )
+
+        # ── question_feedback ──────────────────────────────
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS question_feedback (
+                id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                bank_id TEXT NOT NULL,
+                question_id INTEGER NOT NULL,
+                category TEXT NOT NULL CHECK(category IN ('答案有误','解析有误','题干有误','图片显示异常','其他')),
+                content TEXT NOT NULL,
+                image_id TEXT,
+                status TEXT NOT NULL DEFAULT '待处理' CHECK(status IN ('待处理','已确认','已忽略')),
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_qf_user ON question_feedback(user_id, created_at)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_qf_question ON question_feedback(question_id)")
+
+        # ── note_likes ─────────────────────────────────────
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS note_likes (
+                note_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(note_id, user_id)
             )
             """
         )

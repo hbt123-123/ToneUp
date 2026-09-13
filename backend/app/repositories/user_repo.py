@@ -37,6 +37,7 @@ __all__ = [
     "notes_delete",
     "note_add_like",
     "note_remove_like",
+    "note_toggle_like",
 ]
 
 
@@ -263,21 +264,23 @@ def notes_upsert(
     bank_id: str,
     question_id: int,
     note_text: str,
+    visibility: str,
     now_iso: str,
-) -> None:
-    note_id = int(uuid.uuid4().int % (2**31))
+) -> int:
+    """保存（upsert）笔记；返回生成的 note_id。"""
     with user_connection(db_path) as conn:
         with conn:
-            conn.execute(
+            cur = conn.execute(
                 """
-                INSERT INTO user_notes (id, user_id, bank_id, question_id, note_text, updated_at)
+                INSERT INTO user_notes (user_id, bank_id, question_id, note_text, visibility, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (user_id, bank_id, question_id)
                 DO UPDATE SET note_text = excluded.note_text,
                               updated_at = excluded.updated_at
                 """,
-                (note_id, user_id, bank_id, question_id, note_text, now_iso),
+                (user_id, bank_id, question_id, note_text, visibility, now_iso),
             )
+            return int(cur.lastrowid)
 
 
 # ── ai_feedback ──────────────────────────────────────────────────────────────
@@ -510,6 +513,46 @@ def note_remove_like(db_path: str, note_id: int, user_id: int) -> bool:
                 (note_id, user_id),
             )
     return cur.rowcount == 1
+
+
+def note_toggle_like(db_path: str, note_id: int, user_id: int, now_iso: str) -> tuple[bool, int]:
+    """原子化点赞/取消点赞：返回 (liked: bool, like_count: int)。
+
+    已点赞则取消；未点赞则点赞。全部在单事务内完成。
+    """
+    with user_connection(db_path) as conn:
+        with conn:
+            existing = conn.execute(
+                "SELECT 1 FROM note_likes WHERE note_id = ? AND user_id = ?",
+                (note_id, user_id),
+            ).fetchone()
+            if existing is not None:
+                conn.execute(
+                    "DELETE FROM note_likes WHERE note_id = ? AND user_id = ?",
+                    (note_id, user_id),
+                )
+                count = conn.execute(
+                    "SELECT like_count FROM user_notes WHERE id = ?", (note_id,)
+                ).fetchone()[0]
+                return (False, max(0, count - 1))
+            try:
+                conn.execute(
+                    "INSERT INTO note_likes (note_id, user_id, created_at) VALUES (?, ?, ?)",
+                    (note_id, user_id, now_iso),
+                )
+            except sqlite3.IntegrityError:
+                count = conn.execute(
+                    "SELECT like_count FROM user_notes WHERE id = ?", (note_id,)
+                ).fetchone()[0]
+                return (False, count)
+            count = conn.execute(
+                "SELECT like_count FROM user_notes WHERE id = ?", (note_id,)
+            ).fetchone()[0]
+            conn.execute(
+                "UPDATE user_notes SET like_count = like_count + 1 WHERE id = ?",
+                (note_id,),
+            )
+            return (True, count + 1)
 
 
 def note_get_like_count(db_path: str, note_id: int) -> int:

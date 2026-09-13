@@ -126,7 +126,7 @@ class SectionListViewModelTest {
             sections = listOf(
                 SectionItem(title = "A", total = 10, done = 0),
                 SectionItem(title = "B", total = 10, done = 10, wrong = 3),
-                SectionItem(title = "C", total = 10, done = 5, favorited = true),
+                SectionItem(title = "C", total = 10, done = 5, favorited = 1),
                 SectionItem(title = "D", total = 10, done = 5)
             )
         )

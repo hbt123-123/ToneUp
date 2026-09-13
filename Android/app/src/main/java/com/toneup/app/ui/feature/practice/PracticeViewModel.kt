@@ -186,7 +186,6 @@ class PracticeViewModel @Inject constructor(
         }
         viewModelScope.launch { ensureSlot(index) }
         viewModelScope.launch {
-            delay(50)
             val q = slotAt(index)?.question
             if (q != null) {
                 _isFavorited.value = _state.value.favoritedIds.contains(q.questionId)
@@ -310,9 +309,16 @@ class PracticeViewModel @Inject constructor(
 
     fun toggleFavorite() {
         val newFavorited = !_isFavorited.value
-        _isFavorited.value = newFavorited
         val bankId = sessionBankId()
         val questionId = currentQuestion()?.questionId ?: return
+        _state.value = _state.value.copy(
+            favoritedIds = if (newFavorited) {
+                _state.value.favoritedIds + questionId
+            } else {
+                _state.value.favoritedIds - questionId
+            }
+        )
+        _isFavorited.value = newFavorited
         viewModelScope.launch {
             try {
                 val body = FavoriteRequest(bankId = bankId, questionId = questionId)
@@ -323,6 +329,13 @@ class PracticeViewModel @Inject constructor(
                 }
             } catch (_: Exception) {
                 _isFavorited.value = !newFavorited
+                _state.value = _state.value.copy(
+                    favoritedIds = if (newFavorited) {
+                        _state.value.favoritedIds - questionId
+                    } else {
+                        _state.value.favoritedIds + questionId
+                    }
+                )
             }
         }
     }
