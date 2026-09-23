@@ -209,9 +209,9 @@ fun NavGraphBuilder.addSectionListGraph(navController: NavHostController) {
                     typeCodeFilter = typeCode,
                     title = buildString {
                         append("分组练习")
-                        year?.let { append(" $it年") }
+                        year?.let { append(" ${it}年") }
                         typeCode?.let { append(" $it") }
-                        count?.let { append(" $it题") }
+                        count?.let { append(" ${it}题") }
                     }
                 ) { sessionId ->
                     navController.navigate(Routes.practice(sessionId))

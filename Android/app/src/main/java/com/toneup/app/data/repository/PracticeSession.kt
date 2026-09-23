@@ -48,6 +48,9 @@ class PracticeSession(
         const val MODE_PRACTICE = "practice"
         const val MODE_REVIEW = "review"
         const val MODE_SELF_JUDGE = "self_judge"
+
+        /** 背题模式标记：仅用于 UI/测试识别，不写入 attempts 上报（EC-02） */
+        const val MODE_RECITE = "recite"
     }
 }
 

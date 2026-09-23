@@ -251,7 +251,7 @@ fun FeedbackForm(
                                             if (!envelope.success) {
                                                 submitting = false
                                                 errorMsg = envelope.message ?: "提交失败"
-                                                return@scope
+                                                return@launch
                                             }
                                             submitting = false
                                             android.widget.Toast

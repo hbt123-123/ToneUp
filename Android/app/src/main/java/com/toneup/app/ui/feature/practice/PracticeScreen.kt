@@ -75,6 +75,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toneup.app.data.remote.dto.QuestionDto
 import com.toneup.app.domain.logic.PracticeStatus
+import com.toneup.app.domain.logic.ReciteMode
 import com.toneup.app.domain.model.QuestionType
 import com.toneup.app.ui.LocalToneUpPreferences
 import com.toneup.app.ui.components.Haptic
@@ -149,7 +150,8 @@ fun PracticeScreen(
             knownTotal = state.knownTotal,
             progress = if (state.knownTotal > 0) {
                 ((state.currentIndex + 1f) / state.knownTotal).coerceIn(0f, 1f)
-            } else 0f
+            } else 0f,
+            reciteMode = showAnswerMode
         )
 
         // 待同步横幅（§8.3）
@@ -187,7 +189,8 @@ fun PracticeScreen(
                     viewModel = viewModel,
                     onOpenAnalysis = onOpenAnalysis,
                     onRetryLoad = { viewModel.retryLoad(state.currentIndex) },
-                    featureApis = featureApis
+                    featureApis = featureApis,
+                    showAnswerMode = showAnswerMode
                 )
             } else {
                 // 普通单题
@@ -316,7 +319,8 @@ private fun EnhancedTopBar(
     questionTypeLabel: String?,
     currentIndex: Int,
     knownTotal: Int,
-    progress: Float
+    progress: Float,
+    reciteMode: Boolean = false
 ) {
     Column(
         modifier = Modifier
@@ -334,12 +338,14 @@ private fun EnhancedTopBar(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "退出刷题")
             }
 
-            // 计时器 HH:mm:ss
-            Text(
-                text = formatElapsed(elapsedSeconds),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
+            // 计时器 HH:mm:ss（背题模式隐藏计时，进度与题号保留——EC-02）
+            if (!reciteMode) {
+                Text(
+                    text = formatElapsed(elapsedSeconds),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
 
             Spacer(Modifier.weight(1f))
 
@@ -460,7 +466,9 @@ private fun EnhancedBottomBar(
                 BottomToolButton(
                     icon = Icons.Filled.DateRange,
                     label = "交卷",
-                    onClick = onSubmit
+                    onClick = onSubmit,
+                    // 背题模式禁用交卷（零上报，EC-02）；答题卡跳题保持可用
+                    enabled = !showAnswerMode
                 )
                 BottomToolButton(
                     icon = Icons.Filled.Visibility,
@@ -515,19 +523,20 @@ private fun BottomToolButton(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
-    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface
+    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+    enabled: Boolean = true
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(horizontal = 4.dp)
     ) {
-        IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+        IconButton(onClick = onClick, modifier = Modifier.size(36.dp), enabled = enabled) {
             Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
         }
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = tint
+            color = if (enabled) tint else tint.copy(alpha = 0.38f)
         )
     }
 }
@@ -646,7 +655,7 @@ fun QuestionBody(
                     FormulaText(text = question.content, modifier = Modifier.fillMaxWidth())
 
                     if (slot.status is PracticeStatus.Submitted) {
-                        val isCorrect = if (question.typeCode in listOf(QuestionType.Choice.typeCode, QuestionType.MultiChoice.typeCode)) {
+                        val isCorrect = if (question.typeCode in listOf(QuestionType.Single.typeCode, QuestionType.Multi.typeCode)) {
                             slot.answer != null && run {
                                 val myLabels = when (val a = slot.answer) {
                                     is AnswerValue.Choice -> listOf(a.label)
@@ -667,11 +676,14 @@ fun QuestionBody(
                             else -> ""
                         }
                         val correctAnswer = question.answerText?.trim().orEmpty()
-                        GradingResultBar(
-                            isCorrect = isCorrect,
-                            myAnswer = myAnswer,
-                            correctAnswer = correctAnswer
-                        )
+                        // 客观题判分条（主观题无对错判定，isCorrect=null 不渲染）
+                        if (isCorrect != null) {
+                            GradingResultBar(
+                                isCorrect = isCorrect,
+                                myAnswer = myAnswer,
+                                correctAnswer = correctAnswer
+                            )
+                        }
                         if (isCorrect == false && featureApis != null) {
                             var removed by remember { mutableStateOf(false) }
                             Spacer(Modifier.height(8.dp))
@@ -763,7 +775,8 @@ fun ReadingGroupBody(
     viewModel: PracticeViewModel,
     onOpenAnalysis: (Long) -> Unit,
     onRetryLoad: () -> Unit,
-    featureApis: PracticeFeatureApis? = null
+    featureApis: PracticeFeatureApis? = null,
+    showAnswerMode: Boolean = false
 ) {
     val slot = state.slots.getOrNull(state.currentIndex) ?: return
     val question = slot.question ?: return
@@ -845,7 +858,8 @@ fun ReadingGroupBody(
                     val next = passageQuestions.getOrNull(currentSubIndex + 1)
                     if (next != null) viewModel.loadQuestion(state.slots.indexOf(next))
                 },
-                featureApis = featureApis
+                featureApis = featureApis,
+                showAnswerMode = showAnswerMode
             )
         }
     }
@@ -858,19 +872,28 @@ private fun buildContext(
     index: Int,
     onSkip: () -> Unit,
     showAnswerMode: Boolean = false
-): QuestionContext = QuestionContext(
-    question = question,
-    answer = slot.answer,
-    readonly = slot.status is PracticeStatus.Submitted || showAnswerMode,
-    disabled = slot.status == PracticeStatus.Submitting || showAnswerMode,
-    showAnswer = slot.status is PracticeStatus.Submitted && question.typeCode in OBJECTIVE_TYPES,
-    showAnalysis = slot.status is PracticeStatus.Submitted,
-    onAnswerChange = { viewModel.onAnswerChange(index, it) },
-    onSubmitRequest = { viewModel.submitCurrent(index) },
-    onToggleMark = { viewModel.toggleMark(index) },
-    onRetryLoad = { viewModel.retryLoad(index) },
-    onSkipQuestion = onSkip
-)
+): QuestionContext {
+    // 背题派生统一走 ReciteMode 纯函数（EC-02，JVM 单测覆盖）
+    val derived = ReciteMode.deriveContext(
+        submitted = slot.status is PracticeStatus.Submitted,
+        objectiveType = question.typeCode in OBJECTIVE_TYPES,
+        submitting = slot.status == PracticeStatus.Submitting,
+        recite = showAnswerMode
+    )
+    return QuestionContext(
+        question = question,
+        answer = slot.answer,
+        readonly = derived.readonly,
+        disabled = derived.disabled,
+        showAnswer = derived.showAnswer,
+        showAnalysis = derived.showAnalysis,
+        onAnswerChange = { viewModel.onAnswerChange(index, it) },
+        onSubmitRequest = { viewModel.submitCurrent(index) },
+        onToggleMark = { viewModel.toggleMark(index) },
+        onRetryLoad = { viewModel.retryLoad(index) },
+        onSkipQuestion = onSkip
+    )
+}
 
 private val OBJECTIVE_TYPES = setOf(
     QuestionType.Single.typeCode,

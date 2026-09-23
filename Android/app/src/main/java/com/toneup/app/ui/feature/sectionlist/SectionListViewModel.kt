@@ -7,7 +7,6 @@ import com.toneup.app.data.remote.dto.SectionItem
 import com.toneup.app.data.remote.dto.SectionsResponse
 import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.SectionRepository
-import androidx.annotation.VisibleForTesting
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -125,16 +124,4 @@ class SectionListViewModel @Inject constructor(
     fun retry() {
         loadSections()
     }
-
-    @VisibleForTesting
-    internal constructor(
-        savedStateHandle: SavedStateHandle,
-        sectionRepository: SectionRepository
-    ) : this(
-        savedStateHandle = savedStateHandle,
-        sectionRepository = sectionRepository,
-        sessionManager = null,
-        connectivityMonitor = null,
-        sessionDataStoreManager = null
-    )
 }

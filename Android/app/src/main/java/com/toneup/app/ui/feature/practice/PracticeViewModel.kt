@@ -21,6 +21,7 @@ import com.toneup.app.domain.logic.CorrectAnswerParser
 import com.toneup.app.domain.logic.PracticeEvent
 import com.toneup.app.domain.logic.PracticeStateMachine
 import com.toneup.app.domain.logic.PracticeStatus
+import com.toneup.app.domain.logic.ReciteMode
 import com.toneup.app.domain.model.AnswerValue
 import com.toneup.app.domain.model.QuestionType
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -103,6 +104,7 @@ class PracticeViewModel @Inject constructor(
     private val _isFavorited = MutableStateFlow(false)
     val isFavorited: StateFlow<Boolean> = _isFavorited
 
+    /** 会话级背题开关（EC-02）：开启后零 attempts 上报、零错题/掌握度写入；仅内存态，退出即失效，不持久化 */
     private val _showAnswer = MutableStateFlow(false)
     val showAnswer: StateFlow<Boolean> = _showAnswer
 
@@ -245,6 +247,9 @@ class PracticeViewModel @Inject constructor(
 
     private fun slotAt(index: Int): QuestionSlot? = _state.value.slots.getOrNull(index)
 
+    /** 当前题的题目（toggleFavorite 等副操作消费） */
+    private fun currentQuestion(): QuestionDto? = slotAt(_state.value.currentIndex)?.question
+
     private suspend fun hydrateSlot(index: Int, question: QuestionDto) {
         val userId = sessionManager.currentUserId()
         val draftAnswer = userId?.let {
@@ -340,6 +345,7 @@ class PracticeViewModel @Inject constructor(
         }
     }
 
+    /** 切换会话级背题模式；背题中 submitCurrent 直接触发 return 守卫 */
     fun toggleAnswerMode() {
         _showAnswer.value = !_showAnswer.value
     }
@@ -451,7 +457,7 @@ class PracticeViewModel @Inject constructor(
     // ---------- 提交 ----------
 
     fun submitCurrent(index: Int) {
-        if (_showAnswer.value) return
+        if (!ReciteMode.canSubmit(recite = _showAnswer.value)) return
         val slot = slotAt(index) ?: return
         val question = slot.question ?: return
         val answer = slot.answer ?: return
