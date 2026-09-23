@@ -98,7 +98,7 @@ def list_questions(
     bank_id: str,
     year: int | None = None,
     type_code: str | None = None,
-    page: int = Query(1, ge=1),
+    page_num: int = Query(1, ge=1, alias="page"),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """分页题目列表；不含 answer_text/solution；passage 默认返回。"""
@@ -111,10 +111,10 @@ def list_questions(
         type_id = reverse[type_code]
 
     rows, total = bank_repo.list_questions(
-        str(entry.path), question_type_id=type_id, year=year, page=page, page_size=page_size
+        str(entry.path), question_type_id=type_id, year=year, page=page_num, page_size=page_size
     )
     items = [_build_dto(entry, r, include_answer=False) for r in rows]
-    has_more = page * page_size < total
+    has_more = page_num * page_size < total
     return envelope(page(items, total, has_more))
 
 
