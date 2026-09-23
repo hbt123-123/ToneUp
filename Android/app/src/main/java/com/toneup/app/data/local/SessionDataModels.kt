@@ -37,6 +37,8 @@ data class LastPracticeContext(
     val title: String? = null,
     val year: Int? = null,
     val typeCode: String? = null,
+    /** EC-01：非空表示服务端会话 id，恢复时据此走 GET detail 拉题目+草稿 */
+    val serverSessionId: Long? = null,
     val updatedAtMillis: Long
 )
 
@@ -46,5 +48,7 @@ data class SessionData(
     val pendingSubmissions: List<PendingSubmission> = emptyList(),
     val lastContext: LastPracticeContext? = null,
     /** 本地收藏标记，与账号隔离 */
-    val markedKeys: List<String> = emptyList()
+    val markedKeys: List<String> = emptyList(),
+    /** EC-01 交卷幂等键：服务端确认（submit 成功）前复用同一 id */
+    val sessionSubmitRequestId: String? = null
 )

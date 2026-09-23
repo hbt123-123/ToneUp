@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -93,13 +94,36 @@ fun BankTab(
                     }
                 }
 
+                // EC-01 练习会话历史入口
+                item {
+                    Card(
+                        onClick = { rootNavController.navigate(Routes.SESSION_HISTORY) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.size(12.dp))
+                            Text("练习会话", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.weight(1f))
+                            Icon(Icons.Filled.ChevronRight, contentDescription = null)
+                        }
+                    }
+                }
+
                 // FR-HM-02 继续上次刷题（无历史隐藏）
                 if (home.lastContext != null) {
                     item {
                         Card(
                             onClick = {
-                                viewModel.continueLastPractice { sessionId ->
-                                    rootNavController.navigate(Routes.practice(sessionId))
+                                viewModel.continueLastPractice { sessionId, index ->
+                                    rootNavController.navigate(Routes.practice(sessionId, index = index))
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()

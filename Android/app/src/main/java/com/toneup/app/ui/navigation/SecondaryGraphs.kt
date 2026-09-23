@@ -171,6 +171,7 @@ fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
         SummaryScreen(
             stats = stats,
             totalTime = totalTime,
+            serverSessionId = viewModel.serverSessionId,
             onReviewWrong = {
                 navController.popBackStack()
             },
@@ -230,6 +231,14 @@ fun NavGraphBuilder.addSecondaryGraphs(navController: NavHostController) {
         )
     ) {
         AiPhotoScreen(onBack = { navController.popBackStack() })
+    }
+    composable(Routes.SESSION_HISTORY) {
+        com.toneup.app.ui.feature.sessionhistory.SessionHistoryScreen(
+            onBack = { navController.popBackStack() },
+            onContinue = { sessionId, index ->
+                navController.navigate(Routes.practice(sessionId, index = index))
+            }
+        )
     }
     if (BuildConfig.DEBUG) {
         composable(Routes.FORMULA_POC) {

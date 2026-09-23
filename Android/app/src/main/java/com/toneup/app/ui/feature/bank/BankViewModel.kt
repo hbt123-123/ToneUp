@@ -9,6 +9,8 @@ import com.toneup.app.data.repository.CatalogRepository
 import com.toneup.app.data.remote.dto.CatalogDto
 import com.toneup.app.data.repository.PracticeSession
 import com.toneup.app.data.repository.PracticeSessionRegistry
+import com.toneup.app.data.repository.QuestionRef
+import com.toneup.app.data.repository.SessionRepository
 import com.toneup.app.data.repository.StatsRepository
 import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.QuestionRepository
@@ -59,7 +61,8 @@ class BankViewModel @Inject constructor(
     private val sessionRegistry: PracticeSessionRegistry,
     private val sessionDataStoreManager: SessionDataStoreManager,
     private val sessionManager: SessionManager,
-    private val jsonProvider: JsonProvider
+    private val jsonProvider: JsonProvider,
+    private val sessionRepository: SessionRepository
 ) : ViewModel() {
 
     private val _home = MutableStateFlow(HomeUiState())
@@ -218,6 +221,7 @@ class BankViewModel @Inject constructor(
                     title = session.title,
                     year = session.year,
                     typeCode = session.typeCodeFilter,
+                    serverSessionId = session.serverSessionId,
                     updatedAtMillis = System.currentTimeMillis()
                 )
             )
@@ -225,31 +229,58 @@ class BankViewModel @Inject constructor(
         _home.value = _home.value.copy(lastContext = store.data.first().lastContext)
     }
 
-    /** FR-HM-02 继续上次刷题 */
-    fun continueLastPractice(onReady: (String) -> Unit) {
+    /** FR-HM-02 继续上次刷题（EC-01：恢复到上次题号；服务端会话走 GET detail 重建） */
+    fun continueLastPractice(onReady: (sessionId: String, index: Int) -> Unit) {
         val ctx = _home.value.lastContext ?: return
         val existing = sessionRegistry.get(ctx.sessionId)
         if (existing != null) {
-            onReady(ctx.sessionId)
+            onReady(ctx.sessionId, ctx.questionIndex)
         } else {
             viewModelScope.launch {
                 try {
-                    val session = PracticeSession(
-                        sessionId = ctx.sessionId,
-                        bankId = ctx.bankId,
-                        title = ctx.title ?: "继续刷题",
-                        mode = PracticeSession.MODE_PRACTICE,
-                        year = ctx.year,
-                        typeCodeFilter = ctx.typeCode
-                    )
+                    val session = rebuildSession(ctx)
                     sessionRegistry.register(session)
                     _home.value = _home.value.copy(errorHint = null)
-                    onReady(ctx.sessionId)
+                    onReady(session.sessionId, ctx.questionIndex)
                 } catch (_: Exception) {
                     _home.value = _home.value.copy(errorHint = "继续刷题失败，请重新选题")
                 }
             }
         }
+    }
+
+    /**
+     * EC-01 会话重建：服务端会话（serverSessionId 非空）优先走 GET detail 拉题目+草稿，
+     * 失败（离线/服务端异常）回退本地分页装载路径。
+     */
+    private suspend fun rebuildSession(ctx: LastPracticeContext): PracticeSession {
+        val sid = ctx.serverSessionId
+        if (sid != null) {
+            try {
+                val d = sessionRepository.sessionDetail(sid)
+                val session = PracticeSession(
+                    sessionId = ctx.sessionId,
+                    bankId = d.session.bankId,
+                    title = d.session.title.ifBlank { ctx.title ?: "继续刷题" },
+                    mode = PracticeSession.MODE_PRACTICE,
+                    fixedRefs = d.questions.map { QuestionRef(d.session.bankId, it.questionId) },
+                    serverSessionId = d.session.id,
+                    restoredDraft = d.session.draft
+                )
+                synchronized(session) { session.questions.addAll(d.questions) }
+                return session
+            } catch (_: Exception) {
+                // 落入本地重建路径
+            }
+        }
+        return PracticeSession(
+            sessionId = ctx.sessionId,
+            bankId = ctx.bankId,
+            title = ctx.title ?: "继续刷题",
+            mode = PracticeSession.MODE_PRACTICE,
+            year = ctx.year,
+            typeCodeFilter = ctx.typeCode
+        )
     }
 
     companion object {

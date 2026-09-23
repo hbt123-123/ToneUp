@@ -5,23 +5,27 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toneup.app.data.local.ConnectivityMonitor
 import com.toneup.app.data.local.DraftEntry
+import com.toneup.app.data.local.LastPracticeContext
 import com.toneup.app.data.local.SessionDataStoreManager
 import com.toneup.app.data.local.SessionManager
 import com.toneup.app.data.remote.api.FavoriteRequest
 import com.toneup.app.data.remote.api.FavoritesApi
 import com.toneup.app.data.remote.dto.QuestionDto
+import com.toneup.app.data.remote.dto.SessionSummaryDto
 import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.PracticeRepository
 import com.toneup.app.data.repository.PracticeSession
 import com.toneup.app.data.repository.PracticeSessionRegistry
 import com.toneup.app.data.repository.QuestionRef
 import com.toneup.app.data.repository.QuestionRepository
+import com.toneup.app.data.repository.SessionRepository
 import com.toneup.app.domain.logic.AnswerCodec
 import com.toneup.app.domain.logic.CorrectAnswerParser
 import com.toneup.app.domain.logic.PracticeEvent
 import com.toneup.app.domain.logic.PracticeStateMachine
 import com.toneup.app.domain.logic.PracticeStatus
 import com.toneup.app.domain.logic.ReciteMode
+import com.toneup.app.domain.logic.SessionDraftMerge
 import com.toneup.app.domain.model.AnswerValue
 import com.toneup.app.domain.model.QuestionType
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 data class PaperStats(
@@ -69,6 +74,17 @@ data class PracticeUiState(
         }
 }
 
+/** EC-01 服务端会话交卷状态 */
+sealed interface SessionSubmitState {
+    data object Idle : SessionSubmitState
+    data object Submitting : SessionSubmitState
+    /** 服务端会话交卷成功 */
+    data class Done(val summary: SessionSummaryDto, val replayed: Boolean) : SessionSubmitState
+    /** 本地会话（无服务端 sid）：无需服务端交卷，直接进小结 */
+    data object LocalOnly : SessionSubmitState
+    data class Failed(val message: String) : SessionSubmitState
+}
+
 @HiltViewModel
 class PracticeViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -78,7 +94,8 @@ class PracticeViewModel @Inject constructor(
     private val sessionDataStoreManager: SessionDataStoreManager,
     private val sessionManager: SessionManager,
     private val connectivityMonitor: ConnectivityMonitor,
-    private val favoritesApi: FavoritesApi
+    private val favoritesApi: FavoritesApi,
+    private val sessionRepository: SessionRepository
 ) : ViewModel() {
 
     val sessionId: String = savedStateHandle.get<String>("sessionId") ?: ""
@@ -86,6 +103,9 @@ class PracticeViewModel @Inject constructor(
         savedStateHandle.get<String>("mode") ?: PracticeSession.MODE_PRACTICE
 
     private val session: PracticeSession? = sessionRegistry.get(sessionId)
+
+    /** EC-01：服务端会话 id（小结页/交卷消费） */
+    val serverSessionId: Long? get() = session?.serverSessionId
 
     private val _state = MutableStateFlow(PracticeUiState(sessionId = sessionId))
     val state: StateFlow<PracticeUiState> = _state
@@ -108,6 +128,10 @@ class PracticeViewModel @Inject constructor(
     private val _showAnswer = MutableStateFlow(false)
     val showAnswer: StateFlow<Boolean> = _showAnswer
 
+    /** EC-01 服务端会话交卷状态流 */
+    private val _sessionSubmitState = MutableStateFlow<SessionSubmitState>(SessionSubmitState.Idle)
+    val sessionSubmitState: StateFlow<SessionSubmitState> = _sessionSubmitState
+
     init {
         val size = session?.let { s ->
             if (s.fixedRefs != null) s.fixedRefs.size.coerceAtLeast(1) else 1
@@ -122,7 +146,9 @@ class PracticeViewModel @Inject constructor(
         loadFavoritedIds()
         observeConnectivity()
         refreshPending()
-        loadQuestion(0)
+        // EC-01 lastIndex 修复：恢复路径（路由带 index>=0）按 index 恢复，否则从第 0 题开始
+        val initialIndex = savedStateHandle.get<Int>("index") ?: -1
+        loadQuestion(if (initialIndex >= 0) initialIndex else 0)
         timerJob = viewModelScope.launch {
             while (true) {
                 delay(1000)
@@ -178,8 +204,14 @@ class PracticeViewModel @Inject constructor(
     fun loadQuestion(index: Int, goTo: Boolean = true) {
         val s = session ?: return
         if (index < 0) return
-        if (index != _state.value.currentIndex && goTo) {
+        val previousIndex = _state.value.currentIndex
+        val switching = index != previousIndex && goTo
+        if (switching) {
             questionShownAtMs = System.currentTimeMillis()
+            // EC-01 lastIndex 修复：切题时持久化进度（原先恒 0 导致"继续上次刷题"总回第一题）
+            persistLastIndex(index)
+            // EC-01 草稿推送：先把上一题最新答案落盘，再整体 PUT 服务端草稿（失败静默）
+            flushAndPushServerDraft(previousIndex)
         }
         if (goTo) {
             // 同步扩容，避免 currentIndex 越过已装载页时 UI 因取不到 slot 短暂空白
@@ -196,6 +228,75 @@ class PracticeViewModel @Inject constructor(
         // 相邻预取：不越界、失败静默
         if (index + 1 < slotCount()) {
             viewModelScope.launch { runCatching { ensureSlot(index + 1) } }
+        }
+    }
+
+    /** EC-01：切题时把 questionIndex 写回 LastPracticeContext（仅同会话） */
+    private fun persistLastIndex(index: Int) {
+        val s = session ?: return
+        val userId = sessionManager.currentUserId() ?: return
+        viewModelScope.launch {
+            runCatching {
+                sessionDataStoreManager.storeFor(userId).updateData { data ->
+                    val ctx = data.lastContext
+                    if (ctx != null && ctx.sessionId == s.sessionId && ctx.questionIndex != index) {
+                        data.copy(
+                            lastContext = ctx.copy(
+                                questionIndex = index,
+                                updatedAtMillis = System.currentTimeMillis()
+                            )
+                        )
+                    } else {
+                        data
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * EC-01：切题时草稿落盘 + 服务端推送。
+     * - flush 上一题最新答案到本地 DataStore（防抖窗口内的作答不丢失）
+     * - 服务端会话（serverSessionId != null）再整体 PUT /{sid}/draft，失败静默
+     */
+    private fun flushAndPushServerDraft(prevIndex: Int) {
+        val s = session ?: return
+        val prevSlot = slotAt(prevIndex) ?: run {
+            pushServerDraftOnly()
+            return
+        }
+        val question = prevSlot.question
+        val answer = prevSlot.answer
+        viewModelScope.launch {
+            if (question != null) {
+                if (answer != null && !answer.isEmpty && prevSlot.status.canEdit) {
+                    runCatching { writeDraft(question, answer) }
+                } else if (answer == null || answer.isEmpty) {
+                    runCatching { clearDraft(question.bankId, question.questionId) }
+                }
+            }
+            pushServerDraftIfServerSession(s)
+        }
+    }
+
+    private fun pushServerDraftOnly() {
+        val s = session ?: return
+        if (s.serverSessionId == null) return
+        viewModelScope.launch { pushServerDraftIfServerSession(s) }
+    }
+
+    private suspend fun pushServerDraftIfServerSession(s: PracticeSession) {
+        val sid = s.serverSessionId ?: return
+        val userId = sessionManager.currentUserId() ?: return
+        runCatching {
+            val drafts = sessionDataStoreManager.storeFor(userId).data.first().drafts
+                .filter { it.bankId == s.bankId }
+            sessionRepository.updateDraft(
+                sessionId = sid,
+                currentIndex = _state.value.currentIndex,
+                draft = SessionDraftMerge.toServerDraft(drafts.map { it.questionId to it.answer }),
+                elapsedSeconds = _elapsedSeconds.value
+            )
         }
     }
 
@@ -262,11 +363,22 @@ class PracticeViewModel @Inject constructor(
 
     private suspend fun hydrateSlot(index: Int, question: QuestionDto) {
         val userId = sessionManager.currentUserId()
-        val draftAnswer = userId?.let {
+        val localDraft = userId?.let {
             runCatching {
                 sessionDataStoreManager.storeFor(it).data.first().drafts
                     .firstOrNull { d -> d.bankId == question.bankId && d.questionId == question.questionId }
-            }.getOrNull()?.answer
+            }.getOrNull()
+        }
+        // EC-01 草稿合并：跨进程恢复的服务端会话「服务端优先、本地兜底」；其余场景纯本地
+        val serverDraft = session?.restoredDraft
+        val draftAnswer = if (serverDraft != null) {
+            SessionDraftMerge.resolve(
+                serverDraft = serverDraft,
+                localEntries = localDraft?.let { listOf(question.questionId to it.answer) } ?: emptyList(),
+                questionId = question.questionId
+            )
+        } else {
+            localDraft?.answer
         }
         val restored = draftAnswer?.let { AnswerCodec.decode(it) }
         updateSlot(index) {
@@ -510,6 +622,65 @@ class PracticeViewModel @Inject constructor(
                 updateSlot(index) { it.copy(errorHint = "提交失败，请重试") }
             }
         }
+    }
+
+    // ---------- 服务端会话交卷（EC-01） ----------
+
+    /**
+     * 交卷：服务端会话走 POST /{sid}/submit（交卷前强制 flush 未同步队列，
+     * client_request_id 持久化于 DataStore 直到服务端确认）；本地会话直接进小结。
+     */
+    fun submitSession() {
+        val s = session ?: run {
+            _sessionSubmitState.value = SessionSubmitState.Failed("会话不存在")
+            return
+        }
+        if (s.serverSessionId == null) {
+            _sessionSubmitState.value = SessionSubmitState.LocalOnly
+            return
+        }
+        if (_sessionSubmitState.value is SessionSubmitState.Submitting) return
+        _sessionSubmitState.value = SessionSubmitState.Submitting
+        viewModelScope.launch {
+            try {
+                // 1. 强制 flush：未同步队列联网重放，避免交卷后仍有在途作答
+                runCatching { practiceRepository.replayPendingQueue() }
+                refreshPending()
+                // 2. 尽力推送最后一份草稿
+                pushServerDraftIfServerSession(s)
+                // 3. 幂等键：持久化复用直到服务端确认
+                val userId = sessionManager.currentUserId()
+                    ?: throw AppException.Unauthorized()
+                val store = sessionDataStoreManager.storeFor(userId)
+                val existing = store.data.first().sessionSubmitRequestId
+                val clientRequestId = existing ?: UUID.randomUUID().toString()
+                if (existing == null) {
+                    store.updateData { it.copy(sessionSubmitRequestId = clientRequestId) }
+                }
+                try {
+                    val resp = sessionRepository.submitSession(s.serverSessionId, clientRequestId)
+                    // 服务端确认：清除幂等键
+                    store.updateData { it.copy(sessionSubmitRequestId = null) }
+                    _sessionSubmitState.value =
+                        SessionSubmitState.Done(resp.summary, resp.replayed)
+                } catch (e: Exception) {
+                    if (e is AppException && e !is AppException.Network) {
+                        // 明确业务拒绝：幂等键使命结束
+                        store.updateData { it.copy(sessionSubmitRequestId = null) }
+                    }
+                    throw e
+                }
+            } catch (e: AppException) {
+                _sessionSubmitState.value = SessionSubmitState.Failed(e.userMessage)
+            } catch (e: Exception) {
+                _sessionSubmitState.value = SessionSubmitState.Failed("交卷失败，请重试")
+            }
+        }
+    }
+
+    /** 交卷状态消费后回置（UI 导航完成后调用） */
+    fun consumeSessionSubmitState() {
+        _sessionSubmitState.value = SessionSubmitState.Idle
     }
 
     // ---------- 标记 ----------

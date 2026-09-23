@@ -48,5 +48,8 @@ object Routes {
     /** 练习小结页 */
     const val SUMMARY = "summary"
 
+    /** EC-01 练习会话历史列表页 */
+    const val SESSION_HISTORY = "sessionHistory"
+
     const val FORMULA_POC = "formula_poc" // debug-only PoC 页
 }

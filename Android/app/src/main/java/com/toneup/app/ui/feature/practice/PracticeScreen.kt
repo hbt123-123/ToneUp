@@ -297,13 +297,32 @@ fun PracticeScreen(
     // ===== 交卷确认对话框 =====
     if (showSubmitDialog) {
         val stats = viewModel.submitPaperStats()
+        val submitState by viewModel.sessionSubmitState.collectAsStateWithLifecycle()
+        val context = androidx.compose.ui.platform.LocalContext.current
+        LaunchedEffect(submitState) {
+            when (val s = submitState) {
+                is com.toneup.app.ui.feature.practice.SessionSubmitState.Done,
+                    com.toneup.app.ui.feature.practice.SessionSubmitState.LocalOnly -> {
+                    showSubmitDialog = false
+                    viewModel.consumeSessionSubmitState()
+                    onOpenSummary()
+                }
+                is com.toneup.app.ui.feature.practice.SessionSubmitState.Failed -> {
+                    viewModel.consumeSessionSubmitState()
+                    android.widget.Toast.makeText(context, s.message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+                else -> {}
+            }
+        }
         SubmitConfirmDialog(
             stats = stats,
-            onConfirm = {
-                showSubmitDialog = false
-                onOpenSummary()
-            },
-            onDismiss = { showSubmitDialog = false }
+            submitting = submitState is com.toneup.app.ui.feature.practice.SessionSubmitState.Submitting,
+            onConfirm = { viewModel.submitSession() },
+            onDismiss = {
+                if (submitState !is com.toneup.app.ui.feature.practice.SessionSubmitState.Submitting) {
+                    showSubmitDialog = false
+                }
+            }
         )
     }
 }
@@ -546,6 +565,7 @@ private fun BottomToolButton(
 @Composable
 private fun SubmitConfirmDialog(
     stats: PaperStats,
+    submitting: Boolean = false,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -565,13 +585,22 @@ private fun SubmitConfirmDialog(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
+                if (submitting) {
+                    Text(
+                        text = "正在交卷…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("确认交卷") }
+            TextButton(onClick = onConfirm, enabled = !submitting) {
+                Text(if (submitting) "提交中" else "确认交卷")
+            }
         },
         dismissButton = {
-            OutlinedButton(onClick = onDismiss) { Text("取消") }
+            OutlinedButton(onClick = onDismiss, enabled = !submitting) { Text("取消") }
         }
     )
 }

@@ -34,13 +34,20 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 fun SummaryScreen(
     stats: PaperStats,
     totalTime: Int,
+    serverSessionId: Long? = null,
     onReviewWrong: () -> Unit,
     onPracticeAgain: () -> Unit,
     onBackToList: () -> Unit,
     onBack: () -> Unit,
     viewModel: SummaryViewModel = hiltViewModel()
 ) {
-    val uiState = viewModel.buildState(stats, totalTime)
+    // EC-01：服务端会话拉取服务端 summary 覆盖本地估算
+    val serverSummary by viewModel.serverSummary.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(serverSessionId) {
+        serverSessionId?.let { viewModel.loadServerResult(it) }
+    }
+    val localState = viewModel.buildState(stats, totalTime)
+    val uiState = serverSummary ?: localState
 
     Scaffold(
         topBar = {
@@ -95,6 +102,13 @@ fun SummaryScreen(
                             MaterialTheme.colorScheme.primary
                         }
                     )
+                    if (uiState.serverBacked) {
+                        Text(
+                            text = "已同步服务端成绩",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 
