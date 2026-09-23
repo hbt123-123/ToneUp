@@ -105,6 +105,12 @@ def _build_zhenti(
             """,
             (year,),
         ).fetchall()
+        collection_ids = [
+            r["id"] for r in conn.execute(
+                "SELECT DISTINCT c.id FROM collections c WHERE c.year = ? ORDER BY c.id",
+                (year,),
+            ).fetchall()
+        ]
         qids = [r["id"] for r in qrows]
         qid_type = {r["id"]: r["question_type_id"] for r in qrows}
 
@@ -126,7 +132,7 @@ def _build_zhenti(
                     t_info["wrong"] += wrong.get(qid, 0)
                     t_info["favorited"] += favorited.get(qid, 0)
             types_list.append(t_info)
-        result.append({"year": year, "types": types_list})
+        result.append({"year": year, "types": types_list, "collection_ids": collection_ids})
 
     return result
 
@@ -162,6 +168,12 @@ def _build_zhuanti(
         qids = [r["id"] for r in qrows]
         if not qids:
             continue
+        collection_ids = [
+            c["id"] for c in conn.execute(
+                "SELECT DISTINCT c.id FROM collections c WHERE c.title = ? ORDER BY c.id",
+                (title,),
+            ).fetchall()
+        ]
         done = _counts(user_db, user_id, bank_id, qids, "practice_records")
         wrong = _counts(user_db, user_id, bank_id, qids, "wrong_questions")
         favorited = _counts(user_db, user_id, bank_id, qids, "favorite_questions")
@@ -171,6 +183,7 @@ def _build_zhuanti(
             "done": sum(done.values()),
             "wrong": sum(wrong.values()),
             "favorited": sum(favorited.values()),
+            "collection_ids": collection_ids,
         })
     return result
 

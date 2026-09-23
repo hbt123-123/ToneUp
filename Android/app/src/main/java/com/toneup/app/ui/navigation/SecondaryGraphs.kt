@@ -23,6 +23,7 @@ import com.toneup.app.ui.feature.practice.ReviewCheckScreen
 import com.toneup.app.ui.feature.practice.SummaryScreen
 import com.toneup.app.ui.feature.sectionlist.SectionListScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
@@ -54,9 +55,11 @@ class RedoSessionHelper @Inject constructor(
 /** 分组列表练习会话助手 */
 @HiltViewModel
 class SectionListSessionHelper @Inject constructor(
-    private val registry: PracticeSessionRegistry
+    private val registry: PracticeSessionRegistry,
+    private val sessionRepository: com.toneup.app.data.repository.SessionRepository
 ) : ViewModel() {
-    fun createSectionPracticeSession(
+    /** 本地全量练习（离线兜底路径）：按年份/题型分页装载 */
+    fun createLocalSectionSession(
         bankId: String,
         year: Int?,
         typeCodeFilter: String?,
@@ -75,6 +78,47 @@ class SectionListSessionHelper @Inject constructor(
             )
         )
         onReady(sessionId)
+    }
+
+    /**
+     * EC-01：优先创建服务端会话（collection_ids + count 真实约束本轮题目）；
+     * 创建失败（离线/服务端异常）回退既有本地全量刷题路径，serverBacked=false 供 UI Toast。
+     */
+    fun createSectionSession(
+        bankId: String,
+        collectionIds: List<Long>?,
+        year: Int?,
+        typeCodeFilter: String?,
+        count: Int,
+        title: String = "分组练习",
+        onReady: (sessionId: String, serverBacked: Boolean) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val resp = sessionRepository.createSession(
+                    bankId = bankId,
+                    collectionIds = collectionIds,
+                    typeCodes = typeCodeFilter?.let { listOf(it) },
+                    count = count
+                )
+                val sid = resp.sessionId
+                val session = PracticeSession(
+                    sessionId = "srv_$sid",
+                    bankId = bankId,
+                    title = title,
+                    mode = PracticeSession.MODE_PRACTICE,
+                    fixedRefs = resp.questions.map { QuestionRef(bankId, it.questionId) },
+                    serverSessionId = sid
+                )
+                synchronized(session) { session.questions.addAll(resp.questions) }
+                registry.register(session)
+                onReady(session.sessionId, true)
+            } catch (_: Exception) {
+                createLocalSectionSession(bankId, year, typeCodeFilter, title) { localId ->
+                    onReady(localId, false)
+                }
+            }
+        }
     }
 }
 
@@ -201,9 +245,10 @@ fun NavGraphBuilder.addSectionListGraph(navController: NavHostController) {
     ) { entry ->
         val bankId = entry.arguments?.getString("bankId") ?: ""
         val helper: SectionListSessionHelper = hiltViewModel(entry)
+        val context = androidx.compose.ui.platform.LocalContext.current
         SectionListScreen(
             onNavigateToPractice = { navBankId, year, typeCode, count ->
-                helper.createSectionPracticeSession(
+                helper.createLocalSectionSession(
                     bankId = navBankId,
                     year = year,
                     typeCodeFilter = typeCode,
@@ -214,6 +259,23 @@ fun NavGraphBuilder.addSectionListGraph(navController: NavHostController) {
                         count?.let { append(" ${it}题") }
                     }
                 ) { sessionId ->
+                    navController.navigate(Routes.practice(sessionId))
+                }
+            },
+            onCreateSession = { navBankId, collectionIds, year, typeCode, count ->
+                helper.createSectionSession(
+                    bankId = navBankId,
+                    collectionIds = collectionIds,
+                    year = year,
+                    typeCodeFilter = typeCode,
+                    count = count,
+                    title = "练习 · ${count}题"
+                ) { sessionId, serverBacked ->
+                    if (!serverBacked) {
+                        android.widget.Toast.makeText(
+                            context, "在线会话创建失败，已进入本地练习", android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
                     navController.navigate(Routes.practice(sessionId))
                 }
             },

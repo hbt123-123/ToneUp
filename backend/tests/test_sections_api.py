@@ -87,6 +87,10 @@ def test_zhenti_returns_year_grouped(app_and_data):
     for section in data["sections"]:
         assert "year" in section
         assert "types" in section
+        # EC-01 选题：sections 增量暴露 collection_ids 供服务端会话创建
+        assert isinstance(section["collection_ids"], list)
+        assert len(section["collection_ids"]) > 0
+        assert all(isinstance(cid, int) for cid in section["collection_ids"])
         for t in section["types"]:
             assert all(k in t for k in ("type_code", "type_name", "total", "done", "wrong", "favorited"))
 
@@ -164,6 +168,9 @@ def test_zhuanti_returns_title_grouped(app_and_data_zhuanti):
         assert "done" in section
         assert "wrong" in section
         assert "favorited" in section
+        # EC-01 选题：专题 section 同样暴露 collection_ids
+        assert isinstance(section["collection_ids"], list)
+        assert len(section["collection_ids"]) > 0
 
 
 def test_statistics_correct(app_and_data):

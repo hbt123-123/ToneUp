@@ -205,6 +205,16 @@ class PracticeViewModel @Inject constructor(
         val s = session ?: return
         if (slotAt(index)?.question != null) return
 
+        // EC-01 服务端会话：题目序列创建时已返回并预填，直接取用
+        if (s.serverSessionId != null) {
+            val q = synchronized(s) { s.questions.getOrNull(index) } ?: run {
+                setStatus(index, PracticeStatus.Error("没有更多题目", isNetwork = false))
+                return
+            }
+            hydrateSlot(index, q)
+            return
+        }
+
         // 练习模式分页装载
         if (s.fixedRefs == null) {
             while (s.questions.size <= index && s.hasMore) {

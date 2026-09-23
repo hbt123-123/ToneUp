@@ -24,6 +24,8 @@ data class SectionItem(
     val done: Int = 0,
     val wrong: Int = 0,
     val favorited: Int = 0,
+    /** EC-01 选题：该分组对应的 collections.id（真题=同年集合、专题=同名集合），服务端会话创建用 */
+    @SerialName("collection_ids") val collectionIds: List<Long> = emptyList(),
     val types: List<TypeStat> = emptyList()
 )
 

@@ -198,6 +198,10 @@ fun BankTab(
             viewModel = viewModel,
             onSessionReady = { sessionId ->
                 rootNavController.navigate(Routes.practice(sessionId))
+            },
+            onOpenSectionList = { bankId ->
+                viewModel.closePicker()
+                rootNavController.navigate(Routes.sectionList(bankId))
             }
         )
     }

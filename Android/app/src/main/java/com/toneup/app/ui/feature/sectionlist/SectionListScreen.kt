@@ -51,11 +51,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.toneup.app.data.remote.dto.SectionItem
+import com.toneup.app.domain.logic.SessionCountPolicy
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SectionListScreen(
     onNavigateToPractice: (bankId: String, year: Int?, typeCode: String?, count: Int?) -> Unit,
+    onCreateSession: (
+        bankId: String, collectionIds: List<Long>?, year: Int?, typeCode: String?, count: Int
+    ) -> Unit,
     viewModel: SectionListViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -154,7 +158,7 @@ fun SectionListScreen(
         }
     }
 
-    // 选题弹窗
+    // 选题弹窗：EC-01 服务端会话（collection_ids + count 真实约束本轮题目）
     if (showSelectDialog && selectedSection != null) {
         SelectQuestionDialog(
             section = selectedSection!!,
@@ -162,8 +166,9 @@ fun SectionListScreen(
             onStart = { count ->
                 showSelectDialog = false
                 val section = selectedSection ?: return@SelectQuestionDialog
-                onNavigateToPractice(
+                onCreateSession(
                     state.bankId,
+                    section.collectionIds.ifEmpty { null },
                     section.year,
                     section.types.firstOrNull()?.typeCode,
                     count
@@ -305,7 +310,7 @@ private fun SelectQuestionDialog(
         text = {
             Column {
                 Text(
-                    text = "共 $maxCount 题未做",
+                    text = "共 $maxCount 题未做 · 默认 ${SessionCountPolicy.DEFAULT_COUNT} 题，最多 ${SessionCountPolicy.MAX_COUNT} 题",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -321,10 +326,8 @@ private fun SelectQuestionDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    val count = countText.toIntOrNull()?.coerceIn(1, maxCount.coerceAtLeast(1))
-                    if (count != null) {
-                        onStart(count)
-                    }
+                    // 空输入 → 默认 20；>50 钳制 50；不超过可用题量（EC-01 D1）
+                    onStart(SessionCountPolicy.resolve(countText, maxCount))
                 }
             ) {
                 Text("开始练习")

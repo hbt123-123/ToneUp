@@ -16,6 +16,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -36,7 +37,8 @@ import com.toneup.app.ui.common.Load
 @Composable
 fun BankPickerSheet(
     viewModel: BankViewModel,
-    onSessionReady: (String) -> Unit
+    onSessionReady: (String) -> Unit,
+    onOpenSectionList: (bankId: String) -> Unit = {}
 ) {
     val picker by viewModel.picker.collectAsStateWithLifecycle()
     val home by viewModel.home.collectAsStateWithLifecycle()
@@ -77,6 +79,18 @@ fun BankPickerSheet(
                     Text(yearsError, color = MaterialTheme.colorScheme.error)
 
                 else -> YearLevel(viewModel, picker)
+            }
+
+            // EC-01：选定题库后可跳转专题/章节列表选题（修复原死路由）
+            if (picker.bankId != null) {
+                TextButton(
+                    onClick = { onOpenSectionList(picker.bankId!!) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                ) {
+                    Text("按专题/章节选题")
+                }
             }
 
             if (picker.year != null && picker.bankId != null) {

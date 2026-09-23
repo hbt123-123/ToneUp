@@ -21,7 +21,9 @@ class PracticeSession(
     val mode: String,
     val year: Int? = null,
     val typeCodeFilter: String? = null,
-    val fixedRefs: List<QuestionRef>? = null
+    val fixedRefs: List<QuestionRef>? = null,
+    /** EC-01：非空表示服务端会话（题目序列已在创建时返回并预填 [questions]，无需分页/逐题补取） */
+    val serverSessionId: Long? = null
 ) {
     val questions = mutableListOf<QuestionDto>()
     var total: Int = if (fixedRefs != null) fixedRefs.size else Int.MAX_VALUE
