@@ -131,32 +131,27 @@ class SessionHistoryViewModel @Inject constructor(
         }
     }
 
-    /** 重建会话：服务端 detail 成功 → 题目预填从进度处续刷；失败 → 本地分页全量 */
+    /**
+     * 重建会话：服务端 detail 成功 → 题目预填从进度处续刷。
+     *
+     * 失败一律上抛（由 resumeSession 提示"会话恢复失败，请重试"）：
+     * 静默降级为无 serverSessionId 的本地会话会让后续交卷走 LocalOnly、
+     * 服务端会话永久停在 active；且该兜底在真正离线时同样不可用
+     * （分页装载题目也要网络），故不再保留降级分支。
+     */
     private suspend fun rebuild(item: SessionListItemDto): Pair<PracticeSession, Int> {
-        return try {
-            val d = sessionRepository.sessionDetail(item.id)
-            val session = PracticeSession(
-                sessionId = "srv_${d.session.id}",
-                bankId = d.session.bankId,
-                title = d.session.title,
-                mode = PracticeSession.MODE_PRACTICE,
-                fixedRefs = d.questions.map { QuestionRef(d.session.bankId, it.questionId) },
-                serverSessionId = d.session.id,
-                restoredDraft = d.session.draft
-            )
-            synchronized(session) { session.questions.addAll(d.questions) }
-            session to d.session.currentIndex.coerceIn(0, (d.questions.size - 1).coerceAtLeast(0))
-        } catch (_: Exception) {
-            val session = PracticeSession(
-                sessionId = "srv_${item.id}",
-                bankId = item.bankId,
-                title = item.title,
-                mode = PracticeSession.MODE_PRACTICE,
-                year = null,
-                typeCodeFilter = null
-            )
-            session to 0
-        }
+        val d = sessionRepository.sessionDetail(item.id)
+        val session = PracticeSession(
+            sessionId = "srv_${d.session.id}",
+            bankId = d.session.bankId,
+            title = d.session.title,
+            mode = PracticeSession.MODE_PRACTICE,
+            fixedRefs = d.questions.map { QuestionRef(d.session.bankId, it.questionId) },
+            serverSessionId = d.session.id,
+            restoredDraft = d.session.draft
+        )
+        synchronized(session) { session.questions.addAll(d.questions) }
+        return session to d.session.currentIndex.coerceIn(0, (d.questions.size - 1).coerceAtLeast(0))
     }
 
     private suspend fun saveLastContext(session: PracticeSession, index: Int) {

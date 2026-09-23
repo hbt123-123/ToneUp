@@ -6,6 +6,10 @@ import com.toneup.app.data.local.CatalogCacheStore
 import com.toneup.app.data.remote.api.CatalogApi
 import com.toneup.app.data.remote.dto.BankDetailDto
 import com.toneup.app.data.remote.dto.CatalogDto
+import com.toneup.app.di.ApplicationScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -44,24 +48,54 @@ object CatalogCache {
 class CatalogRepository @Inject constructor(
     private val catalogApi: CatalogApi,
     private val jsonProvider: JsonProvider,
-    private val cacheStore: CatalogCacheStore
+    private val cacheStore: CatalogCacheStore,
+    @ApplicationScope private val appScope: CoroutineScope
 ) {
+    /** 后台刷新任务（去重：同一时刻至多一个在途刷新） */
+    private var refreshJob: Job? = null
+
     suspend fun catalog(forceRefresh: Boolean = false): CatalogDto {
         if (!forceRefresh) {
             CatalogCache.catalogIfFresh()?.let { return it }
-            CatalogCache.catalog?.let { return it } // 过期但可先展示，后台再刷
+            CatalogCache.catalog?.let { stale ->
+                // 内存过期：先展示，同时后台刷新
+                refreshInBackground()
+                return stale
+            }
             // EC-05 持久缓存：内存 miss 时先发磁盘缓存（cache-first 水合）
             cacheStore.read()?.let { payload ->
                 payload.catalog?.let { dto ->
                     CatalogCache.putCatalog(dto, payload.cachedAtMillis)
+                    // 磁盘缓存过期：先渲染，同时后台刷新
+                    // （否则新增题库/题目在用户手动下拉刷新前永远不可见）
+                    if (System.currentTimeMillis() - payload.cachedAtMillis >=
+                        CatalogCache.TTL_MILLIS
+                    ) {
+                        refreshInBackground()
+                    }
                     return dto
                 }
             }
         }
+        return fetchAndCache()
+    }
+
+    /** 拉取并写入内存/磁盘缓存 */
+    private suspend fun fetchAndCache(): CatalogDto {
         val dto = EnvelopeUnwrapper.unwrap(jsonProvider.json) { catalogApi.catalog() }
         CatalogCache.putCatalog(dto)
-        runCatching { cacheStore.write(CatalogCachePayload(cachedAtMillis = System.currentTimeMillis(), catalog = dto)) }
+        runCatching {
+            cacheStore.write(
+                CatalogCachePayload(cachedAtMillis = System.currentTimeMillis(), catalog = dto)
+            )
+        }
         return dto
+    }
+
+    /** 后台刷新（应用级 scope，不随调用方取消）；失败静默，下次调用仍走缓存 */
+    private fun refreshInBackground() {
+        if (refreshJob?.isActive == true) return
+        refreshJob = appScope.launch { runCatching { fetchAndCache() } }
     }
 
     suspend fun bankDetail(bankId: String, forceRefresh: Boolean = false): BankDetailDto {

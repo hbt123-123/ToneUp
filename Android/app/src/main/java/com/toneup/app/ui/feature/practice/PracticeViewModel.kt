@@ -1,11 +1,13 @@
 package com.toneup.app.ui.feature.practice
 
+import androidx.datastore.core.DataStore
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toneup.app.data.local.ConnectivityMonitor
 import com.toneup.app.data.local.DraftEntry
 import com.toneup.app.data.local.LastPracticeContext
+import com.toneup.app.data.local.SessionData
 import com.toneup.app.data.local.SessionDataStoreManager
 import com.toneup.app.data.local.SessionManager
 import com.toneup.app.data.remote.api.FavoriteRequest
@@ -289,8 +291,13 @@ class PracticeViewModel @Inject constructor(
         val sid = s.serverSessionId ?: return
         val userId = sessionManager.currentUserId() ?: return
         runCatching {
+            // 仅推送本会话题目的草稿：按 fixedRefs 的 question_id 过滤，
+            // 避免把该题库跨所有会话的历史作答整包 PUT（作答量大时负载膨胀）
+            val sessionQids = s.fixedRefs?.map { it.questionId }?.toSet()
             val drafts = sessionDataStoreManager.storeFor(userId).data.first().drafts
-                .filter { it.bankId == s.bankId }
+                .filter {
+                    it.bankId == s.bankId && (sessionQids == null || it.questionId in sessionQids)
+                }
             sessionRepository.updateDraft(
                 sessionId = sid,
                 currentIndex = _state.value.currentIndex,
@@ -648,25 +655,29 @@ class PracticeViewModel @Inject constructor(
                 refreshPending()
                 // 2. 尽力推送最后一份草稿
                 pushServerDraftIfServerSession(s)
-                // 3. 幂等键：持久化复用直到服务端确认
+                // 3. 幂等键：按会话作用域持久化（格式 "$sid:$uuid"），跨会话绝不复用。
+                //    否则"请求已送达但响应丢失"时会话 A 的键被会话 B 复用，
+                //    后端撞 UNIQUE(user_id, client_request_id) 会返回 A 的摘要。
                 val userId = sessionManager.currentUserId()
                     ?: throw AppException.Unauthorized()
                 val store = sessionDataStoreManager.storeFor(userId)
+                val sid = s.serverSessionId
                 val existing = store.data.first().sessionSubmitRequestId
-                val clientRequestId = existing ?: UUID.randomUUID().toString()
-                if (existing == null) {
-                    store.updateData { it.copy(sessionSubmitRequestId = clientRequestId) }
+                val scoped = existing?.takeIf { it.startsWith("$sid:") }
+                val clientRequestId = scoped?.substringAfter(':') ?: UUID.randomUUID().toString()
+                if (scoped == null) {
+                    store.updateData { it.copy(sessionSubmitRequestId = "$sid:$clientRequestId") }
                 }
                 try {
-                    val resp = sessionRepository.submitSession(s.serverSessionId, clientRequestId)
-                    // 服务端确认：清除幂等键
-                    store.updateData { it.copy(sessionSubmitRequestId = null) }
+                    val resp = sessionRepository.submitSession(sid, clientRequestId)
+                    // 服务端确认：仅清除本会话的幂等键（不影响其他会话在途键）
+                    clearScopedSubmitKey(store, sid)
                     _sessionSubmitState.value =
                         SessionSubmitState.Done(resp.summary, resp.replayed)
                 } catch (e: Exception) {
                     if (e is AppException && e !is AppException.Network) {
-                        // 明确业务拒绝：幂等键使命结束
-                        store.updateData { it.copy(sessionSubmitRequestId = null) }
+                        // 明确业务拒绝：本会话幂等键使命结束
+                        clearScopedSubmitKey(store, sid)
                     }
                     throw e
                 }
@@ -681,6 +692,17 @@ class PracticeViewModel @Inject constructor(
     /** 交卷状态消费后回置（UI 导航完成后调用） */
     fun consumeSessionSubmitState() {
         _sessionSubmitState.value = SessionSubmitState.Idle
+    }
+
+    /** 仅当持久化的幂等键属于该会话时清除（避免误清其他会话的在途键） */
+    private suspend fun clearScopedSubmitKey(store: DataStore<SessionData>, sid: Long) {
+        store.updateData { data ->
+            if (data.sessionSubmitRequestId?.startsWith("$sid:") == true) {
+                data.copy(sessionSubmitRequestId = null)
+            } else {
+                data
+            }
+        }
     }
 
     // ---------- 标记 ----------

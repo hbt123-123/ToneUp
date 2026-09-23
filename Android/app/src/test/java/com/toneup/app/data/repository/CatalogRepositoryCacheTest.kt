@@ -6,6 +6,8 @@ import com.toneup.app.data.remote.api.CatalogApi
 import com.toneup.app.data.remote.dto.ApiEnvelope
 import com.toneup.app.data.remote.dto.BankDetailDto
 import com.toneup.app.data.remote.dto.CatalogDto
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -54,12 +56,15 @@ class CatalogRepositoryCacheTest {
     private lateinit var store: FakeCacheStore
     private lateinit var repo: CatalogRepository
 
+    /** 后台刷新 scope：Unconfined 使 launch 同步执行，便于断言刷新副作用 */
+    private val testScope = CoroutineScope(Dispatchers.Unconfined)
+
     @Before
     fun setUp() {
         CatalogCache.reset()
         api = FakeCatalogApi()
         store = FakeCacheStore()
-        repo = CatalogRepository(api, JsonProvider(Json), store)
+        repo = CatalogRepository(api, JsonProvider(Json), store, testScope)
     }
 
     private val cachedDto = CatalogDto()
@@ -102,6 +107,22 @@ class CatalogRepositoryCacheTest {
         val result = repo.catalog()
         assertEquals(freshDto, result)
         assertEquals(1, api.catalogCalls)
+    }
+
+    @Test
+    fun `stale disk cache serves cache first and refreshes in background`() = runTest {
+        // 磁盘缓存已过期：先渲染缓存，同时后台刷新（避免新增题库在手动下拉前不可见）
+        store.payload = CatalogCachePayload(
+            cachedAtMillis = System.currentTimeMillis() - CatalogCache.TTL_MILLIS - 1000,
+            catalog = cachedDto,
+        )
+        api.envelope = ApiEnvelope(success = true, data = freshDto)
+
+        val result = repo.catalog()
+
+        assertEquals(cachedDto, result) // cache-first：本次仍返回旧缓存
+        assertEquals(1, api.catalogCalls) // 后台刷新已发起
+        assertEquals(freshDto, store.payload?.catalog) // 磁盘缓存被刷新覆盖
     }
 
     // ---------- 损坏缓存安全语义（CatalogCachePayload 纯函数） ----------
