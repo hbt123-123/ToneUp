@@ -24,6 +24,7 @@ import { useKeyboardShortcuts, SHORTCUT_HINTS } from '@/composables/useKeyboardS
 import { humanizeError } from '@/api/http'
 import { appDialog, appMessage } from '@/utils/feedback'
 import { typeCodeLabel } from '@/utils/format'
+import { canSubmit } from '@/utils/recite'
 
 /**
  * 刷题工作台（FR-PRAC 全部 + FR-ANA-01~07）。
@@ -155,6 +156,9 @@ const question = computed(() => rt.value?.detail ?? rt.value?.listMeta ?? null)
 const rendererComp = computed(() => resolveRenderer(question.value?.type_code ?? ''))
 const isUnknownType = computed(() => rendererComp.value === UnknownTypeRenderer)
 
+/** 背题模式（§6.2 / EC-02）：review 会话下 mode 被 store 强制 practice，此处仅消费 */
+const isRecite = computed(() => practice.mode === 'recite')
+
 const gradingView = computed<GradingView | null>(() => {
   const g = rt.value?.grading
   if (!g) return null
@@ -163,13 +167,15 @@ const gradingView = computed<GradingView | null>(() => {
 
 const ctx = computed<QuestionContext | null>(() => {
   if (!question.value || !rt.value) return null
+  // 背题模式：强制只读 + 展示答案/解析；提交按钮 disabled 由 canSubmit 派生
+  const recite = isRecite.value
   return {
     question: question.value,
     answer: rt.value.answer,
-    readonly: rt.value.phase === 'submitted',
-    disabled: rt.value.phase === 'submitting',
-    showAnswer: rt.value.phase === 'submitted',
-    showAnalysis: rt.value.phase === 'submitted',
+    readonly: recite || rt.value.phase === 'submitted',
+    disabled: recite || rt.value.phase === 'submitting',
+    showAnswer: recite || rt.value.phase === 'submitted',
+    showAnalysis: recite || rt.value.phase === 'submitted',
     grading: gradingView.value,
     onAnswerChange: (answer: unknown) => practice.setAnswer(answer),
     onSubmitRequest: () => void handleSubmit(),
@@ -188,6 +194,8 @@ function isBlankAnswer(v: unknown): boolean {
 async function handleSubmit(): Promise<void> {
   const r = rt.value
   if (!r) return
+  // 背题模式禁用提交（按钮已 disabled，此处守卫键盘 Enter 与 ctx.onSubmitRequest 回调）
+  if (isRecite.value) return
   if (r.phase === 'submitted') {
     await goNext()
     return
@@ -344,6 +352,8 @@ function handleLetter(letter: string): void {
   const q = question.value
   const r = rt.value
   if (!q || !r || r.phase === 'submitting' || r.phase === 'submitted') return
+  // 背题模式禁用键盘作答（ctx.readonly 已派生，此处守卫键盘快捷键绕过 renderer 的路径）
+  if (isRecite.value) return
   if (q.type_code === 'SINGLE' || q.type_code === 'READING') {
     const opt = (q.options ?? []).find((o) => o.label.toUpperCase() === letter)
     if (opt) ctx.value?.onAnswerChange(opt.label)
@@ -498,6 +508,16 @@ onBeforeUnmount(() => {
           </div>
           <div class="q-actions-head">
             <n-button
+              v-if="!isReviewMode"
+              size="small"
+              :type="isRecite ? 'info' : 'default'"
+              secondary
+              :title="isRecite ? '退出背题模式' : '进入背题模式（直接展示答案与解析，不记录作答）'"
+              @click="practice.mode = isRecite ? 'practice' : 'recite'"
+            >
+              {{ isRecite ? '背题中' : '背题模式' }}
+            </n-button>
+            <n-button
               size="small"
               :type="markedActive ? 'warning' : 'default'"
               secondary
@@ -563,7 +583,7 @@ onBeforeUnmount(() => {
             type="primary"
             size="large"
             :loading="(rt?.phase ?? '') === 'submitting'"
-            :disabled="(rt?.phase ?? '') === 'submitting'"
+            :disabled="(rt?.phase ?? '') === 'submitting' || !canSubmit(practice.mode)"
             @click="handleSubmit"
           >
             确认答案（Enter）

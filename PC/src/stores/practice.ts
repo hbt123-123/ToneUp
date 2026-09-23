@@ -21,6 +21,7 @@ import {
   writeProgress,
 } from '@/utils/storage'
 import { hashString, uuidV4 } from '@/utils/uuid'
+import { canSubmit, type PracticeMode } from '@/utils/recite'
 
 /**
  * practice store（§2.4 / 第 8 章）：
@@ -80,6 +81,8 @@ export interface StartBankOptions {
 export const usePracticeStore = defineStore('practice', () => {
   /* ---------- 会话 ---------- */
   const sessionKind = ref<'bank' | 'review'>('bank')
+  /** 练习模式（§6.2 / EC-02）：与 sessionKind 正交，review 强制 practice；仅内存态，刷新复位 */
+  const mode = ref<PracticeMode>('practice')
   const bankId = ref('')
   const year = ref<number | null>(null)
   const typeCode = ref<string | null>(null)
@@ -423,6 +426,8 @@ export const usePracticeStore = defineStore('practice', () => {
     const key = currentKey.value
     const rt = currentRuntime.value
     if (!key || !rt) return
+    // 背题模式禁用提交（双保险：配合 ctx.readonly/showAnswer，不写离线队列）
+    if (!canSubmit(mode.value)) return
     if (rt.phase === 'submitting' || rt.phase === 'submitted') return
     if (rt.answer === null || rt.answer === undefined || rt.answer === '') {
       rt.errorMessage = '请先作答再提交'
@@ -635,6 +640,7 @@ export const usePracticeStore = defineStore('practice', () => {
 
   async function startBankSession(opts: StartBankOptions): Promise<void> {
     sessionKind.value = 'bank'
+    mode.value = 'practice'
     bankId.value = opts.bankId
     year.value = opts.year ?? null
     typeCode.value = opts.typeCode ?? null
@@ -678,6 +684,8 @@ export const usePracticeStore = defineStore('practice', () => {
 
   function startReviewSession(items: SessionItem[]): void {
     sessionKind.value = 'review'
+    // review 会话禁用背题开关（计划 D3 / Must-NOT-Have：背题不产生 attempts/attempts 副作用）
+    mode.value = 'practice'
     orderedIds.value = items.map((i) => i.questionId)
     const m = new Map<number, string>()
     for (const i of items) m.set(i.questionId, i.bankId)
@@ -700,6 +708,7 @@ export const usePracticeStore = defineStore('practice', () => {
     currentIndex.value = -1
     bankId.value = ''
     markedIds.value = new Set()
+    mode.value = 'practice'
   }
 
   /** 离开/刷新前强制落盘全部草稿（FR-PRAC-11） */
@@ -744,6 +753,7 @@ export const usePracticeStore = defineStore('practice', () => {
     listError,
     runtimes,
     markedIds,
+    mode,
     currentKey,
     currentRuntime,
     bindUserId,
