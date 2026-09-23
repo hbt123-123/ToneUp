@@ -1,6 +1,7 @@
 package com.toneup.app.data.repository
 
 import android.util.Log
+import com.toneup.app.data.local.CatalogCacheStore
 import com.toneup.app.data.local.SessionDataStoreManager
 import com.toneup.app.data.local.SessionManager
 import com.toneup.app.data.local.SessionUser
@@ -18,7 +19,8 @@ class AuthRepository @Inject constructor(
     private val jsonProvider: JsonProvider,
     private val sessionManager: SessionManager,
     private val sessionDataStoreManager: SessionDataStoreManager,
-    private val attemptResultCache: AttemptResultCache
+    private val attemptResultCache: AttemptResultCache,
+    private val catalogCacheStore: CatalogCacheStore
 ) {
     suspend fun login(username: String, password: String): UserDto {
         val token = EnvelopeUnwrapper.unwrap(jsonProvider.json) {
@@ -66,10 +68,11 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    /** 退出登录：先删该用户草稿/队列文件，再清令牌与内存缓存 */
+    /** 退出登录：先删该用户草稿/队列文件，再清令牌与内存/磁盘缓存（EC-05 双清） */
     suspend fun logout() {
         sessionManager.currentUserId()?.let { sessionDataStoreManager.wipeUser(it) }
         CatalogCache.reset()
+        runCatching { catalogCacheStore.clear() }
         attemptResultCache.clear()
         sessionManager.clearSession()
     }

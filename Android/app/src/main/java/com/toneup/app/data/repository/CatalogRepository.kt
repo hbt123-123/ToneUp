@@ -1,6 +1,8 @@
 package com.toneup.app.data.repository
 
 import android.util.Log
+import com.toneup.app.data.local.CatalogCachePayload
+import com.toneup.app.data.local.CatalogCacheStore
 import com.toneup.app.data.remote.api.CatalogApi
 import com.toneup.app.data.remote.dto.BankDetailDto
 import com.toneup.app.data.remote.dto.CatalogDto
@@ -19,9 +21,10 @@ object CatalogCache {
     fun catalogIfFresh(): CatalogDto? =
         catalog?.takeIf { System.currentTimeMillis() - cachedAtMillis < TTL_MILLIS }
 
-    fun putCatalog(dto: CatalogDto) {
+    /** cachedAtMillis 可指定：从磁盘水合时恢复原时间戳，避免 fresh 判定失真 */
+    fun putCatalog(dto: CatalogDto, cachedAtMillis: Long = System.currentTimeMillis()) {
         catalog = dto
-        cachedAtMillis = System.currentTimeMillis()
+        this.cachedAtMillis = cachedAtMillis
     }
 
     fun bankDetail(bankId: String): BankDetailDto? = bankDetails[bankId]
@@ -40,15 +43,24 @@ object CatalogCache {
 @Singleton
 class CatalogRepository @Inject constructor(
     private val catalogApi: CatalogApi,
-    private val jsonProvider: JsonProvider
+    private val jsonProvider: JsonProvider,
+    private val cacheStore: CatalogCacheStore
 ) {
     suspend fun catalog(forceRefresh: Boolean = false): CatalogDto {
         if (!forceRefresh) {
             CatalogCache.catalogIfFresh()?.let { return it }
             CatalogCache.catalog?.let { return it } // 过期但可先展示，后台再刷
+            // EC-05 持久缓存：内存 miss 时先发磁盘缓存（cache-first 水合）
+            cacheStore.read()?.let { payload ->
+                payload.catalog?.let { dto ->
+                    CatalogCache.putCatalog(dto, payload.cachedAtMillis)
+                    return dto
+                }
+            }
         }
         val dto = EnvelopeUnwrapper.unwrap(jsonProvider.json) { catalogApi.catalog() }
         CatalogCache.putCatalog(dto)
+        runCatching { cacheStore.write(CatalogCachePayload(cachedAtMillis = System.currentTimeMillis(), catalog = dto)) }
         return dto
     }
 

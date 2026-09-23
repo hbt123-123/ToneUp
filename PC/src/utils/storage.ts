@@ -35,6 +35,27 @@ function safeRemove(key: string): void {
   }
 }
 
+/* ---------- 通用 JSON 缓存（EC-05 catalog 持久缓存等） ---------- */
+
+/** 读取 JSON 缓存：缺失/损坏返回 null（安全语义，调用方走网络路径） */
+export function readJsonCache<T>(key: string): T | null {
+  const raw = safeGet(key)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
+}
+
+export function writeJsonCache(key: string, value: unknown): void {
+  safeSet(key, JSON.stringify(value))
+}
+
+export function removeJsonCache(key: string): void {
+  safeRemove(key)
+}
+
 /* ---------- 单题草稿 ---------- */
 
 export function draftKey(userId: number | string, bankId: string, questionId: number): string {

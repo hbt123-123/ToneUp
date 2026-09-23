@@ -2,16 +2,33 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { apiBankDetail, apiCatalog } from '@/api/endpoints'
 import type { BankDetail, BankSummary, CatalogData, SubjectNode } from '@/api/generated/schema'
+import { readJsonCache, removeJsonCache, writeJsonCache } from '@/utils/storage'
+
+/** EC-05 目录持久缓存键：登录态缓存，不登记 DEVICE_LEVEL_KEYS 豁免，登出随用户域清除 */
+const CATALOG_CACHE_KEY = 'toneup:catalog:cache'
+
+interface CatalogCachePayload {
+  subjects: SubjectNode[]
+  banks: BankSummary[]
+}
 
 /**
  * catalog store（§2.4）：学科/题型/题库目录树 + 当前选择路径（面包屑数据源）。
- * 会话级内存缓存，手动刷新（FR-CAT-06 / §8.5）。
+ * cache-first 水合（EC-05）：初始化即从 localStorage 恢复目录，随后网络刷新覆盖。
  */
 export const useCatalogStore = defineStore('catalog', () => {
   const subjects = ref<SubjectNode[]>([])
   const banks = ref<BankSummary[]>([])
   const loaded = ref(false)
   const loading = ref(false)
+
+  // EC-05 cache-first：store 创建时立即水合持久缓存（损坏/缺失 → null 走网络路径）
+  const cached = readJsonCache<CatalogCachePayload>(CATALOG_CACHE_KEY)
+  if (cached && Array.isArray(cached.subjects) && Array.isArray(cached.banks)) {
+    subjects.value = cached.subjects
+    banks.value = cached.banks
+    loaded.value = true
+  }
 
   /** 面包屑三级联动数据源：学科 / 题型 / 年份（§4.3） */
   const selectedSubjectId = ref<string | null>(null)
@@ -39,6 +56,7 @@ export const useCatalogStore = defineStore('catalog', () => {
       subjects.value = data?.subjects ?? []
       banks.value = data?.banks ?? []
       loaded.value = true
+      writeJsonCache(CATALOG_CACHE_KEY, { subjects: subjects.value, banks: banks.value } satisfies CatalogCachePayload)
     } finally {
       loading.value = false
     }
@@ -74,9 +92,10 @@ export const useCatalogStore = defineStore('catalog', () => {
     return detail
   }
 
-  /** 管理侧重载后手动刷新本地缓存（FR-ADM-02） */
+  /** 管理侧重载后手动刷新本地缓存（FR-ADM-02）：内存与持久键一并清除 */
   function invalidateAll(): void {
     bankDetailCache.clear()
+    removeJsonCache(CATALOG_CACHE_KEY)
     loaded.value = false
     subjects.value = []
     banks.value = []
