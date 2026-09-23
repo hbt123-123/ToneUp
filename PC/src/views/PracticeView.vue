@@ -22,6 +22,8 @@ import { useUiStore } from '@/stores/ui'
 import { useLayoutMode } from '@/composables/useLayoutMode'
 import { useKeyboardShortcuts, SHORTCUT_HINTS } from '@/composables/useKeyboardShortcuts'
 import { humanizeError } from '@/api/http'
+import { apiQuestionDetail } from '@/api/endpoints'
+import type { QuestionDetailDto } from '@/api/generated/schema'
 import { appDialog, appMessage } from '@/utils/feedback'
 import { typeCodeLabel } from '@/utils/format'
 import { canSubmit } from '@/utils/recite'
@@ -180,6 +182,45 @@ const ctx = computed<QuestionContext | null>(() => {
     onAnswerChange: (answer: unknown) => practice.setAnswer(answer),
     onSubmitRequest: () => void handleSubmit(),
   }
+})
+
+/* ---------- 背题模式答案/解析来源（EC-02：进入即展示正确答案与官方解析） ---------- */
+
+/**
+ * 列表 DTO 不含 answer_text/solution（授权出口在详情接口），背题模式下
+ * 按当前题号拉取详情供解析面板展示；失败静默降级（面板显示已有内容）。
+ */
+const reciteDetail = ref<QuestionDetailDto | null>(null)
+watch(
+  () => (isRecite.value ? (question.value?.question_id ?? null) : null),
+  async (qid) => {
+    reciteDetail.value = null
+    if (qid == null) return
+    const bankId = practice.itemBanks.get(qid) ?? practice.bankId
+    try {
+      reciteDetail.value = await apiQuestionDetail(bankId, qid)
+    } catch {
+      reciteDetail.value = null
+    }
+  },
+  { immediate: true },
+)
+
+/** 解析面板 ctx：普通模式透传；背题模式合并详情接口的答案与解析 */
+const analysisPanelCtx = computed(() => {
+  if (!ctx.value) return null
+  const base = { ...ctx.value, attemptResult: rt.value?.attempt ?? null }
+  if (isRecite.value && reciteDetail.value) {
+    return {
+      ...base,
+      question: {
+        ...base.question,
+        answer_text: reciteDetail.value.answer_text ?? null,
+        solution: reciteDetail.value.solution ?? null,
+      },
+    }
+  }
+  return base
 })
 
 /* ---------- 提交与切题 ---------- */
@@ -607,7 +648,7 @@ onBeforeUnmount(() => {
         />
         <div class="side-scroll">
           <question-panel
-            v-if="rt?.phase !== 'submitted'"
+            v-if="rt?.phase !== 'submitted' && !isRecite"
             v-model:unanswered-only="filterUnansweredOnly"
             v-model:marked-only="filterMarkedOnly"
             :ids="practice.orderedIds"
@@ -617,8 +658,8 @@ onBeforeUnmount(() => {
             @jump="(i: number) => practice.gotoIndex(i)"
           />
           <analysis-panel
-            v-else-if="ctx"
-            :ctx="{ ...ctx, attemptResult: rt?.attempt ?? null }"
+            v-else-if="analysisPanelCtx"
+            :ctx="analysisPanelCtx"
             :self-judge-ready="rt?.selfJudgeReady ?? false"
             :bank-id="practice.itemBanks.get(practice.orderedIds[practice.currentIndex]!) ?? practice.bankId"
             @submit-self-judge="(rating) => practice.submitSelfJudge(rating)"
@@ -656,7 +697,7 @@ onBeforeUnmount(() => {
     <!-- 窄屏抽屉：题号面板 / 解析 -->
     <n-drawer v-model:show="infoDrawerOpen" :width="420" placement="right">
       <n-drawer-content title="练习面板" closable>
-        <div v-if="rt?.phase !== 'submitted'">
+        <div v-if="rt?.phase !== 'submitted' && !isRecite">
           <question-panel
             v-model:unanswered-only="filterUnansweredOnly"
             v-model:marked-only="filterMarkedOnly"
@@ -668,8 +709,8 @@ onBeforeUnmount(() => {
           />
         </div>
         <analysis-panel
-          v-else-if="ctx"
-          :ctx="{ ...ctx, attemptResult: rt?.attempt ?? null }"
+          v-else-if="analysisPanelCtx"
+          :ctx="analysisPanelCtx"
           :self-judge-ready="rt?.selfJudgeReady ?? false"
           :bank-id="practice.itemBanks.get(practice.orderedIds[practice.currentIndex]!) ?? practice.bankId"
           @submit-self-judge="(rating) => practice.submitSelfJudge(rating)"
