@@ -21,8 +21,10 @@ import random
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.deps import get_current_user
 from app.api.question_banks import _build_dto
@@ -36,8 +38,45 @@ from app.schemas.common import envelope, page
 router = APIRouter(prefix="/api/practice-sessions", tags=["practice-sessions"])
 
 MAX_SESSION_COUNT = 50
-# draft 单次提交体上限（防认证用户高频发大包消耗解析 CPU/带宽）
-_DRAFT_MAX_BYTES = 64 * 1024
+# draft 单次提交体上限（防认证用户高频发大包消耗解析 CPU/带宽）。
+# 两层防护：中间件在 body 解析前按 Content-Length 拦截（主），
+# 路由内保留解析后检查兜底 chunked/无头请求（次）。
+DRAFT_MAX_BYTES = 64 * 1024
+
+
+class DraftBodyLimitMiddleware(BaseHTTPMiddleware):
+    """draft 请求体大小守卫（在 body 解析前拦截）。
+
+    BaseHTTPMiddleware 早于路由与依赖解析执行，此处仅读 Content-Length 头
+    即可拒绝超限请求，避免下游 JSON/Pydantic 解析超大 body。
+    无 Content-Length（chunked）的请求无法预判，由 update_draft 的
+    解析后检查兜底。
+    """
+
+    _PREFIX = "/api/practice-sessions/"
+
+    async def dispatch(self, request: Request, call_next):
+        if (
+            request.method == "PUT"
+            and request.url.path.startswith(self._PREFIX)
+            and request.url.path.endswith("/draft")
+        ):
+            raw = request.headers.get("content-length")
+            if raw is not None:
+                try:
+                    too_large = int(raw) > DRAFT_MAX_BYTES
+                except ValueError:
+                    too_large = True  # 非法 Content-Length 一律按超限处理
+                if too_large:
+                    return JSONResponse(
+                        content=envelope(
+                            message="draft payload too large (max 64KB)", success=False
+                        ),
+                        status_code=400,
+                    )
+        return await call_next(request)
+
+
 # ESSAY（含 AI 批改链路的主观作文）不进入练习会话；AI 题不在任何
 # subject 映射内，白名单过滤自然排除（EC-01 MUST NOT 红线）。
 _EXCLUDED_TYPE_CODES = {"ESSAY"}
@@ -217,11 +256,12 @@ def get_session(session_id: int, user=Depends(get_current_user)):
 @router.put("/{session_id}/draft")
 def update_draft(session_id: int, body: DraftBody, user=Depends(get_current_user)):
     """草稿更新（last-write-wins，无冲突合并）。节流由客户端负责；服务端不做
-    频率限流，但限制单次 body 大小（64KB）。
+    频率限流，但限制单次 body 大小（64KB，主拦截在 DraftBodyLimitMiddleware）。
 
     会话已提交返回 409；不存在/非本人 404；超限 400。
     """
-    if len(json.dumps(body.draft, ensure_ascii=False).encode("utf-8")) > _DRAFT_MAX_BYTES:
+    # 解析后兜底：chunked/无 Content-Length 请求绕过中间件时在此拒绝
+    if len(json.dumps(body.draft, ensure_ascii=False).encode("utf-8")) > DRAFT_MAX_BYTES:
         raise BadRequestError("draft payload too large (max 64KB)")
     user_db = _user_db()
     if repo.get_session(user_db, user["id"], session_id) is None:

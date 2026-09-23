@@ -7,6 +7,7 @@ init_user_db 建 tmp 用户库 + 直接 create_access_token 鉴权。
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import shutil
 import uuid
@@ -340,7 +341,46 @@ def test_submit_request_id_reused_across_sessions_409(app_and_data):
 
 
 def test_draft_payload_too_large_400(app_and_data):
-    """draft 单次 body 超 64KB → 400；正常大小仍可写入。"""
+    """draft 单次 body 超 64KB → 400；正常大小仍可写入。
+
+    关键：中间件在 body 解析前按 Content-Length 拦截——用一个被截断的
+    非法 JSON 超限体，若走到解析会得到 JSON 校验错误，此处应得到 too large，
+    以此证明拦截发生在解析之前。
+    """
+    client, user_db_path, _ = app_and_data
+    headers = _auth_headers(user_db_path, "alice")
+    sid = client.post(
+        "/api/practice-sessions", headers=headers,
+        json={"bank_id": "math1", "count": 2},
+    ).json()["data"]["session_id"]
+    url = f"/api/practice-sessions/{sid}/draft"
+
+    resp = client.put(
+        url, headers=headers,
+        json={"current_index": 0,
+              "draft": {"q0": "x" * (64 * 1024)},
+              "elapsed_seconds": 1},
+    )
+    assert resp.status_code == 400
+
+    # 非法 JSON 的超限体：message 为 too large（中间件层），而非 JSON 校验摘要
+    broken = b'{"current_index":0,"draft":{"q0":"' + b"x" * (64 * 1024)
+    resp_broken = client.put(
+        url, headers={**headers, "content-type": "application/json"},
+        content=broken,
+    )
+    assert resp_broken.status_code == 400
+    assert "too large" in resp_broken.json()["message"]
+
+    ok = client.put(
+        url, headers=headers,
+        json={"current_index": 0, "draft": {"q0": "A"}, "elapsed_seconds": 1},
+    )
+    assert ok.status_code == 200
+
+
+def test_draft_oversize_chunked_falls_back_to_route_check(app_and_data):
+    """chunked（无 Content-Length）超限：中间件无法预判，路由解析后检查兜底。"""
     client, user_db_path, _ = app_and_data
     headers = _auth_headers(user_db_path, "alice")
     sid = client.post(
@@ -348,19 +388,22 @@ def test_draft_payload_too_large_400(app_and_data):
         json={"bank_id": "math1", "count": 2},
     ).json()["data"]["session_id"]
 
+    body = json.dumps({
+        "current_index": 0,
+        "draft": {"q0": "x" * (64 * 1024)},
+        "elapsed_seconds": 1,
+    }).encode("utf-8")
+
+    def _chunks():
+        yield body
+
     resp = client.put(
-        f"/api/practice-sessions/{sid}/draft", headers=headers,
-        json={"current_index": 0,
-              "draft": {"q0": "x" * (64 * 1024)},
-              "elapsed_seconds": 1},
+        f"/api/practice-sessions/{sid}/draft",
+        headers={**headers, "content-type": "application/json"},
+        content=_chunks(),
     )
     assert resp.status_code == 400
-
-    ok = client.put(
-        f"/api/practice-sessions/{sid}/draft", headers=headers,
-        json={"current_index": 0, "draft": {"q0": "A"}, "elapsed_seconds": 1},
-    )
-    assert ok.status_code == 200
+    assert "too large" in resp.json()["message"]
 
 
 def test_list_pagination(app_and_data):

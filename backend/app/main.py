@@ -72,6 +72,12 @@ def create_app() -> FastAPI:
 
     app.add_middleware(DefaultRateLimitMiddleware)
 
+    # --- draft body 大小守卫（body 解析前按 Content-Length 拦截）：
+    # 先于 request_id 注册（更内层），其 400 响应同样被注入 request_id ---
+    from app.api.practice_sessions import DraftBodyLimitMiddleware
+
+    app.add_middleware(DraftBodyLimitMiddleware)
+
     # --- request_id 中间件（后注册=外层，负责透传/生成/回显）---
     add_request_id_middleware(app)
 
