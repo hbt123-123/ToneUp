@@ -191,16 +191,22 @@ const ctx = computed<QuestionContext | null>(() => {
  * 按当前题号拉取详情供解析面板展示；失败静默降级（面板显示已有内容）。
  */
 const reciteDetail = ref<QuestionDetailDto | null>(null)
+let reciteDetailAbort: AbortController | null = null
 watch(
   () => (isRecite.value ? (question.value?.question_id ?? null) : null),
   async (qid) => {
+    // 中止上一次在途请求，避免快速切题时旧响应后到覆盖当前题答案
+    reciteDetailAbort?.abort()
     reciteDetail.value = null
     if (qid == null) return
     const bankId = practice.itemBanks.get(qid) ?? practice.bankId
+    const ac = new AbortController()
+    reciteDetailAbort = ac
     try {
-      reciteDetail.value = await apiQuestionDetail(bankId, qid)
+      const detail = await apiQuestionDetail(bankId, qid, ac.signal)
+      if (reciteDetailAbort === ac) reciteDetail.value = detail
     } catch {
-      reciteDetail.value = null
+      if (reciteDetailAbort === ac) reciteDetail.value = null
     }
   },
   { immediate: true },

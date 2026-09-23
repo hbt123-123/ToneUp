@@ -6,8 +6,6 @@
  * 本文件随即删除。字段一律可容忍缺失（可选），客户端不做服务端校验职责之外的假设。
  */
 
-import type { DailyTrendPoint } from '@/components/charts/types'
-
 export type TypeCode =
   | 'SINGLE'
   | 'MULTI'
@@ -204,6 +202,16 @@ export interface WeaknessListData extends PageMeta {
 }
 
 /* ---------- 统计：每日趋势（§6.11） ---------- */
+
+/** 每日趋势点（§6.11 契约；内联定义以免生成物依赖应用内模块） */
+export interface DailyTrendPoint {
+  /** 日期，格式 YYYY-MM-DD */
+  date: string
+  /** 当日去重作答题数 */
+  attempts: number
+  /** 当日正确率 0~1（4 位小数；空天为 0） */
+  correct_rate: number
+}
 
 export interface StatsDailyTrendData {
   days: number
