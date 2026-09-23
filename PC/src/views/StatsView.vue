@@ -5,11 +5,12 @@ import { NButton, NCard, NSelect, NSpin, NTag } from 'naive-ui'
 import { useStatsStore } from '@/stores/stats'
 import { useCatalogStore } from '@/stores/catalog'
 import { formatPercent, typeCodeLabel } from '@/utils/format'
+import DailyTrendChart from '@/components/charts/DailyTrendChart.vue'
 
 /**
  * 统计页（FR-STAT-01~04）：
  * 概览指标卡、时间范围/学科联动筛选、薄弱知识点榜（可跳转定向练习）、
- * 趋势图（P2：契约暂无时序端点，预留数据位与轻量 SVG 渲染）。
+ * 趋势折线图（daily-trend 端点 §6.11）。
  */
 const router = useRouter()
 const stats = useStatsStore()
@@ -20,7 +21,11 @@ onMounted(() => {
 })
 
 async function refreshAll(): Promise<void> {
-  await Promise.allSettled([stats.fetchOverview(true), stats.fetchWeaknesses(true)])
+  await Promise.allSettled([
+    stats.fetchOverview(true),
+    stats.fetchWeaknesses(true),
+    stats.fetchDailyTrend(undefined, true),
+  ])
 }
 
 function onFilterChange(): void {
@@ -55,18 +60,6 @@ function practiceWeakness(item: { bank_id?: string; type_code?: string }): void 
     query: item.type_code ? { type_code: item.type_code } : {},
   })
 }
-
-interface TrendPoint {
-  date: string
-  count: number
-  accuracy?: number | null
-}
-
-/** 趋势数据：后端契约当前未提供时序字段；若未来返回 trend 数组即可渲染 */
-const trend = computed<TrendPoint[]>(() => {
-  const raw = (stats.overview as typeof stats.overview & { trend?: TrendPoint[] }).trend
-  return Array.isArray(raw) ? raw : []
-})
 </script>
 
 <template>
@@ -136,32 +129,12 @@ const trend = computed<TrendPoint[]>(() => {
         </n-spin>
       </section>
 
-      <!-- 趋势图（FR-STAT-04，P2） -->
+      <!-- 趋势图（FR-STAT-04，§6.11 daily-trend） -->
       <section class="tu-card trend-section">
         <h3>趋势</h3>
-        <template v-if="trend.length >= 2">
-          <svg class="trend-svg" viewBox="0 0 320 140" role="img" aria-label="刷题量与正确率趋势">
-            <polyline
-              :points="trend.map((p, i) => `${(i / (trend.length - 1)) * 300 + 10},${130 - Math.min(120, p.count)} `).join('')"
-              fill="none"
-              stroke="#2B3A67"
-              stroke-width="2.5"
-              stroke-linejoin="round"
-            />
-            <polyline
-              v-if="trend.some((p) => p.accuracy != null)"
-              :points="trend.map((p, i) => `${(i / (trend.length - 1)) * 300 + 10},${130 - (p.accuracy ?? 0) * 120} `).join('')"
-              fill="none"
-              stroke="#7C3AED"
-              stroke-width="2"
-              stroke-dasharray="4 3"
-            />
-          </svg>
-          <p class="legend-line text-secondary">
-            <span class="lg solid" /> 刷题量　<span class="lg dash" /> 正确率
-          </p>
-        </template>
-        <n-empty-lite v-else text="契约尚未提供趋势时序端点，图表将在数据可用后自动展示" />
+        <n-spin :show="stats.dailyTrendLoading">
+          <daily-trend-chart :points="stats.dailyTrend" />
+        </n-spin>
       </section>
     </div>
   </div>
@@ -296,31 +269,6 @@ h3 {
 
 .bad {
   color: var(--tu-error);
-}
-
-.trend-svg {
-  width: 100%;
-  height: auto;
-}
-
-.legend-line {
-  font-size: 12px;
-}
-
-.lg {
-  display: inline-block;
-  width: 18px;
-  height: 3px;
-  vertical-align: middle;
-  border-radius: 2px;
-}
-
-.lg.solid {
-  background: #2b3a67;
-}
-
-.lg.dash {
-  background: repeating-linear-gradient(90deg, #7c3aed 0 4px, transparent 4px 7px);
 }
 
 :deep(.empty-lite) {

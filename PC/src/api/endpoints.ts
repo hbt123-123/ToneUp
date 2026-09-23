@@ -13,6 +13,7 @@ import type {
   QuestionListData,
   ReviewTodayData,
   SkipResult,
+  StatsDailyTrendData,
   StatsOverview,
   SubmitAttemptBody,
   WeaknessListData,
@@ -108,6 +109,14 @@ export function apiStatsWeaknesses(
   signal?: AbortSignal,
 ): Promise<WeaknessListData> {
   return request('/stats/weaknesses', { query, signal })
+}
+
+/** 每日趋势：最近 days 个 UTC 自然日（端点上限 60），无 subject 维度 */
+export function apiStatsDailyTrend(
+  query: { days?: number } = {},
+  signal?: AbortSignal,
+): Promise<StatsDailyTrendData> {
+  return request('/stats/daily-trend', { query, signal })
 }
 
 /* ---------- 错题本（M2）：FR-WRONG-01 约定——契约未提供专用查询端点，

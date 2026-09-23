@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, reactive, ref } from 'vue'
-import { apiStatsOverview, apiStatsWeaknesses } from '@/api/endpoints'
+import { apiStatsDailyTrend, apiStatsOverview, apiStatsWeaknesses } from '@/api/endpoints'
 import type { StatsOverview, WeaknessItem } from '@/api/generated/schema'
+import type { DailyTrendPoint } from '@/components/charts/types'
 
 /**
- * stats store（§2.4）：概览指标、薄弱项、时间范围参数。内存缓存 + 手动刷新。
+ * stats store（§2.4）：概览指标、薄弱项、每日趋势、时间范围参数。内存缓存 + 手动刷新。
  */
 export const useStatsStore = defineStore('stats', () => {
   const overview = reactive<StatsOverview>({})
@@ -13,6 +14,10 @@ export const useStatsStore = defineStore('stats', () => {
 
   const weaknesses = ref<WeaknessItem[]>([])
   const weaknessLoading = ref(false)
+
+  /** 每日趋势（§6.11 daily-trend），空数组 = 未加载/加载失败占位 */
+  const dailyTrend = ref<DailyTrendPoint[]>([])
+  const dailyTrendLoading = ref(false)
 
   /** FR-STAT-02 时间范围与学科筛选，联动所有图表 */
   const range = ref<'7d' | '30d' | '90d' | 'all'>('30d')
@@ -52,9 +57,27 @@ export const useStatsStore = defineStore('stats', () => {
     }
   }
 
+  /** 每日趋势窗口天数：随 range 联动；端点上限 60，故 90d/all 夹到 60 */
+  const trendDays = computed(() => (range.value === '7d' ? 7 : range.value === '30d' ? 30 : 60))
+
+  async function fetchDailyTrend(days = trendDays.value, force = false): Promise<DailyTrendPoint[]> {
+    if (dailyTrend.value.length > 0 && !force) return dailyTrend.value
+    dailyTrendLoading.value = true
+    try {
+      const data = await apiStatsDailyTrend({ days })
+      dailyTrend.value = data.points ?? []
+    } catch {
+      /* 失败保留现有数据；图表以占位/旧数据呈现，可手动刷新重试 */
+    } finally {
+      dailyTrendLoading.value = false
+    }
+    return dailyTrend.value
+  }
+
   function invalidate(): void {
     overviewLoaded.value = false
     weaknesses.value = []
+    dailyTrend.value = []
   }
 
   function reset(): void {
@@ -69,11 +92,15 @@ export const useStatsStore = defineStore('stats', () => {
     overviewLoading,
     weaknesses,
     weaknessLoading,
+    dailyTrend,
+    dailyTrendLoading,
     range,
     subjectId,
     rangeQuery,
+    trendDays,
     fetchOverview,
     fetchWeaknesses,
+    fetchDailyTrend,
     invalidate,
     reset,
   }
