@@ -1,31 +1,61 @@
+import { defineAsyncComponent, defineComponent, h } from 'vue'
 import type { Component } from 'vue'
-import SingleChoiceRenderer from './SingleChoiceRenderer.vue'
-import MultiChoiceRenderer from './MultiChoiceRenderer.vue'
-import JudgeRenderer from './JudgeRenderer.vue'
-import FillBlankRenderer from './FillBlankRenderer.vue'
-import SolutionRenderer from './SolutionRenderer.vue'
-import ClozeRenderer from './ClozeRenderer.vue'
-import OrderingRenderer from './OrderingRenderer.vue'
-import TranslationRenderer from './TranslationRenderer.vue'
-import EssayRenderer from './EssayRenderer.vue'
 import UnknownTypeRenderer from './UnknownTypeRenderer.vue'
 import { CONTRACT_TYPE_CODES } from './types'
 
 /**
+ * EC-04 懒加载包装：defineAsyncComponent + chunk 加载失败兜底
+ * （部署发版后旧标签页引用已失效的 chunk 文件名 → 404，渲染占位而非白屏崩溃）。
+ */
+function lazyRenderer(loader: () => Promise<Component>): Component {
+  let lastRetry: (() => void) | null = null
+  return defineAsyncComponent({
+    loader,
+    onError(error, retry, fail) {
+      console.error('[ToneUp] 题型渲染组件加载失败，已降级为占位', error)
+      lastRetry = retry
+      fail()
+    },
+    errorComponent: defineComponent({
+      name: 'RendererLoadError',
+      setup() {
+        return () =>
+          h('div', { class: 'renderer-load-error', style: 'padding:24px;text-align:center;font-size:13px;' }, [
+            h('p', { style: 'margin:0 0 8px;color:var(--tu-error,#d03050);' }, '组件加载失败'),
+            h(
+              'button',
+              {
+                type: 'button',
+                onClick: () => lastRetry?.(),
+                style: 'padding:4px 14px;cursor:pointer;',
+              },
+              '加载失败，点击重试',
+            ),
+          ])
+      },
+    }),
+  })
+}
+
+/** 单选渲染器：SINGLE 与 READING 共享同一异步实例（别名随 Single，§6.3） */
+const singleChoiceRenderer = lazyRenderer(() => import('./SingleChoiceRenderer.vue'))
+
+/**
  * 题型渲染注册表（§6.1）：
  * 键为后端契约 type_code，逐字符一致；工作台通过 resolveRenderer 动态挂载。
+ * 除 UnknownTypeRenderer（身份判断用）与 OptionRow（支撑件）外，9 个真实渲染器按需加载。
  */
 export const RENDERER_REGISTRY: Record<string, Component> = {
-  SINGLE: SingleChoiceRenderer,
-  READING: SingleChoiceRenderer, // 英语阅读单选按单选渲染（§6.3）
-  MULTI: MultiChoiceRenderer,
-  JUDGE: JudgeRenderer,
-  FILL_BLANK: FillBlankRenderer,
-  SOLUTION: SolutionRenderer,
-  CLOZE: ClozeRenderer,
-  ORDERING: OrderingRenderer,
-  TRANSLATION: TranslationRenderer,
-  ESSAY: EssayRenderer,
+  SINGLE: singleChoiceRenderer,
+  READING: singleChoiceRenderer, // 英语阅读单选按单选渲染（§6.3）
+  MULTI: lazyRenderer(() => import('./MultiChoiceRenderer.vue')),
+  JUDGE: lazyRenderer(() => import('./JudgeRenderer.vue')),
+  FILL_BLANK: lazyRenderer(() => import('./FillBlankRenderer.vue')),
+  SOLUTION: lazyRenderer(() => import('./SolutionRenderer.vue')),
+  CLOZE: lazyRenderer(() => import('./ClozeRenderer.vue')),
+  ORDERING: lazyRenderer(() => import('./OrderingRenderer.vue')),
+  TRANSLATION: lazyRenderer(() => import('./TranslationRenderer.vue')),
+  ESSAY: lazyRenderer(() => import('./EssayRenderer.vue')),
 }
 
 export function resolveRenderer(typeCode: string): Component {
