@@ -199,6 +199,7 @@ PC/
 | FR-PRAC-11 | 离开保护：有未提交内容时路由离开/刷新前弹确认并强制落盘草稿 | P0 |
 | FR-PRAC-12 | 断网续答：离线可继续切题作答，联网后提示同步未提交记录，以服务端结果为准 | P0 |
 | FR-PRAC-13 | 缓存手动刷新：按缓存键失效并重新拉取（见 8.5） | P1 |
+| FR-PRAC-14 | 背题模式（EC-02）：工具栏"背题"开关（mode: practice\|recite，会话内存态，刷新/退出复位；review 会话禁用）；recite 下全部题型强制只读并展示正确答案与解析，提交按钮经 `canSubmit()` 禁用、submit 入口双保险直接 return，零 `POST /api/attempts`、零错题本/掌握度/复习排期写入、不入离线队列 | P0 |
 
 ### 5.5 解析视图
 
@@ -239,7 +240,7 @@ PC/
 | FR-STAT-01 | 概览指标卡：正确率、刷题量、连续学习天数（`GET /api/stats/overview`） | P0 |
 | FR-STAT-02 | 时间范围与学科筛选，联动所有图表 | P1 |
 | FR-STAT-03 | 薄弱知识点榜：按学科、题型、知识点聚合（`GET /api/stats/weaknesses`），条目可跳转对应题库定向练习 | P0 |
-| FR-STAT-04 | 趋势图：刷题量与正确率随时间变化；图表库按需分包懒加载 | P2 |
+| FR-STAT-04 | 趋势图：刷题量与正确率随时间变化，数据来自 `GET /api/stats/daily-trend`（days 随时间范围 7d/30d 取 7/30，其余档夹到 60）；由 `components/charts/DailyTrendChart.vue` 渲染（纯 props：`points: DailyTrendPoint[]`，零 store 依赖零网络请求，空数组占位"暂无数据"） | P2 |
 
 ### 5.9 个人笔记
 
@@ -563,11 +564,20 @@ PC/
 | POST | `/api/admin/catalog/reload` | 重载目录索引 | 管理页 | M3 |
 | GET | `/api/admin/health` | 发起健康检查（支持 bank_id 筛选） | 管理页 | M3 |
 | GET | `/api/admin/health/{task_id}` | 查询健康检查任务结果 | 管理页 | M3 |
+| GET | `/api/stats/daily-trend` | 按天作答量与正确率趋势（days 1~60） | 统计页趋势图（DailyTrendChart，EC-03 已消费） | EC |
+| POST | `/api/practice-sessions` | 创建练习会话（按专题/题型/数量选题，count 默认 20 上限 50） | 题库选择页 | EC |
+| GET | `/api/practice-sessions/{sid}` | 恢复会话：题目序列、进度、服务端草稿 | 刷题工作台 | EC |
+| PUT | `/api/practice-sessions/{sid}/draft` | 服务端草稿（10s 节流） | 刷题工作台 | EC |
+| POST | `/api/practice-sessions/{sid}/submit` | 交卷（client_request_id 幂等，须先同步完 attempts） | 刷题工作台 | EC |
+| GET | `/api/practice-sessions/{sid}/result` | 本轮结果详情 | 小结/解析视图 | EC |
+| GET | `/api/practice-sessions` | 会话历史列表（分页） | 会话历史入口 | EC |
+| DELETE | `/api/practice-sessions/{sid}` | 删除会话 | 会话历史入口 | EC |
 
 备注：
 
 - 主观题自评结果的回传方式、错题本专用查询端点（若契约提供）均以后端契约为准，本文不预设路径；确定后在表中补一行即可，不得引入 §9.1 之外的同义旧路径。
 - 除登录注册外所有请求携带 `Authorization: Bearer <token>`；响应外层结构与 request_id 透传规则见契约。
+- EC 批次（ExamCrafts 借鉴）：`daily-trend` 与背题模式（FR-PRAC-14）已消费；practice-sessions 七端点为服务端会话资源的目标消费声明，PC 端接入排期以台账为准，字段与错误码一律以 `../backend/后端目标需求文档.md` §6.10 为准。
 
 ---
 
