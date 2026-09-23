@@ -36,6 +36,8 @@ from app.schemas.common import envelope, page
 router = APIRouter(prefix="/api/practice-sessions", tags=["practice-sessions"])
 
 MAX_SESSION_COUNT = 50
+# draft 单次提交体上限（防认证用户高频发大包消耗解析 CPU/带宽）
+_DRAFT_MAX_BYTES = 64 * 1024
 # ESSAY（含 AI 批改链路的主观作文）不进入练习会话；AI 题不在任何
 # subject 映射内，白名单过滤自然排除（EC-01 MUST NOT 红线）。
 _EXCLUDED_TYPE_CODES = {"ESSAY"}
@@ -214,10 +216,13 @@ def get_session(session_id: int, user=Depends(get_current_user)):
 
 @router.put("/{session_id}/draft")
 def update_draft(session_id: int, body: DraftBody, user=Depends(get_current_user)):
-    """草稿更新（last-write-wins，无冲突合并）。节流由客户端负责，服务端不限流。
+    """草稿更新（last-write-wins，无冲突合并）。节流由客户端负责；服务端不做
+    频率限流，但限制单次 body 大小（64KB）。
 
-    会话已提交返回 409；不存在/非本人 404。
+    会话已提交返回 409；不存在/非本人 404；超限 400。
     """
+    if len(json.dumps(body.draft, ensure_ascii=False).encode("utf-8")) > _DRAFT_MAX_BYTES:
+        raise BadRequestError("draft payload too large (max 64KB)")
     user_db = _user_db()
     if repo.get_session(user_db, user["id"], session_id) is None:
         raise NotFoundError("session not found")

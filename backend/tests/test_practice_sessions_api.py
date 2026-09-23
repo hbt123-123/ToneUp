@@ -308,6 +308,61 @@ def test_ownership_404(app_and_data):
                       headers=headers_a).status_code == 200
 
 
+def test_submit_request_id_reused_across_sessions_409(app_and_data):
+    """幂等键跨会话复用：第二个会话 submit 返回 409，绝不下发首个会话的摘要。"""
+    client, user_db_path, _ = app_and_data
+    headers = _auth_headers(user_db_path, "alice")
+    sid_a = client.post(
+        "/api/practice-sessions", headers=headers,
+        json={"bank_id": "math1", "count": 2},
+    ).json()["data"]["session_id"]
+    sid_b = client.post(
+        "/api/practice-sessions", headers=headers,
+        json={"bank_id": "math1", "count": 2},
+    ).json()["data"]["session_id"]
+
+    cri = f"reuse-{uuid.uuid4().hex}"
+    assert client.post(
+        f"/api/practice-sessions/{sid_a}/submit", headers=headers,
+        json={"client_request_id": cri},
+    ).status_code == 200
+
+    resp = client.post(
+        f"/api/practice-sessions/{sid_b}/submit", headers=headers,
+        json={"client_request_id": cri},
+    )
+    assert resp.status_code == 409
+    # B 仍为 active：未被误标为已提交
+    detail_b = client.get(
+        f"/api/practice-sessions/{sid_b}", headers=headers
+    ).json()["data"]
+    assert detail_b["session"]["status"] == "active"
+
+
+def test_draft_payload_too_large_400(app_and_data):
+    """draft 单次 body 超 64KB → 400；正常大小仍可写入。"""
+    client, user_db_path, _ = app_and_data
+    headers = _auth_headers(user_db_path, "alice")
+    sid = client.post(
+        "/api/practice-sessions", headers=headers,
+        json={"bank_id": "math1", "count": 2},
+    ).json()["data"]["session_id"]
+
+    resp = client.put(
+        f"/api/practice-sessions/{sid}/draft", headers=headers,
+        json={"current_index": 0,
+              "draft": {"q0": "x" * (64 * 1024)},
+              "elapsed_seconds": 1},
+    )
+    assert resp.status_code == 400
+
+    ok = client.put(
+        f"/api/practice-sessions/{sid}/draft", headers=headers,
+        json={"current_index": 0, "draft": {"q0": "A"}, "elapsed_seconds": 1},
+    )
+    assert ok.status_code == 200
+
+
 def test_list_pagination(app_and_data):
     """分页：total 正确、page_size=1 时 has_more 翻页。"""
     client, user_db_path, _ = app_and_data

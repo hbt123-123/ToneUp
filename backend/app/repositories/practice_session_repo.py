@@ -6,9 +6,9 @@
 幂等语义（EC-01）：
 - submit 为条件更新幂等——`UPDATE ... WHERE id=? AND user_id=? AND status='active'`，
   rowcount==1 即首次提交；rowcount==0 重查既有会话返回既有摘要（replayed=True）；
-  若 UPDATE 因 UNIQUE(user_id, client_request_id) 冲突（同 request_id 被另一
-  会话占用），照 user_repo.insert_attempt 范式按 (user_id, client_request_id)
-  回查既有行返回 replayed=True，不抛出。
+  若 UPDATE 因 UNIQUE(user_id, client_request_id) 冲突，回查该键所属会话：
+  即本会话 → 视为并发重放返回 replayed=True；属别的会话 → 抛 ConflictError，
+  绝不复用他人幂等键（否则会向调用方返回"别的会话"的摘要）。
 - 已答数/摘要一律由 practice_records 实时聚合，本仓储不冗余计数。
 """
 
@@ -16,6 +16,7 @@ import json
 import sqlite3
 from typing import Dict, List, Optional, Tuple
 
+from app.core.errors import ConflictError
 from app.repositories.user_repo import user_connection
 
 __all__ = [
@@ -153,7 +154,8 @@ def submit_session(
                     (client_request_id, session_id, user_id),
                 )
         except sqlite3.IntegrityError:
-            # 同 request_id 已被该用户另一会话占用：回查既有行照常返回。
+            # 同 request_id 已被占用：回查该键所属会话，仅当就是本会话时
+            # 视为并发重放；属别的会话则明确拒绝（避免返回错误摘要）。
             row = conn.execute(
                 """
                 SELECT * FROM practice_session
@@ -163,6 +165,10 @@ def submit_session(
             ).fetchone()
             if row is None:
                 raise
+            if row["id"] != session_id:
+                raise ConflictError(
+                    "client_request_id already used by another session"
+                )
             return _summarize(conn, row), True
 
         if cur.rowcount == 1:

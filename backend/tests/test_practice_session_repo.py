@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from app.core.errors import ConflictError
 from app.repositories import practice_session_repo as repo
 from app.repositories import user_repo
 
@@ -208,11 +209,10 @@ def test_submit_same_request_id_two_sessions_integrity_branch(db):
     summary_a, replayed_a = repo.submit_session(db, uid, sid_a, "req-dup")
     assert replayed_a is False
 
-    # 会话 B 用同一 request_id：UNIQUE(user_id, client_request_id) 冲突，
-    # 照 insert_attempt 范式回查既有行 → replayed=True，不抛异常
-    summary_b, replayed_b = repo.submit_session(db, uid, sid_b, "req-dup")
-    assert replayed_b is True
-    assert summary_b is not None
+    # 会话 B 复用同一 request_id：该键属会话 A，明确拒绝（409），
+    # 不得返回 A 的摘要——否则客户端会把 B 误判为已提交
+    with pytest.raises(ConflictError):
+        repo.submit_session(db, uid, sid_b, "req-dup")
 
     # 恰一次成功：B 仍为 active（其 UPDATE 被回滚），A 已 submitted
     assert repo.get_session(db, uid, sid_a)["status"] == "submitted"
