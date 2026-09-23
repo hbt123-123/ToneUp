@@ -1,8 +1,10 @@
-"""统计两端点（需求文档 §6.6 / §9.4）。
+"""统计端点（需求文档 §6.6 / §9.4 / §6.11）。
 
 - overview：正确率/刷题量/连续学习天数（按 STATS_TZ 切日）
 - weaknesses：学科×题型×知识点聚合；窗口=最近90天或200次先到；
   入选 ≥5 次且正确率 <60%；错误率降序
+- daily-trend：近 N 天作答趋势（UTC 日历日分桶，桶内 (bank_id, question_id)
+  去重取当天最新判分，空天补零；EC-03 双端图表数据源）
 """
 from __future__ import annotations
 
@@ -255,3 +257,58 @@ def weaknesses(
 
     items.sort(key=lambda x: x["wrong_rate"], reverse=True)
     return envelope({"items": items[:limit]})
+
+
+@router.get("/daily-trend")
+def daily_trend(
+    days: int = Query(14, ge=1, le=60),
+    user=Depends(get_current_user),
+):
+    """近 N 天作答趋势（EC-03）。
+
+    分桶口径：`created_at` 存储即 UTC ISO（attempts 写入 `datetime.now(utc).isoformat()`），
+    `substr(created_at,1,10)` 即 UTC 日历日；桶内按 (bank_id, question_id) 去重，
+    取当天最新一条判分代表该题当天状态；跨天重复作答各天分别计入；
+    空天补零（attempts=0, correct_rate=0.0）。correct_rate 与 overview 同为 4 位小数。
+    """
+    db = _user_db()
+    today_utc = datetime.now(timezone.utc).date()
+    start_date = today_utc - timedelta(days=days - 1)
+
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    try:
+        # 窗口函数去重：同 (day, bank_id, question_id) 仅保留当天最新一条
+        rows = conn.execute(
+            """
+            SELECT day, bank_id, question_id, is_correct FROM (
+                SELECT substr(created_at, 1, 10) AS day,
+                       bank_id, question_id, is_correct,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY substr(created_at, 1, 10), bank_id, question_id
+                           ORDER BY created_at DESC
+                       ) AS rn
+                FROM practice_records
+                WHERE user_id = ? AND created_at >= ?
+            ) WHERE rn = 1
+            """,
+            (user["id"], start_date.isoformat()),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_day: dict[str, list[int]] = {}
+    for r in rows:
+        by_day.setdefault(r["day"], []).append(r["is_correct"])
+
+    points = []
+    for offset in range(days):
+        day = (start_date + timedelta(days=offset)).isoformat()
+        results = by_day.get(day, [])
+        correct = sum(1 for x in results if x == 1)
+        points.append({
+            "date": day,
+            "attempts": len(results),
+            "correct_rate": round(correct / len(results), 4) if results else 0.0,
+        })
+    return envelope({"days": days, "points": points})

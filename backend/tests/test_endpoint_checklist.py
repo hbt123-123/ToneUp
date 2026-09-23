@@ -17,6 +17,7 @@ EXPECTED_ENDPOINTS = {
     ("POST", "/api/reviews/{question_id}/skip"),
     ("GET", "/api/stats/overview"),
     ("GET", "/api/stats/weaknesses"),
+    ("GET", "/api/stats/daily-trend"),
     ("GET", "/api/questions/{question_id}/notes"),
     ("PUT", "/api/questions/{question_id}/notes"),
     ("PUT", "/api/notes/{note_id}"),
@@ -62,4 +63,4 @@ def test_openapi_contains_all_contract_endpoints(client):
     extra = {a for a in actual if a not in EXPECTED_ENDPOINTS}
     assert not missing, f"missing endpoints: {sorted(missing)}"
     assert not extra, f"unexpected endpoints: {sorted(extra)}"
-    assert len(EXPECTED_ENDPOINTS) == 45
+    assert len(EXPECTED_ENDPOINTS) == 46
