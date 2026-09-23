@@ -45,7 +45,19 @@ def test_init_creates_five_tables_in_master(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table' AND name != 'sqlite_sequence' ORDER BY name"
         )
         tables = {row[0] for row in cur.fetchall()}
-        expected = {"users", "practice_records", "user_mastery", "user_notes", "ai_feedback", "wrong_questions", "favorite_questions"}
+        expected = {
+            "users",
+            "practice_records",
+            "user_mastery",
+            "user_notes",
+            "ai_feedback",
+            "wrong_questions",
+            "favorite_questions",
+            "question_feedback",
+            "note_likes",
+            "practice_session",
+            "practice_session_item",
+        }
         assert tables == expected, f"Expected table set {expected}, got {tables}"
     finally:
         conn.close()
@@ -185,5 +197,116 @@ def test_indexes_exist_in_sqlite_master(tmp_path):
         )
         idx_ai = cur.fetchone()
         assert idx_ai is not None, "Index idx_ai_feedback_user should exist in sqlite_master"
+    finally:
+        conn.close()
+
+
+# ── Test 8: practice_session tables and unique index exist ──────────────────
+def test_practice_session_tables_and_unique_index_exist(tmp_path):
+    """sqlite_master 含 practice_session 两表与 uq_practice_session_request 唯一索引"""
+    db = _tmp_db_path(tmp_path)
+    init_user_db(db)
+
+    conn = sqlite3.connect(db)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('practice_session','practice_session_item')"
+        )
+        tables = {row[0] for row in cur.fetchall()}
+        assert tables == {"practice_session", "practice_session_item"}, (
+            f"Expected practice_session tables, got {tables}"
+        )
+
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='uq_practice_session_request'"
+        )
+        assert cur.fetchone() is not None, (
+            "Index uq_practice_session_request should exist in sqlite_master"
+        )
+    finally:
+        conn.close()
+
+
+# ── Test 9: practice_session (user_id, client_request_id) uniqueness ────────
+def test_practice_session_unique_request_when_duplicate_insert(tmp_path):
+    """practice_session 插入同 (user_id, client_request_id) 两行抛 IntegrityError"""
+    db = _tmp_db_path(tmp_path)
+    init_user_db(db)
+
+    conn = sqlite3.connect(db)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO practice_session (user_id, bank_id, client_request_id) VALUES (?, ?, ?)",
+            (1, "bank1", "req1"),
+        )
+        conn.commit()
+
+        try:
+            cur.execute(
+                "INSERT INTO practice_session (user_id, bank_id, client_request_id) VALUES (?, ?, ?)",
+                (1, "bank1", "req1"),
+            )
+            conn.commit()
+            assert False, "Expected sqlite3.IntegrityError on duplicate (user_id, client_request_id)"
+        except sqlite3.IntegrityError:
+            conn.rollback()
+    finally:
+        conn.close()
+
+
+# ── Test 10: practice_session NULL client_request_id is allowed repeatedly ──
+def test_practice_session_null_request_id_allows_multiple_rows(tmp_path):
+    """活跃会话 client_request_id=NULL 互异：同一 user 可插入多行 NULL（唯一索引不受影响）"""
+    db = _tmp_db_path(tmp_path)
+    init_user_db(db)
+
+    conn = sqlite3.connect(db)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO practice_session (user_id, bank_id) VALUES (?, ?)", (1, "bank1")
+        )
+        cur.execute(
+            "INSERT INTO practice_session (user_id, bank_id) VALUES (?, ?)", (1, "bank1")
+        )
+        conn.commit()
+
+        cur.execute("SELECT COUNT(*) FROM practice_session WHERE user_id = 1")
+        assert cur.fetchone()[0] == 2, "Two rows with NULL client_request_id should coexist"
+    finally:
+        conn.close()
+
+
+# ── Test 11: practice_session_item (session_id, position) uniqueness ────────
+def test_practice_session_item_unique_position(tmp_path):
+    """practice_session_item 同会话同 position 二次插入抛 IntegrityError"""
+    db = _tmp_db_path(tmp_path)
+    init_user_db(db)
+
+    conn = sqlite3.connect(db)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO practice_session (user_id, bank_id) VALUES (?, ?)", (1, "bank1")
+        )
+        session_id = cur.lastrowid
+
+        cur.execute(
+            "INSERT INTO practice_session_item (session_id, position, question_id) VALUES (?, ?, ?)",
+            (session_id, 0, 101),
+        )
+        conn.commit()
+
+        try:
+            cur.execute(
+                "INSERT INTO practice_session_item (session_id, position, question_id) VALUES (?, ?, ?)",
+                (session_id, 0, 102),
+            )
+            conn.commit()
+            assert False, "Expected sqlite3.IntegrityError on duplicate (session_id, position)"
+        except sqlite3.IntegrityError:
+            conn.rollback()
     finally:
         conn.close()

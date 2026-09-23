@@ -16,10 +16,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.core.wrongbook_schema import WRONG_QUESTIONS_DDL, WRONG_QUESTIONS_INDEXES
 from app.core.favorites_schema import FAVORITE_QUESTIONS_DDL, FAVORITE_QUESTIONS_INDEXES
+from app.core.practice_session_schema import (
+    PRACTICE_SESSION_DDL,
+    PRACTICE_SESSION_ITEM_DDL,
+    PRACTICE_SESSION_INDEXES,
+)
 
 
 def init_user_db(db_path: str) -> None:
-    """Initialize the user database with seven tables, WAL mode, and idempotent indexes.
+    """Initialize the user database with nine tables, WAL mode, and idempotent indexes.
 
     Creates the following tables if they do not already exist (all DDL uses IF NOT EXISTS):
       - users
@@ -29,6 +34,8 @@ def init_user_db(db_path: str) -> None:
       - ai_feedback
       - wrong_questions
       - favorite_questions
+      - practice_session
+      - practice_session_item
 
     After connecting, sets PRAGMA journal_mode=WAL and PRAGMA busy_timeout=5000.
 
@@ -104,7 +111,7 @@ def init_user_db(db_path: str) -> None:
                 updated_at        TEXT    NOT NULL,
                 visibility        TEXT    NOT NULL DEFAULT 'public',
                 like_count        INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (user_id, bank_id, question_id)
+                UNIQUE(user_id, bank_id, question_id)
             )
             """
         )
@@ -184,6 +191,12 @@ def init_user_db(db_path: str) -> None:
         # ── favorite_questions ───────────────────────────────
         cursor.execute(FAVORITE_QUESTIONS_DDL)
         for idx_sql in FAVORITE_QUESTIONS_INDEXES:
+            cursor.execute(idx_sql)
+
+        # ── practice_session / practice_session_item ────────
+        cursor.execute(PRACTICE_SESSION_DDL)
+        cursor.execute(PRACTICE_SESSION_ITEM_DDL)
+        for idx_sql in PRACTICE_SESSION_INDEXES:
             cursor.execute(idx_sql)
 
         conn.commit()
