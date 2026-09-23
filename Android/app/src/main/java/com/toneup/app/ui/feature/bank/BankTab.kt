@@ -40,6 +40,9 @@ import com.toneup.app.ui.common.Load
 import com.toneup.app.ui.components.EmptyState
 import com.toneup.app.ui.components.ErrorRetryCard
 import com.toneup.app.ui.components.SkeletonBlock
+import com.toneup.app.ui.components.charts.AccuracyTrendChart
+import com.toneup.app.ui.components.charts.AttemptTrendChart
+import com.toneup.app.ui.components.charts.TopicProgressList
 import com.toneup.app.ui.navigation.Routes
 import androidx.navigation.NavHostController
 
@@ -210,6 +213,33 @@ fun BankTab(
                                     modifier = Modifier.fillMaxWidth().height(48.dp)
                                 ) { Text("浏览完整目录选题") }
                             }
+                        }
+                    }
+                }
+
+                // EC-03 首页仪表盘三卡（Canvas 自绘，失败静默 → 占位）
+                item { Text("学习概览", style = MaterialTheme.typography.titleLarge) }
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("近 14 天作答量", style = MaterialTheme.typography.titleSmall)
+                            AttemptTrendChart(points = home.trend)
+                        }
+                    }
+                }
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("正确率趋势", style = MaterialTheme.typography.titleSmall)
+                            AccuracyTrendChart(points = home.trend)
+                        }
+                    }
+                }
+                item {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("专题进度", style = MaterialTheme.typography.titleSmall)
+                            TopicProgressList(items = home.topicProgress)
                         }
                     }
                 }

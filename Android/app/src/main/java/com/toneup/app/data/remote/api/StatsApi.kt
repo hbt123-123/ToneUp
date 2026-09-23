@@ -1,6 +1,7 @@
 package com.toneup.app.data.remote.api
 
 import com.toneup.app.data.remote.dto.ApiEnvelope
+import com.toneup.app.data.remote.dto.DailyTrendDataDto
 import com.toneup.app.data.remote.dto.StatsOverviewDto
 import com.toneup.app.data.remote.dto.WeaknessItemDto
 import retrofit2.http.GET
@@ -19,4 +20,8 @@ interface StatsApi {
         @Query("subject_id") subjectId: String? = null,
         @Query("limit") limit: Int = 10
     ): ApiEnvelope<List<WeaknessItemDto>>
+
+    /** §6.11 每日趋势：最近 days 个 UTC 自然日（端点上限 60），无 subject 维度 */
+    @GET("api/stats/daily-trend")
+    suspend fun dailyTrend(@Query("days") days: Int = 14): ApiEnvelope<DailyTrendDataDto>
 }

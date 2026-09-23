@@ -10,6 +10,7 @@ import com.toneup.app.data.remote.dto.CatalogDto
 import com.toneup.app.data.repository.PracticeSession
 import com.toneup.app.data.repository.PracticeSessionRegistry
 import com.toneup.app.data.repository.QuestionRef
+import com.toneup.app.data.repository.SectionRepository
 import com.toneup.app.data.repository.SessionRepository
 import com.toneup.app.data.repository.StatsRepository
 import com.toneup.app.data.repository.AppException
@@ -18,6 +19,10 @@ import com.toneup.app.data.repository.JsonProvider
 import com.toneup.app.domain.logic.AnswerCodec
 import com.toneup.app.ui.common.Load
 import com.toneup.app.ui.common.toLoadMessage
+import com.toneup.app.ui.components.charts.DailyTrendPoint
+import com.toneup.app.ui.components.charts.TopicProgressItem
+import com.toneup.app.ui.components.charts.toChartPoint
+import com.toneup.app.ui.components.charts.toProgressItem
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -33,6 +38,10 @@ data class HomeUiState(
     val checkedToday: Boolean = false,
     val lastContext: LastPracticeContext? = null,
     val catalog: Load<CatalogDto> = Load.Loading,
+    /** EC-03 首页仪表盘：近 14 天趋势（失败静默 → 空 = 占位） */
+    val trend: List<DailyTrendPoint> = emptyList(),
+    /** 最近练习 bank 的专题进度前 5（无最近 bank / 失败静默 → 空 = 占位） */
+    val topicProgress: List<TopicProgressItem> = emptyList(),
     val refreshing: Boolean = false,
     val errorHint: String? = null
 )
@@ -57,6 +66,7 @@ data class PickerUiState(
 class BankViewModel @Inject constructor(
     private val catalogRepository: CatalogRepository,
     private val statsRepository: StatsRepository,
+    private val sectionRepository: SectionRepository,
     private val questionRepository: QuestionRepository,
     private val sessionRegistry: PracticeSessionRegistry,
     private val sessionDataStoreManager: SessionDataStoreManager,
@@ -93,6 +103,17 @@ class BankViewModel @Inject constructor(
                     val catalog = async {
                         runCatching { catalogRepository.catalog(forceRefreshCatalog) }
                     }
+                    // EC-03 首页仪表盘：趋势不带 subject_id；sections 取最近练习 bank，失败静默占位
+                    val trend = async {
+                        runCatching { statsRepository.dailyTrend(14) }
+                    }
+                    val sections = async {
+                        val bankId = lastCtx?.bankId
+                        when {
+                            bankId == null -> null
+                            else -> runCatching { sectionRepository.sections(bankId) }.getOrNull()
+                        }
+                    }
                     overview.await().onSuccess { stats ->
                         _home.value = _home.value.copy(
                             streakDays = stats.streakDays,
@@ -105,6 +126,14 @@ class BankViewModel @Inject constructor(
                         if (_home.value.catalog !is Load.Ready) {
                             _home.value = _home.value.copy(catalog = Load.Failed(e.toLoadMessage()))
                         }
+                    }
+                    trend.await().onSuccess { data ->
+                        _home.value = _home.value.copy(trend = data.points.map { it.toChartPoint() })
+                    }.onFailure { /* 静默：图表以占位呈现 */ }
+                    sections.await()?.let { resp ->
+                        _home.value = _home.value.copy(
+                            topicProgress = resp.sections.take(5).map { it.toProgressItem() }
+                        )
                     }
                 }
                 _home.value = _home.value.copy(lastContext = lastCtx, refreshing = false)

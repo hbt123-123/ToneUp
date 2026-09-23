@@ -1,6 +1,7 @@
 package com.toneup.app.data.repository
 
 import com.toneup.app.data.remote.api.StatsApi
+import com.toneup.app.data.remote.dto.DailyTrendDataDto
 import com.toneup.app.data.remote.dto.StatsOverviewDto
 import com.toneup.app.data.remote.dto.WeaknessItemDto
 import java.time.LocalDate
@@ -25,4 +26,7 @@ class StatsRepository @Inject constructor(
 
     suspend fun weaknesses(subjectId: String? = null, limit: Int = 10): List<WeaknessItemDto> =
         EnvelopeUnwrapper.unwrap(jsonProvider.json) { statsApi.weaknesses(subjectId, limit) }
+
+    suspend fun dailyTrend(days: Int = 14): DailyTrendDataDto =
+        EnvelopeUnwrapper.unwrap(jsonProvider.json) { statsApi.dailyTrend(days) }
 }
