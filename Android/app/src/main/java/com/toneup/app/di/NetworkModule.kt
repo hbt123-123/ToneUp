@@ -14,6 +14,7 @@ import com.toneup.app.data.remote.api.NotesSharedApi
 import com.toneup.app.data.remote.api.QuestionApi
 import com.toneup.app.data.remote.api.ReviewApi
 import com.toneup.app.data.remote.api.SectionsApi
+import com.toneup.app.data.remote.api.SessionApi
 import com.toneup.app.data.remote.api.StatsApi
 import com.toneup.app.data.remote.api.WrongbookApi
 import com.toneup.app.data.remote.api.WrongQuestionApi
@@ -103,6 +104,7 @@ object NetworkModule {
     @Provides @Singleton fun notesApi(retrofit: Retrofit): NotesApi = retrofit.create(NotesApi::class.java)
     @Provides @Singleton fun wrongbookApi(retrofit: Retrofit): WrongbookApi = retrofit.create(WrongbookApi::class.java)
     @Provides @Singleton fun sectionsApi(retrofit: Retrofit): SectionsApi = retrofit.create(SectionsApi::class.java)
+    @Provides @Singleton fun sessionApi(retrofit: Retrofit): SessionApi = retrofit.create(SessionApi::class.java)
     @Provides @Singleton fun feedbackApi(retrofit: Retrofit): FeedbackApi = retrofit.create(FeedbackApi::class.java)
     @Provides @Singleton fun notesSharedApi(retrofit: Retrofit): NotesSharedApi = retrofit.create(NotesSharedApi::class.java)
     @Provides @Singleton fun wrongQuestionApi(retrofit: Retrofit): WrongQuestionApi = retrofit.create(WrongQuestionApi::class.java)
