@@ -40,6 +40,14 @@ EXPECTED_ENDPOINTS = {
     ("POST", "/api/wrong-questions/sync"),
     ("POST", "/api/backgrounds/upload"),
     ("GET", "/api/backgrounds/{filename}"),
+    # EC-01 练习会话（§6.10）
+    ("POST", "/api/practice-sessions"),
+    ("GET", "/api/practice-sessions"),
+    ("GET", "/api/practice-sessions/{session_id}"),
+    ("PUT", "/api/practice-sessions/{session_id}/draft"),
+    ("POST", "/api/practice-sessions/{session_id}/submit"),
+    ("GET", "/api/practice-sessions/{session_id}/result"),
+    ("DELETE", "/api/practice-sessions/{session_id}"),
 }
 
 
@@ -54,4 +62,4 @@ def test_openapi_contains_all_contract_endpoints(client):
     extra = {a for a in actual if a not in EXPECTED_ENDPOINTS}
     assert not missing, f"missing endpoints: {sorted(missing)}"
     assert not extra, f"unexpected endpoints: {sorted(extra)}"
-    assert len(EXPECTED_ENDPOINTS) == 38
+    assert len(EXPECTED_ENDPOINTS) == 45

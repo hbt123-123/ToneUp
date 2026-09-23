@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
         feedback,
         images,
         notes,
+        practice_sessions,
         question_banks,
         reviews,
         sections,
@@ -110,6 +111,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_feedback.router)
     app.include_router(admin.router)
     app.include_router(wrong_questions.router)
+    app.include_router(practice_sessions.router)
     app.include_router(backgrounds.router)
     app.include_router(sections.router)
     app.include_router(feedback.router)

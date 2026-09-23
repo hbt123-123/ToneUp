@@ -26,6 +26,9 @@ __all__ = [
     "submit_session",
     "list_sessions",
     "delete_session",
+    "count_answered",
+    "latest_records",
+    "summarize_session",
 ]
 
 
@@ -195,17 +198,10 @@ def _summarize(conn: sqlite3.Connection, session_row: sqlite3.Row) -> Dict:
             (session_row["id"],),
         ).fetchall()
     ]
-    answered = 0
+    answered = count_answered_in_conn(conn, session_row["user_id"], session_row["bank_id"], qids)
     correct = 0
     if qids:
         placeholders = ",".join("?" * len(qids))
-        answered = conn.execute(
-            f"""
-            SELECT COUNT(DISTINCT question_id) FROM practice_records
-            WHERE user_id = ? AND bank_id = ? AND question_id IN ({placeholders})
-            """,
-            [session_row["user_id"], session_row["bank_id"], *qids],
-        ).fetchone()[0]
         correct = conn.execute(
             f"""
             SELECT COUNT(DISTINCT question_id) FROM practice_records
@@ -222,6 +218,59 @@ def _summarize(conn: sqlite3.Connection, session_row: sqlite3.Row) -> Dict:
         "accuracy_rate": accuracy,
         "elapsed_seconds": session_row["elapsed_seconds"],
     }
+
+
+def count_answered_in_conn(
+    conn: sqlite3.Connection, user_id: int, bank_id: str, question_ids: List[int]
+) -> int:
+    """在既有连接上统计本轮题目已答去重数（供 _summarize 与连接内复用）。"""
+    if not question_ids:
+        return 0
+    placeholders = ",".join("?" * len(question_ids))
+    return int(conn.execute(
+        f"""
+        SELECT COUNT(DISTINCT question_id) FROM practice_records
+        WHERE user_id = ? AND bank_id = ? AND question_id IN ({placeholders})
+        """,
+        [user_id, bank_id, *question_ids],
+    ).fetchone()[0])
+
+
+def count_answered(db_path: str, user_id: int, bank_id: str, question_ids: List[int]) -> int:
+    """统计给定题目在 practice_records 的已答去重数（detail 端点 progress 用）。"""
+    if not question_ids:
+        return 0
+    with user_connection(db_path) as conn:
+        return count_answered_in_conn(conn, user_id, bank_id, question_ids)
+
+
+def summarize_session(db_path: str, session_row: sqlite3.Row) -> Dict:
+    """按会话行聚合 practice_records 现状生成摘要（与 submit 同口径，公开入口）。"""
+    with user_connection(db_path) as conn:
+        return _summarize(conn, session_row)
+
+
+def latest_records(
+    db_path: str, user_id: int, bank_id: str, question_ids: List[int]
+) -> Dict[int, sqlite3.Row]:
+    """取每题最新一条练习记录（result 端点用），返回 {question_id: row}。
+
+    无记录的题不出现在结果中。id 升序遍历、后写覆盖 → 每题保留最新一条。
+    """
+    if not question_ids:
+        return {}
+    placeholders = ",".join("?" * len(question_ids))
+    with user_connection(db_path) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT question_id, is_correct, time_spent, created_at
+            FROM practice_records
+            WHERE user_id = ? AND bank_id = ? AND question_id IN ({placeholders})
+            ORDER BY id ASC
+            """,
+            [user_id, bank_id, *question_ids],
+        ).fetchall()
+    return {r["question_id"]: r for r in rows}
 
 
 # ── 列表与删除 ───────────────────────────────────────────────────────────────
