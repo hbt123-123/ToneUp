@@ -43,11 +43,15 @@ def remove_favorite(
                 "DELETE FROM favorite_questions WHERE user_id = ? AND bank_id = ? AND question_id = ?",
                 (user_id, bank_id, question_id),
             )
+
+
+def toggle_favorite(
     db_path: str,
     user_id: int,
     bank_id: str,
     question_id: int,
 ) -> bool:
+    """切换收藏状态：已收藏则取消返回 False，未收藏则收藏返回 True。"""
     with user_connection(db_path) as conn:
         cur = conn.execute(
             "SELECT 1 FROM favorite_questions WHERE user_id = ? AND bank_id = ? AND question_id = ?",
