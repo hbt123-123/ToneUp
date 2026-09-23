@@ -109,8 +109,9 @@ class SessionHistoryViewModel @Inject constructor(
     }
 
     /**
-     * 继续会话：active 会话重建题目序列（服务端 detail 优先，离线回退本地全量），
-     * 同时写入 lastContext 供"继续上次刷题"复用。
+     * 继续会话：active 会话从服务端 detail 重建题目序列与进度。
+     * 失败时提示重试（不降级为本地会话，避免服务端会话悬挂在 active）；
+     * 成功后写入 lastContext 供"继续上次刷题"复用。
      */
     fun resumeSession(item: SessionListItemDto, onReady: (String, Int) -> Unit) {
         if (_state.value.resumingId != null) return
