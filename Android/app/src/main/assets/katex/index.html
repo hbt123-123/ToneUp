@@ -33,6 +33,56 @@
 <script>
   var lastHeight = 0;
 
+  // ── HTML 白名单消毒（C-1）───────────────────────────────────────────
+  // 题目内容经 markdown 转 HTML 后可能携带不可信标记；innerHTML 直接注入
+  // 会在 WebView 内执行事件属性/危险标签并触达 JS bridge。此处用
+  // DOMParser 做白名单过滤：剥离事件属性、javascript: URL、script/svg 等
+  // 危险标签（含其子树），未知标签剥壳保留文本。
+  var ALLOWED_TAGS = {
+    p: 1, br: 1, hr: 1, b: 1, strong: 1, i: 1, em: 1, u: 1, s: 1,
+    code: 1, pre: 1, span: 1, div: 1, blockquote: 1,
+    ul: 1, ol: 1, li: 1, h1: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1,
+    table: 1, thead: 1, tbody: 1, tfoot: 1, tr: 1, td: 1, th: 1,
+    sub: 1, sup: 1, img: 1, a: 1
+  };
+  var DROP_WITH_SUBTREE = {
+    script: 1, style: 1, iframe: 1, object: 1, embed: 1, link: 1,
+    meta: 1, base: 1, template: 1, form: 1, svg: 1, math: 1, noscript: 1
+  };
+
+  function sanitizeHtml(html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var root = document.createElement('div');
+    (function walk(src, dst) {
+      for (var i = 0; i < src.childNodes.length; i++) {
+        var n = src.childNodes[i];
+        if (n.nodeType === 3) { dst.appendChild(document.createTextNode(n.nodeValue)); continue; }
+        if (n.nodeType !== 1) continue;
+        var tag = n.tagName.toLowerCase();
+        if (DROP_WITH_SUBTREE[tag]) continue;
+        if (!ALLOWED_TAGS[tag]) { walk(n, dst); continue; }
+        var el = document.createElement(tag);
+        if (tag === 'img') {
+          var src = n.getAttribute('src') || '';
+          if (/^(https?:|data:image\/(png|jpe?g|gif|webp);|\/)/i.test(src)) {
+            el.setAttribute('src', src);
+          }
+          var alt = n.getAttribute('alt');
+          if (alt) el.setAttribute('alt', alt);
+        } else if (tag === 'a') {
+          var href = n.getAttribute('href') || '';
+          if (/^https?:/i.test(href)) {
+            el.setAttribute('href', href);
+            el.setAttribute('rel', 'noopener noreferrer');
+          }
+        }
+        walk(n, el);
+        dst.appendChild(el);
+      }
+    })(doc.body, root);
+    return root.innerHTML;
+  }
+
   function postHeight() {
     var el = document.getElementById('content');
     var h = Math.ceil(el.scrollHeight);
@@ -46,7 +96,7 @@
     try {
       document.body.classList.toggle('dark', !!dark);
       var el = document.getElementById('content');
-      el.innerHTML = html;
+      el.innerHTML = sanitizeHtml(html);
       renderMathInElement(el, {
         delimiters: [
           {left: '$$', right: '$$', display: true},

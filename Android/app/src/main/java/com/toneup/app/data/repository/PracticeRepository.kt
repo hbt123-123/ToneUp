@@ -65,6 +65,15 @@ class PracticeRepository @Inject constructor(
             // 网络失败：保留幂等键 + 入未同步队列
             enqueuePending(bankId, questionId, answerJson, timeSpentSeconds, mode, clientRequestId)
             throw e
+        } catch (e: AppException.Server) {
+            // 5xx 瞬态（请求可能已被服务端处理）：与 Network 同策略，
+            // 保留幂等键 + 入队重放，避免答案丢失且重试换新键造成重复计分
+            enqueuePending(bankId, questionId, answerJson, timeSpentSeconds, mode, clientRequestId)
+            throw e
+        } catch (e: AppException.RateLimited) {
+            // 429 限流：同样瞬态可重试（与 replayPendingQueue 口径一致）
+            enqueuePending(bankId, questionId, answerJson, timeSpentSeconds, mode, clientRequestId)
+            throw e
         } catch (e: AppException.Unauthorized) {
             throw e
         } catch (e: AppException) {

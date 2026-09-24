@@ -8,6 +8,7 @@ import com.toneup.app.data.repository.CatalogRepository
 import com.toneup.app.data.repository.StatsRepository
 import com.toneup.app.ui.common.Load
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,12 +55,18 @@ class StatsViewModel @Inject constructor(
             try {
                 val overview = statsRepository.overview(rangeDays, subjectId?.takeIf { it.isNotBlank() })
                 _state.value = _state.value.copy(overview = Load.Ready(overview))
+            } catch (e: CancellationException) {
+                // loadJob 切换时旧协程被取消：放行取消，避免旧任务把
+                // 新任务刚写入的 Loading 状态覆盖为 Failed（C-8）
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(overview = Load.Failed(e.toMsg()))
             }
             try {
                 val weaknesses = statsRepository.weaknesses(subjectId?.takeIf { it.isNotBlank() })
                 _state.value = _state.value.copy(weaknesses = Load.Ready(weaknesses))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(weaknesses = Load.Failed(e.toMsg()))
             }

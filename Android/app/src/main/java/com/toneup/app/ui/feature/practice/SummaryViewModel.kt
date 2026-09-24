@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.SessionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -57,7 +58,9 @@ class SummaryViewModel @Inject constructor(
                     totalCount = s.total,
                     answeredCount = s.answered,
                     wrongCount = (s.answered - s.correct).coerceAtLeast(0),
-                    correctRate = s.accuracyRate.toInt().coerceIn(0, 100),
+                    // accuracyRate 是 0..1 的分数（契约 §6.10），先乘 100 再取整，
+                    // 直接 toInt() 会把 0.83 截断为 0%（C-6）
+                    correctRate = (s.accuracyRate * 100).roundToInt().coerceIn(0, 100),
                     formattedTime = formatTime(s.elapsedSeconds),
                     serverBacked = true
                 )

@@ -8,6 +8,7 @@ import com.toneup.app.data.remote.dto.SectionsResponse
 import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.SectionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -104,6 +105,9 @@ class SectionListViewModel @Inject constructor(
                     isLoading = false,
                     error = e.userMessage
                 )
+            } catch (e: CancellationException) {
+                // 结构化并发：ViewModel 清理/任务被顶替时必须放行取消（C-7）
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     isLoading = false,

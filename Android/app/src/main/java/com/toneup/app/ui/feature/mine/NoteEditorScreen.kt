@@ -49,7 +49,9 @@ class NoteEditorViewModel @Inject constructor(
     private val notesRepository: NotesRepository
 ) : ViewModel() {
 
-    val questionId: Long = savedStateHandle.get<String>("questionId")?.toLongOrNull() ?: -1L
+    // 路由参数声明为 NavType.LongType，必须按 Long 读取（C-4）；
+    // get<String> 会对 Long 做未检查强转，进屏即 ClassCastException
+    val questionId: Long = savedStateHandle.get<Long>("questionId") ?: -1L
     val bankId: String = savedStateHandle.get<String>("bankId") ?: ""
 
     private val _state = MutableStateFlow(NoteEditorUiState())

@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -91,8 +91,9 @@ fun ReviewCheckScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(state.slots) { slot ->
-                val index = state.slots.indexOf(slot)
+            // itemsIndexed 用真实位置：data class 的结构化 equals 会让
+            // indexOf 永远命中第一个相同 slot，跳转错题且 O(n²)（C-5）
+            itemsIndexed(state.slots) { index, slot ->
                 val answered = slot.answer?.isEmpty == false ||
                     slot.status is PracticeStatus.Submitted
                 Surface(
