@@ -69,9 +69,11 @@ def _check_sqlite(path: Path) -> str | None:
     """规则④：校验 SQLite 结构与数据，返回问题描述；None 表示通过。"""
     if not path.is_file():
         return f"数据库文件不存在: {path.name}"
-    # Windows 下 SQLite URI 必须使用正斜杠
-    con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    con: sqlite3.Connection | None = None
     try:
+        # Windows 下 SQLite URI 必须使用正斜杠；connect 本身也可能失败
+        # （权限/损坏头部），必须纳入 try 统一降级为该条目禁用（H-94）
+        con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         tables = {row[0] for row in con.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         missing = [t for t in _REQUIRED_TABLES if t not in tables]
@@ -105,7 +107,8 @@ def _check_sqlite(path: Path) -> str | None:
     except sqlite3.Error as exc:
         return f"非合法 SQLite 或读取失败: {exc}"
     finally:
-        con.close()
+        if con is not None:
+            con.close()
 
 
 class BankRegistry:
@@ -135,8 +138,9 @@ class BankRegistry:
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            self.warnings.append(f"manifest: 无法读取 manifest.json: {exc}")
-            return self.warnings
+            # manifest 级失败必须抛出：warning 粒度仅适用于单条目校验失败；
+            # 否则 admin reload 会把空目录当作"成功"替换掉旧索引（H-84）
+            raise RuntimeError(f"无法读取 manifest.json: {exc}") from exc
 
         self.subjects_raw = manifest.get("subjects", [])
         subject_types = self._index_subject_types(self.subjects_raw)
@@ -225,11 +229,15 @@ _registry: BankRegistry | None = None
 
 
 def get_registry() -> BankRegistry:
-    """返回全局注册表单例；首次调用时按 Settings.data_root 加载。"""
+    """返回全局注册表单例；首次调用时按 Settings.data_root 加载。
+
+    加载失败（manifest 级异常）时单例保持 None，下次调用重试加载。
+    """
     global _registry
     if _registry is None:
-        _registry = BankRegistry()
-        _registry.load(get_settings().data_root)
+        registry = BankRegistry()
+        registry.load(get_settings().data_root)
+        _registry = registry
     return _registry
 
 

@@ -54,6 +54,13 @@ def _snapshot_sqlite(src: Path, dst: Path) -> None:
     直接 zipfile.write() 正被 FastAPI worker 写入的 .db 可能打包出
     缺 -wal 或半事务页的撕裂文件，灾难恢复时不可用。
     """
+    with open(src, "rb") as f:
+        header = f.read(16)
+    if header != b"SQLite format 3\x00":
+        # 非 SQLite 文件：普通复制（H-107：不能再用 DatabaseError 兜底判断，
+        # 否则 "database is locked" 等瞬态错误会被误判为坏文件而撕裂复制）
+        shutil.copy2(src, dst)
+        return
     src_conn = sqlite3.connect(str(src))
     try:
         dst_conn = sqlite3.connect(str(dst))
@@ -61,9 +68,6 @@ def _snapshot_sqlite(src: Path, dst: Path) -> None:
             src_conn.backup(dst_conn)
         finally:
             dst_conn.close()
-    except sqlite3.DatabaseError:
-        # 非 SQLite 文件或已损坏：退化为普通复制，备份任务不因单个坏文件中断
-        shutil.copy2(src, dst)
     finally:
         src_conn.close()
 
@@ -81,7 +85,13 @@ def _zip_backup(data_root: Path, sources: List[Tuple[str, Path]]) -> Path:
             for _display_name, path in sources:
                 if path.suffix == ".db":
                     snapshot = Path(tmp_dir) / path.name
-                    _snapshot_sqlite(path, snapshot)
+                    try:
+                        _snapshot_sqlite(path, snapshot)
+                    except sqlite3.Error as exc:
+                        # 真 SQLite 库备份失败（锁/IO）必须可见：
+                        # 静默跳过并继续，绝不写入撕裂副本
+                        print(f"错误: SQLite 快照失败，跳过 {path.name}: {exc}")
+                        continue
                     zf.write(snapshot, arcname=path.name)
                 else:
                     zf.write(path, arcname=path.name)

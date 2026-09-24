@@ -115,11 +115,8 @@ def decode_token(token: str, jwt_secret: str) -> dict:
     try:
         payload = jwt.decode(token, jwt_secret, algorithms=["HS256"])
         return payload
-    except (
-        jwt.ExpiredSignatureError,
-        jwt.InvalidTokenError,
-        # Pydantic-internal exceptions that may surface via jwt-lib
-        # edge versions; catch BaseException subset safely.
-        Exception,
-    ):
+    except jwt.InvalidTokenError:
+        # InvalidTokenError 是 PyJWT 全部令牌错误的基类（含 ExpiredSignature、
+        # 签名不符、格式非法）。不再兜底裸 Exception（H-100）：编程错误
+        # （AttributeError 等）应原样暴露而不是被静默转成 401。
         raise TokenError("Invalid or expired token") from None

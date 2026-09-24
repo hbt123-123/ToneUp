@@ -87,7 +87,8 @@ def chat(payload: dict, client: httpx.Client | None = None) -> str:
 
     try:
         content = resp.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, ValueError) as exc:
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        # TypeError 覆盖 resp.json() 为 list/scalar 时的下标访问（H-105）
         logger.error("glm_bad_response_shape")
         raise GlmError(f"GLM bad response shape: {exc}") from exc
 

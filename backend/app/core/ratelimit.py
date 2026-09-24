@@ -71,7 +71,7 @@ def allow(key: str, limit: int, window_seconds: int) -> int:
     if retry_after:
         logger.warning(
             "rate_limited",
-            key_kind=key.split("|", 1)[0],
+            key_kind=key.split(":", 1)[0],  # 键以 ':' 分隔（H-97：'｜' 切分永远取不到 kind）
             retry_after=retry_after,
             request_id=get_request_id(),
         )

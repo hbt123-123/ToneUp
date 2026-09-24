@@ -158,6 +158,9 @@ def like_note(note_id: int, user=Depends(get_current_user)):
     row = user_repo.notes_get_by_id(db, note_id)
     if row is None:
         raise NotFoundError("note not found")
+    # private 笔记对非本人等同不存在（H-90：防越权点赞 + 防枚举）
+    if row["visibility"] != "public" and row["user_id"] != user["id"]:
+        raise NotFoundError("note not found")
     if not user_repo.note_add_like(db, note_id, user["id"], _now_iso()):
         raise ConflictError("already liked")
     user_repo.note_increment_likes(db, note_id)
@@ -172,6 +175,8 @@ def unlike_note(note_id: int, user=Depends(get_current_user)):
     db = _db()
     row = user_repo.notes_get_by_id(db, note_id)
     if row is None:
+        raise NotFoundError("note not found")
+    if row["visibility"] != "public" and row["user_id"] != user["id"]:
         raise NotFoundError("note not found")
     if not user_repo.note_remove_like(db, note_id, user["id"]):
         raise NotFoundError("not liked")

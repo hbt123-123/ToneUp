@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import re
 
-_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*")
-_LIST_MARK_RE = re.compile(r"^\s{0,3}[-*+]\s+")
+_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
+_LIST_MARK_RE = re.compile(r"^\s{0,3}[-*+]\s+", re.MULTILINE)
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
-_NUM_PREFIX_RE = re.compile(r"^\s{0,3}(?:###\s*)?\d{1,3}[\.、．]\s*")
+# 分隔符后必须跟空白或行尾（H-104：零空白匹配会把 "3.14" 截成 "14"）
+_NUM_PREFIX_RE = re.compile(r"^\s{0,3}(?:###\s*)?\d{1,3}[\.、．](?:\s+|$)", re.MULTILINE)
 
 
 def clean_markdown_text(text: str | None, enabled: bool = True) -> str | None:

@@ -28,7 +28,7 @@ MAX_EDGE_PX = 4096
 
 
 def _image_size(data: bytes) -> tuple[int, int] | None:
-    """解析图片宽高（PNG/JPEG 头部解析，免 PIL 依赖）。"""
+    """解析图片宽高（PNG/JPEG/WebP 头部解析，免 PIL 依赖）。"""
     if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) > 24:
         w = int.from_bytes(data[16:20], "big")
         h = int.from_bytes(data[20:24], "big")
@@ -46,6 +46,22 @@ def _image_size(data: bytes) -> tuple[int, int] | None:
                 w = int.from_bytes(data[i + 7:i + 9], "big")
                 return w, h
             i += 2 + seg_len
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) > 30:
+        chunk = data[12:16]
+        if chunk == b"VP8 " and len(data) > 30:
+            # lossy：sync code 3 字节后跟 14 位宽/高（小端）
+            w = int.from_bytes(data[26:28], "little") & 0x3FFF
+            h = int.from_bytes(data[28:30], "little") & 0x3FFF
+            return w, h
+        if chunk == b"VP8L" and len(data) > 25:
+            # lossless：4 字节打包 14 位宽-1/高-1（小端）
+            bits = int.from_bytes(data[21:25], "little")
+            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        if chunk == b"VP8X":
+            # extended：画布尺寸为 24 位小端的（值-1）
+            w = int.from_bytes(data[24:27], "little") + 1
+            h = int.from_bytes(data[27:30], "little") + 1
+            return w, h
     return None
 
 

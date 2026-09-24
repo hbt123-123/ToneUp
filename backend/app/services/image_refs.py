@@ -39,8 +39,6 @@ def rewrite_image_refs(content: str | None, bank_id: str, enabled: bool = True) 
             rewritten = True
             return _endpoint(m.group(1), bank_id)
 
-        text = _PLACEHOLDER_RE.sub(repl, text)
-
         def repl_cn(m: re.Match) -> str:
             nonlocal rewritten
             rewritten = True
@@ -69,6 +67,11 @@ def rewrite_image_refs(content: str | None, bank_id: str, enabled: bool = True) 
             return m.group(0)
 
         text = _IMG_TAG_RE.sub(repl_tag, text)
+
+        # 全局兜底必须放在结构化分支之后（H-106）：若先跑，md/img target 内的
+        # __IMAGE_n__ 会被提前改写成端点 URL，随后分支内的 _BARE_ID_RE 会对
+        # 端点 URL 里的裸数字做二次提取，产生错误替换
+        text = _PLACEHOLDER_RE.sub(repl, text)
         return text
 
     result = _replace_ids_in(content)

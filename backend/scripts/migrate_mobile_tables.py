@@ -90,13 +90,13 @@ def migrate_mobile_tables(db_path: str) -> None:
                 cursor.execute(
                     f"ALTER TABLE user_notes ADD COLUMN {col_name} {col_type}"
                 )
-            except sqlite3.OperationalError:
-                pass
+            except sqlite3.OperationalError as exc:
+                # 仅"列已存在"属预期幂等场景；其余 OperationalError
+                # （表不存在、权限、语法）必须暴露（H-108）
+                if "duplicate column name" not in str(exc).lower():
+                    raise
         # 回填已有行的 id（ALTER 新增列为 NULL）
-        try:
-            cursor.execute("UPDATE user_notes SET id = rowid WHERE id IS NULL")
-        except sqlite3.OperationalError:
-            pass
+        cursor.execute("UPDATE user_notes SET id = rowid WHERE id IS NULL")
 
         conn.commit()
     finally:

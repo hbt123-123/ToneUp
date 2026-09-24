@@ -125,7 +125,9 @@ def parse_answer(answer_text: str | None, type_code: str):
         parts = [p.strip().upper() for p in s.replace("，", ",").split(",") if p.strip()]
         if len(parts) > 1 or (len(parts) == 1 and len(parts[0]) == 1):
             return parts
-        chars = [ch.upper() for ch in s if ch.isalnum()]
+        # 限定 ASCII 字母数字（H-101：str.isalnum() 对 CJK 为真，
+        # "选AB" 会被误解析成 ['选', 'A', 'B']）
+        chars = [ch.upper() for ch in s if ch.isascii() and ch.isalnum()]
         return chars or None
 
     if type_code in ("SINGLE", "READING"):

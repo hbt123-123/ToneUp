@@ -190,7 +190,18 @@ def sync_wrong_questions(body: dict = Body(...), user=Depends(get_current_user))
                 wrong_count = it.get("wrong_count")
                 if wrong_count is None or not isinstance(wrong_count, int) or wrong_count < 1:
                     wrong_count = 1
-                last_practice_at = it.get("last_practice_at") or now_iso
+                # 客户端时间统一规范化为 UTC ISO（H-93：SQL MAX 在 TEXT 列上
+                # 是字典序比较，混入 naive/非零偏移会导致"最近错误时间"错乱）
+                last_raw = it.get("last_practice_at")
+                last_practice_at = now_iso
+                if last_raw:
+                    try:
+                        parsed_dt = datetime.fromisoformat(str(last_raw))
+                        if parsed_dt.tzinfo is None:
+                            parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+                        last_practice_at = parsed_dt.astimezone(timezone.utc).isoformat()
+                    except ValueError:
+                        last_practice_at = now_iso
                 conn.execute(
                     """
                     INSERT INTO wrong_questions

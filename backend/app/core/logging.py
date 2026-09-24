@@ -6,6 +6,7 @@
 - 模块导入即调用 setup_logging()
 """
 
+import logging
 import sys
 
 import structlog
@@ -20,6 +21,10 @@ def setup_logging() -> None:
     - inject_request_id 从 request_id contextvar 读取值并写入事件
     - 最终输出格式由 JSONRenderer 控制
     """
+    # stdlib LoggerFactory 委托 stdlib 根 logger 做级别过滤与输出；
+    # 不配置 basicConfig 时根 logger 默认 WARNING 且无 handler，
+    # info 级结构化日志（含 http_request / admin_audit）会全部丢失（H-96）
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
     structlog.configure(
         processors=[
             structlog.processors.TimeStamper(fmt="iso"),

@@ -61,30 +61,41 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
         # --- 阶段3：如果是 JSON 响应，注入 request_id 到 body ---
         if "application/json" in response.headers.get("content-type", ""):
-            # 读取原 body
+            # 读取原 body（body_iterator 将被耗尽，任何分支都必须重建 Response）
             original_body = b""
             async for chunk in response.body_iterator:
                 original_body += chunk
 
-            try:
-                body_json = json.loads(original_body) if original_body else {}
-                if isinstance(body_json, dict):
-                    body_json.setdefault("request_id", rid)
-                else:
-                    body_json = {"request_id": rid}
-                # 重建 Response；必须剔除旧 content-length（body 长度已变）
-                headers = dict(response.headers)
-                headers.pop("content-length", None)
+            headers = dict(response.headers)
+            # 重建 Response；必须剔除旧 content-length（body 长度可能已变）
+            headers.pop("content-length", None)
+
+            body_json: Any = None
+            if original_body:
+                try:
+                    body_json = json.loads(original_body)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # 解析失败：内容原样透传（H-99：返回已耗尽 iterator 的
+                    # 原 response 会让客户端收到空响应体）
+                    structlog.get_logger().debug(
+                        "request_id_body_inject_failed", request_id=rid
+                    )
+
+            if isinstance(body_json, dict):
+                body_json.setdefault("request_id", rid)
                 response = Response(
                     content=json.dumps(body_json, ensure_ascii=False),
                     status_code=response.status_code,
                     media_type="application/json",
                     headers=headers,
                 )
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                # 解析失败则原样返回（头里仍带 X-Request-ID）
-                structlog.get_logger().debug(
-                    "request_id_body_inject_failed", error=str(exc), request_id=rid
+            else:
+                # 非 dict JSON（list/scalar）、解析失败或空 body：
+                # 内容原样透传，request_id 保留在响应头（H-98：不得丢弃真实响应数据）
+                response = Response(
+                    content=original_body,
+                    status_code=response.status_code,
+                    headers=headers,
                 )
 
         # --- 阶段4：access log——每条请求一条结构化事件，request_id 由处理器注入 ---

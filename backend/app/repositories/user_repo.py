@@ -275,6 +275,7 @@ def notes_upsert(
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT (user_id, bank_id, question_id)
                 DO UPDATE SET note_text = excluded.note_text,
+                              visibility = excluded.visibility,
                               updated_at = excluded.updated_at
                 """,
                 (user_id, bank_id, question_id, note_text, visibility, now_iso),

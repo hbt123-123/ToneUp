@@ -192,6 +192,8 @@ def _counts(
     user_db: str, user_id: int, bank_id: str,
     question_ids: list[int], table: str,
 ) -> dict[int, int]:
+    """按题目去重计数（H-92：practice_records 一题可有多行作答流水，
+    COUNT(*) 会把"做过"统计成"做题次数"；DISTINCT 后三张表口径一致）。"""
     if not question_ids:
         return {}
     ph = ",".join("?" * len(question_ids))
@@ -199,12 +201,11 @@ def _counts(
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
-            f"""SELECT question_id, COUNT(*) AS cnt
+            f"""SELECT DISTINCT question_id
             FROM {table}
-            WHERE user_id = ? AND bank_id = ? AND question_id IN ({ph})
-            GROUP BY question_id""",
+            WHERE user_id = ? AND bank_id = ? AND question_id IN ({ph})""",
             [user_id, bank_id] + question_ids,
         ).fetchall()
-        return {r["question_id"]: r["cnt"] for r in rows}
+        return {r["question_id"]: 1 for r in rows}
     finally:
         conn.close()

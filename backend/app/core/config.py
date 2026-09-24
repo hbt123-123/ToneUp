@@ -41,9 +41,12 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     @field_validator("jwt_expire_hours", mode="after")
     @classmethod
-    def _jwt_expire_hours_not_exceed_24(cls, v: int) -> int:
+    def _jwt_expire_hours_valid(cls, v: int) -> int:
         if v > 24:
             raise ValueError("jwt_expire_hours must be <= 24")
+        if v < 1:
+            # 0/负数会使签发的 token 立即过期，属配置错误而非合法取值（H-95）
+            raise ValueError("jwt_expire_hours must be >= 1")
         return v
 
     model_config = SettingsConfigDict(

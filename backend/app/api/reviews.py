@@ -107,11 +107,15 @@ def skip(
         raise NotFoundError("question is not in the review pool")
 
     if override:
-        new_next = str(override)
         try:
-            datetime.fromisoformat(new_next)
+            parsed_dt = datetime.fromisoformat(str(override))
         except ValueError as exc:
             raise BadRequestError("next_review_at must be ISO8601") from exc
+        # 统一规范化为 UTC aware ISO 串（H-91：naive/非零偏移与 now_iso
+        # 做字典序比较会错乱到期判定），naive 视为 UTC
+        if parsed_dt.tzinfo is None:
+            parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+        new_next = parsed_dt.astimezone(timezone.utc).isoformat()
     else:
         base = datetime.now(timezone.utc)
         new_next = (base + timedelta(days=1)).isoformat()

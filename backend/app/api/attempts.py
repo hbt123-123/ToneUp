@@ -172,7 +172,10 @@ def submit_attempt(request: Request, body: dict = Body(...), user=Depends(get_cu
         is_correct, score = objective_result
         applied = user_repo.update_attempt_result(user_db, attempt_id, int(is_correct), score)
         if applied:
-            level, next_at = review_policy(0, is_correct, settings.review_retry_hours)
+            # 沿用现有掌握度等级；无记录（首答）从 0 起（H-86：硬编码 0 会让等级永不累积）
+            existing = user_repo.get_mastery(user_db, user["id"], str(bank_id), int(question_id))
+            current_level = int(existing["confidence_level"] or 0) if existing is not None else 0
+            level, next_at = review_policy(current_level, is_correct, settings.review_retry_hours)
             user_repo.mastery_apply_terminal(
                 user_db, user["id"], str(bank_id), int(question_id),
                 int(is_correct), next_at, level, now_iso,

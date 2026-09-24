@@ -21,6 +21,13 @@ router = APIRouter(prefix="/api/backgrounds", tags=["backgrounds"])
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_SIZE = 5 * 1024 * 1024  # 5 MB
 
+# magic bytes 前缀（H-87：content_type 头完全由客户端控制，须按文件内容校验）
+_MAGIC_PREFIX: dict[str, tuple[bytes, ...]] = {
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
+    "image/webp": (b"RIFF",),  # 结合 data[8:12] == b"WEBP" 判定
+}
+
 # 安全文件名正则：{user_id}_{timestamp}_{hash12}.{jpg|png|webp}
 _FILENAME_RE = re.compile(r"^\d+_\d+_[a-f0-9]{12}\.(jpg|png|webp)$")
 
@@ -63,28 +70,43 @@ async def upload_background(
             detail=f"不支持的文件类型: {file.content_type}，仅支持 JPEG/PNG/WebP",
         )
 
-    # 2. 读取内容并校验大小
-    contents = await file.read()
-    if len(contents) > MAX_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"文件过大（{len(contents) // (1024 * 1024)} MB），最大允许 5 MB",
-        )
+    # 2. 分块读取并校验大小（H-88：先全量 read() 再检查会任由超大 body 灌满内存）
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"文件过大，最大允许 {MAX_SIZE // (1024 * 1024)} MB",
+            )
+        chunks.append(chunk)
+    contents = b"".join(chunks)
 
-    # 3. 确定扩展名
+    # 3. 校验 magic bytes（防止伪装成图片的任意字节被存储/回显）
+    prefixes = _MAGIC_PREFIX[file.content_type]
+    if not any(contents.startswith(p) for p in prefixes) or (
+        file.content_type == "image/webp" and contents[8:12] != b"WEBP"
+    ):
+        raise HTTPException(status_code=400, detail="文件内容与声明的图片类型不符")
+
+    # 4. 确定扩展名
     ext = _EXT_MAP[file.content_type]
 
-    # 4. 删除该用户旧背景（配额1张）
+    # 5. 删除该用户旧背景（配额1张）
     bg_dir = _backgrounds_dir()
     for old in bg_dir.glob(f"{user['id']}_*"):
         old.unlink(missing_ok=True)
 
-    # 5. 生成安全文件名：{user_id}_{timestamp}_{sha256_prefix}.{ext}
+    # 6. 生成安全文件名：{user_id}_{timestamp}_{sha256_prefix}.{ext}
     content_hash = hashlib.sha256(contents[:1024]).hexdigest()[:12]
     filename = f"{user['id']}_{int(time.time())}_{content_hash}{ext}"
     filepath = bg_dir / filename
 
-    # 6. 写入文件
+    # 7. 写入文件
     filepath.write_bytes(contents)
 
     return {"url": f"/api/backgrounds/{filename}"}

@@ -33,7 +33,16 @@ def main() -> None:
     args = _build_parser().parse_args()
 
     registry = BankRegistry()
-    registry.load(args.data_root)
+    try:
+        registry.load(args.data_root)
+    except RuntimeError as exc:
+        print(f"错误: {exc}")
+        sys.exit(1)
+
+    if not registry.entries:
+        # 空条目意味着什么都没校验，不能视为成功（H-111）
+        print("错误: 未加载到任何题库条目（manifest 缺失或 banks 为空）")
+        sys.exit(1)
 
     all_enabled = True
     for bank_id, entry in registry.entries.items():

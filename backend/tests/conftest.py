@@ -37,6 +37,12 @@ def client(monkeypatch, tmp_path) -> Any:
         '["http://allowed.dev"]',
     )
 
+    # H-84 修复后 manifest.json 缺失会在应用启动时抛 RuntimeError（这是正确行为）；
+    # 测试环境补一个最小合法 manifest，模拟"合法的空数据根目录"
+    tmp_path.joinpath("manifest.json").write_text(
+        '{"subjects": [], "banks": []}', encoding="utf-8"
+    )
+
     # 清除 settings 缓存，确保读取最新环境变量
     from app.core.config import get_settings
     get_settings.cache_clear()
@@ -62,17 +68,13 @@ def data_root_with_banks(tmp_path) -> Path:
     返回值：临时 data_root 的 Path
     """
     src_dir = Path(__file__).resolve().parents[1] / "data"
-    dst_dir = tmp_path / "data_root" / "data"
-    # 复制整个 data 目录
+    # 直接以 tmp_path 作为 data_root（H-112：先前多套一层 data/ 目录，
+    # 导致 manifest 内的相对路径 data_root/math/math1.db 解析不到实际文件）
+    dst_dir = tmp_path
     if dst_dir.exists():
         shutil.rmtree(dst_dir)
     shutil.copytree(src_dir, dst_dir)
-    # 复制 manifest.json 到 data_root 级别
-    src_manifest = src_dir / "manifest.json"
-    dst_manifest = tmp_path / "data_root" / "manifest.json"
-    if src_manifest.exists():
-        shutil.copy(str(src_manifest), str(dst_manifest))
-    return tmp_path / "data_root"
+    return tmp_path
 
 
 # ── fixture: user_db ─────────────────────────────────────────────────────
