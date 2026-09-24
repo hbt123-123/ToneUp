@@ -108,7 +108,6 @@ function startPractice(bankId: string): void {
     params: { bankId },
     query: {
       ...(catalog.selectedYear !== null ? { year: String(catalog.selectedYear) } : {}),
-      ...(catalog.selectedTypeId ? { type_code: catalog.selectedTypeId } : {}),
     },
   })
 }

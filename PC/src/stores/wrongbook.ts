@@ -23,6 +23,8 @@ import { ApiError } from '@/api/http'
 const OFFLINE_QUEUE_KEY = (userId: number | string): string => `toneup:wrongbook:offline:${userId}`
 
 interface WrongRecord extends WrongBookItem {
+  /** 服务端错题记录 id（DELETE /wrong-questions/{id} 的路径参数），离线未同步时缺省 */
+  id?: number
   question_id: number
   bank_id: string
   /** 派生字段：是否同时被疑问标记（不落盘） */
@@ -150,6 +152,7 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
     try {
       const res = await fetchWrongQuestions()
       const loaded: WrongRecord[] = res.items.map((it) => ({
+        id: it.id,
         bank_id: it.bank_id,
         question_id: it.question_id,
         wrong_count: it.attempt_count,
@@ -193,8 +196,10 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
   /** 由 practice store 在服务端返回 is_correct=false 时调用 */
   async function recordWrong(entry: { bankId: string; questionId: number; preview?: string; year?: number; typeCode?: string; lastPracticeAt?: string }): Promise<void> {
     const uid = currentUserId()
+    let serverId: number | undefined
     try {
-      await addWrongQuestion(entry.bankId, entry.questionId, entry.preview)
+      const created = await addWrongQuestion(entry.bankId, entry.questionId, entry.preview)
+      serverId = created.id
     } catch (err) {
       if (err instanceof ApiError && err.networkError && uid !== -1) {
         // 断网：入队离线队列，稍后同步
@@ -213,8 +218,10 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
       existing.total_attempts = (existing.total_attempts ?? 1) + 1
       existing.last_practice_at = new Date().toISOString()
       existing.preview = entry.preview ?? existing.preview
+      if (serverId !== undefined) existing.id = serverId
     } else {
       records.value.push({
+        id: serverId,
         bank_id: entry.bankId,
         question_id: entry.questionId,
         wrong_count: 1,
@@ -234,14 +241,16 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
     if (rec) {
       rec.total_attempts = (rec.total_attempts ?? 0) + 1
       rec.last_practice_at = new Date().toISOString()
-      // 掌握后移出列表：口径与后端复习调度一致由服务端管理，这里仅维护本地视图
+      // DELETE /wrong-questions/{id} 需要"错题记录 id"而非题目 id；离线未同步的记录无服务端 id，无记录可删
+      if (rec.id !== undefined) {
+        try {
+          await removeWrongQuestion(rec.id)
+        } catch {
+          return // 删除失败：保留本地条目，待下次答对重试
+        }
+      }
+      // 服务端删除成功（或本就无服务端记录）后才移除本地条目
       records.value = records.value.filter((r) => r !== rec)
-    }
-    // 尝试从后端删除（后端 id 未知时无法定位，仅尽力而为）
-    try {
-      await removeWrongQuestion(questionId)
-    } catch {
-      /* 删除失败不阻塞本地视图 */
     }
   }
 

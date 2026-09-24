@@ -34,7 +34,11 @@ const correctAnswerText = computed<string>(() => {
       <button
         type="button"
         class="judge-btn option-row"
-        :class="{ active: answer === 'A', good: ctx.showAnswer && correctLabel === 'A' }"
+        :class="{
+          active: answer === 'A',
+          good: ctx.showAnswer && correctLabel === 'A',
+          bad: ctx.showAnswer && correctLabel === 'B' && answer === 'A',
+        }"
         :disabled="ctx.disabled || ctx.readonly"
         @click="choose('A')"
       >
@@ -44,7 +48,11 @@ const correctAnswerText = computed<string>(() => {
       <button
         type="button"
         class="judge-btn option-row"
-        :class="{ active: answer === 'B', bad: ctx.showAnswer && correctLabel === 'B' && answer !== 'B' }"
+        :class="{
+          active: answer === 'B',
+          good: ctx.showAnswer && correctLabel === 'B',
+          bad: ctx.showAnswer && correctLabel === 'A' && answer === 'B',
+        }"
         :disabled="ctx.disabled || ctx.readonly"
         @click="choose('B')"
       >

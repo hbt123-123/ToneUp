@@ -36,8 +36,10 @@ const wrappedItems = computed(() => asItemData(props.items))
     :item-resizable="false"
     style="height: 100%"
   >
-    <template #default="{ item, index }: { item: T; index: number }">
-      <slot :item="item" :index="index" />
+    <!-- 用 index 回读原始项：NVirtualList 的 item 是包装对象，
+         直接透传会给原始类型列表传 { value: it }（C-16） -->
+    <template #default="{ index }: { index: number }">
+      <slot :item="props.items[index]" :index="index" />
     </template>
   </n-virtual-list>
   <div v-else class="plain-list">

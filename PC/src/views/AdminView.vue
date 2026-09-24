@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { NAlert, NButton, NInput, NSpin, NTag } from 'naive-ui'
 import {
   apiAdminHealthStart,
@@ -70,6 +70,11 @@ const healthPolling = usePolling<HealthTask>(
     until: (t) => t.status === 'succeeded' || t.status === 'failed' || t.status === 'done',
   },
 )
+
+// 轮询结果写回 healthTask，驱动模板渲染最新状态（含最终 issues 与 summary）
+watch(healthPolling.data, (latest) => {
+  if (latest) healthTask.value = latest
+})
 
 async function startHealthCheck(): Promise<void> {
   if (starting.value) return
