@@ -97,8 +97,12 @@ def overview(
         where = ["user_id = ?"]
         args: list = [user["id"]]
         if banks is not None:
-            where.append(f"bank_id IN ({','.join('?' * len(banks))})")
-            args.extend(banks)
+            if banks:
+                where.append(f"bank_id IN ({','.join('?' * len(banks))})")
+                args.extend(banks)
+            else:
+                # 学科无注册题库：空 IN () 是非法 SQL，直接短路为空结果
+                where.append("1 = 0")
         if d_from:
             where.append("substr(created_at, 1, 10) >= ?")
             args.append(d_from.isoformat())
@@ -141,8 +145,12 @@ def weaknesses(
         where = ["user_id = ?"]
         args: list = [user["id"]]
         if banks is not None:
-            where.append(f"bank_id IN ({','.join('?' * len(banks))})")
-            args.extend(banks)
+            if banks:
+                where.append(f"bank_id IN ({','.join('?' * len(banks))})")
+                args.extend(banks)
+            else:
+                # 学科无注册题库：空 IN () 是非法 SQL，直接短路为空结果
+                where.append("1 = 0")
         rows = conn.execute(
             f"SELECT bank_id, question_id, is_correct, created_at FROM practice_records "
             f"WHERE {' AND '.join(where)} ORDER BY created_at DESC LIMIT 200",

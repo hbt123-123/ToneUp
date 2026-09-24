@@ -92,8 +92,18 @@ def normalize_latex(text: str) -> str:
     return s.translate(table)
 
 
+_LATEX_STRUCT_MARK = re.compile(r"\\[a-zA-Z]+|[{}$^_]")
+
+
 def try_deterministic_fill_blank(user_answer: str, reference: str) -> bool | None:
-    """确定性归一化比对。高置信一致 True / 不一致 False；无法判定 None。"""
+    """确定性归一化比对。高置信一致 True / 不一致 False；无法判定 None。
+
+    normalize_latex 会剥掉全部 LaTeX 命令与花括号，结构性不同的答案可能
+    塌缩为同一字符串（\\sqrt{2} → "2"、"12" ≡ \\frac{1}{2}）。任一侧含
+    LaTeX 结构记号时裁决置信度不足，返回 None 交给 AI 判定（C-13）。
+    """
+    if _LATEX_STRUCT_MARK.search(user_answer) or _LATEX_STRUCT_MARK.search(reference):
+        return None
     u, r = normalize_latex(user_answer), normalize_latex(reference)
     if not u or not r:
         return None

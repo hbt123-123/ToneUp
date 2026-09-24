@@ -122,8 +122,11 @@ def update_feedback_status(body: dict = Body(...), user=Depends(require_admin)):
         ).fetchone()
         if row is None:
             raise NotFoundError("feedback not found")
-        conn.execute(
-            "UPDATE question_feedback SET status = ? WHERE id = ?",
-            (new_status, feedback_id),
-        )
+        # user_connection 只管理生命周期不 commit，须显式用 `with conn:` 提交，
+        # 否则 UPDATE 的隐式事务在连接关闭时被回滚（C-9）
+        with conn:
+            conn.execute(
+                "UPDATE question_feedback SET status = ? WHERE id = ?",
+                (new_status, feedback_id),
+            )
     return envelope({"feedback_id": feedback_id, "status": new_status})

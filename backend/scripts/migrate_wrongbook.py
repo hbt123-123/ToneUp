@@ -1,7 +1,6 @@
 """Migration script: Migrate data from wrongbook.json to wrong_questions table.
 
 Field mapping:
-- content -> preview (JSON string)
 - wrong_count -> attempt_count (int)
 - last_practice_at -> last_wrong_at (ISO timestamp)
 - tags -> tags (JSON string, default '[]')
@@ -18,11 +17,11 @@ from datetime import datetime, timezone
 # Add backend directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.core.database import get_db_path
+from app.core.config import get_settings
 from app.core.wrongbook_schema import WRONG_QUESTIONS_DDL
 
 def get_user_data_path():
-    return get_db_path("user_data")
+    return str(get_settings().data_root / "user_data.db")
 
 def migrate_wrongbook(dry_run=False):
     """Migrate wrongbook.json to wrong_questions table."""
@@ -70,12 +69,18 @@ def migrate_wrongbook(dry_run=False):
             for item in user_data["items"]:
                 try:
                     # Map fields with defaults
-                    question_id = int(item.get("id", 0))
+                    # id 缺失/非法时跳过该条：默认 0 会让多条记录共用主键
+                    # 撞 (user_id, bank_id, question_id) 唯一约束互相覆盖
+                    raw_id = item.get("id")
+                    if raw_id is None:
+                        raise ValueError("missing question id")
+                    question_id = int(raw_id)
+                    if question_id <= 0:
+                        raise ValueError(f"invalid question id: {raw_id}")
                     bank_id = str(item.get("bank_id", "unknown"))
-                    preview = item.get("content", "")  # content -> preview
                     attempt_count = int(item.get("wrong_count", 1))  # wrong_count -> attempt_count
                     tags = json.dumps(item.get("tags", []))  # tags -> tags
-                    
+
                     # Handle last_wrong_at (last_practice_at -> last_wrong_at)
                     last_practice_at = item.get("last_practice_at")
                     if last_practice_at:
@@ -88,13 +93,14 @@ def migrate_wrongbook(dry_run=False):
                             last_wrong_at = datetime.now(timezone.utc).isoformat()
                     else:
                         last_wrong_at = datetime.now(timezone.utc).isoformat()
-                    
+
                     # Insert with ON CONFLICT UPDATE
+                    # created_at 为 NOT NULL 无默认，必须显式提供（迁移时间）
                     cursor.execute("""
-                        INSERT INTO wrong_questions (user_id, bank_id, question_id, attempt_count, last_wrong_at, tags)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT INTO wrong_questions (user_id, bank_id, question_id, attempt_count, last_wrong_at, tags, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(user_id, bank_id, question_id)
-                        DO UPDATE SET 
+                        DO UPDATE SET
                             attempt_count = MAX(excluded.attempt_count, wrong_questions.attempt_count),
                             last_wrong_at = excluded.last_wrong_at,
                             tags = excluded.tags
@@ -104,7 +110,8 @@ def migrate_wrongbook(dry_run=False):
                         question_id,
                         attempt_count,
                         last_wrong_at,
-                        tags
+                        tags,
+                        datetime.now(timezone.utc).isoformat(),
                     ))
                     migrated += 1
                     

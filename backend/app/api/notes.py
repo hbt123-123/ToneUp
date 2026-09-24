@@ -149,27 +149,31 @@ def delete_note(note_id: int, user=Depends(get_current_user)):
 
 @_extra_router.post("/{note_id}/like")
 def like_note(note_id: int, user=Depends(get_current_user)):
-    """点赞笔记；已点赞返回 409。"""
+    """点赞笔记；已点赞返回 409。
+
+    用非切换原语（add + increment + get count）组合：toggle 原语在
+    "已点赞"错误路径会先删掉赞再报 409，破坏幂等（C-10）。
+    """
     db = _db()
     row = user_repo.notes_get_by_id(db, note_id)
     if row is None:
         raise NotFoundError("note not found")
-    liked, new_count = user_repo.note_toggle_like(db, note_id, user["id"], _now_iso())
-    if not liked:
+    if not user_repo.note_add_like(db, note_id, user["id"], _now_iso()):
         raise ConflictError("already liked")
-    return envelope({"liked": True, "like_count": new_count})
+    user_repo.note_increment_likes(db, note_id)
+    return envelope({"liked": True, "like_count": user_repo.note_get_like_count(db, note_id)})
 
 
 # ── DELETE /api/notes/{note_id}/like ──────────────────────────────────
 
 @_extra_router.delete("/{note_id}/like")
 def unlike_note(note_id: int, user=Depends(get_current_user)):
-    """取消点赞；未点赞返回 404。"""
+    """取消点赞；未点赞返回 404。同理用非切换原语，错误路径零副作用。"""
     db = _db()
     row = user_repo.notes_get_by_id(db, note_id)
     if row is None:
         raise NotFoundError("note not found")
-    liked, new_count = user_repo.note_toggle_like(db, note_id, user["id"], _now_iso())
-    if liked:
+    if not user_repo.note_remove_like(db, note_id, user["id"]):
         raise NotFoundError("not liked")
-    return envelope({"liked": False, "like_count": new_count})
+    user_repo.note_decrement_likes(db, note_id)
+    return envelope({"liked": False, "like_count": user_repo.note_get_like_count(db, note_id)})
