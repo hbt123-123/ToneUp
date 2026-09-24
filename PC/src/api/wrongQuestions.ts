@@ -7,11 +7,11 @@ import { request } from './http'
 
 /* ---------- 类型 ---------- */
 
-export interface WrongQuestionItem {
-  /** 题目全局唯一 ID（后端生成） */
-  id: number
-  /** 用户 ID（由 auth token 推断，前端不传） */
-  user_id?: string
+/**
+ * 同步/上传请求体条目（H-117）：id 由服务端生成，离线上传时不存在，
+ * 请求与响应拆分为两个类型，避免请求体被迫伪造 id: 0。
+ */
+export interface WrongQuestionSyncItem {
   /** 所属题库 ID */
   bank_id: string
   /** 题目 ID（题库内唯一） */
@@ -24,6 +24,13 @@ export interface WrongQuestionItem {
   tags: string[]
   /** 题目预览文本（用于错题本列表展示） */
   preview?: string
+}
+
+export interface WrongQuestionItem extends WrongQuestionSyncItem {
+  /** 错题记录 ID（后端生成，DELETE /wrong-questions/{id} 的路径参数） */
+  id: number
+  /** 用户 ID（由 auth token 推断，前端不传） */
+  user_id?: string
 }
 
 export interface SyncResult {
@@ -81,7 +88,7 @@ export function removeWrongQuestion(id: number): Promise<void> {
  * 批量同步错题（离线队列上传）
  * POST /api/wrong-questions/sync
  */
-export function syncWrongQuestions(items: WrongQuestionItem[]): Promise<SyncResult> {
+export function syncWrongQuestions(items: WrongQuestionSyncItem[]): Promise<SyncResult> {
   return request('/wrong-questions/sync', {
     method: 'POST',
     json: { items },

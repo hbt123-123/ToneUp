@@ -57,6 +57,14 @@ captures/
 .externalNativeBuild/
 .cxx/
 local.properties
+*.jks
+*.keystore
+keystore.properties
+
+# Cloud credentials
+service-account*.json
+gcloud-*.json
+*.p12
 
 # IDE and OS files
 .idea/

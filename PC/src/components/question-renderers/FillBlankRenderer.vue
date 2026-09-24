@@ -29,7 +29,9 @@ function valueOf(index: number): string {
 
 function update(index: number, value: string): void {
   if (props.ctx.readonly || props.ctx.disabled) return
-  const next = Array.from({ length: blankCount.value }, (_, i) => valueOf(i))
+  // H-142：与 ClozeRenderer 一致，历史答案可能比当前空数长，取较大长度避免截断丢失
+  const base = answers.value
+  const next = Array.from({ length: Math.max(blankCount.value, base.length) }, (_, i) => base[i] ?? '')
   next[index] = value
   props.ctx.onAnswerChange(next)
 }

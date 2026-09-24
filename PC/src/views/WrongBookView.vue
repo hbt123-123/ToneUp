@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { NButton, NInput, NSelect, NSwitch, NTag } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
@@ -25,6 +25,18 @@ onMounted(async () => {
   wrongbook.bindUser(() => auth.userId)
   wrongbook.loadForUser(auth.userId, (bankId) => readMarked(auth.userId, bankId))
 })
+
+// H-165：刷新后异步恢复会话时 onMounted 拿到的可能是 -1（未登录态），
+// 监听 userId 从 -1 变为有效值后补一次加载
+watch(
+  () => auth.userId,
+  (uid, prev) => {
+    if (prev === -1 && uid !== -1) {
+      wrongbook.bindUser(() => auth.userId)
+      wrongbook.loadForUser(uid, (bankId) => readMarked(uid, bankId))
+    }
+  },
+)
 
 const subjectOptions = computed(() => [
   { label: '全部学科', value: '' },

@@ -168,12 +168,12 @@ async function refreshCatalog(): Promise<void> {
           <template #header>{{ bank.name }}</template>
           <template #header-extra>
             <n-tag v-if="bank.enabled === false" type="warning" size="small">未启用</n-tag>
-            <n-tag v-else-if="bank.id === bankDetail?.id" type="info" size="small">已选</n-tag>
+            <n-tag v-else-if="bank.id === bankDetail?.bank_id" type="info" size="small">已选</n-tag>
           </template>
           <p class="text-secondary bank-id">{{ bank.id }}</p>
 
-          <!-- 题库详情（FR-CAT-04） -->
-          <div v-if="bank.id === bankDetail?.id" class="detail" @click.stop>
+          <!-- 题库详情（FR-CAT-04）；H-160：详情端点返回 bank_id，用它与列表项 id 对齐 -->
+          <div v-if="bank.id === bankDetail?.bank_id" class="detail" @click.stop>
             <div v-if="bankDetail.years?.length || bankDetail.year_min" class="detail-row">
               <span class="label">可用年份：</span>
               <span>{{ bankDetail.years?.length ? `${Math.min(...bankDetail.years)} - ${Math.max(...bankDetail.years)}（${bankDetail.years.length} 套）` : `${bankDetail.year_min} - ${bankDetail.year_max}` }}</span>

@@ -39,13 +39,19 @@ const ALLOWED_ATTR = [
 
 /** 题目图片只允许来自图片端点；其余一律剥离（§7.2 约束） */
 function normalizeImages(holder: HTMLElement): void {
-  const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
+  // H-156：VITE_API_BASE 可能是完整 URL（如 https://host/api）而非根相对路径，
+  // 需按 URL 解析后比对 pathname 与 origin，不能直接字符串拼接
+  const base = new URL(
+    (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api',
+    window.location.origin,
+  )
+  const basePath = base.pathname.replace(/\/$/, '')
   holder.querySelectorAll('img').forEach((img) => {
     const src = img.getAttribute('src') ?? ''
     try {
       const url = new URL(src, window.location.origin)
-      const pathOk = url.pathname.startsWith(`${base}/images/`)
-      if (!pathOk || url.origin !== window.location.origin) {
+      const pathOk = url.pathname.startsWith(`${basePath}/images/`)
+      if (!pathOk || url.origin !== base.origin) {
         img.remove()
         return
       }

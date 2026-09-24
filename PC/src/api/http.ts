@@ -75,7 +75,10 @@ function apiBase(): string {
 }
 
 function buildUrl(path: string, query: RequestOptions['query']): string {
-  const url = path.startsWith('/api') ? path : `${apiBase()}${path}`
+  // H-115：统一以 apiBase 为前缀（全库调用方均传相对 path，如 '/auth/login'）。
+  // 原先 `path.startsWith('/api')` 的启发式会把 VITE_API_BASE 指向其它 origin 的配置
+  // 静默降级为同源请求，且 '/apixxx' 这类路径也会误判。
+  const url = `${apiBase()}${path}`
   if (!query) return url
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(query)) {

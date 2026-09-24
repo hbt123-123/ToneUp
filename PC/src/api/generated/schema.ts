@@ -106,6 +106,9 @@ export interface BankTypeDistribution {
 
 export interface BankDetail {
   id: string
+  /* H-160：后端详情端点实际返回 bank_id 标识（见 backend/app/api/question_banks.py），
+     与列表项的 id 对齐用 bank_id 而非 id；保留 id 以兼容旧响应 */
+  bank_id?: string
   name: string
   subject_id?: string
   type_id?: string

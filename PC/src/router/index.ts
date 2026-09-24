@@ -100,12 +100,14 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
 
   // 会话恢复（FR-AUTH-03）：有本地令牌但用户信息缺失时调一次 /auth/me
-  if (auth.token && !auth.user && !sessionRestorePromise) {
-    sessionRestorePromise = auth.restoreSession().finally(() => {
-      setTimeout(() => {
+  // H-121：恢复进行中的后续导航也必须 await，不得跳过（原先直接放行，恢复失败
+  // 前误判 isLoggedIn=false 踢到登录页；且恢复完成后无需要重新等待）
+  if (auth.token && !auth.user) {
+    if (!sessionRestorePromise) {
+      sessionRestorePromise = auth.restoreSession().finally(() => {
         sessionRestorePromise = null
-      }, 0)
-    })
+      })
+    }
     await sessionRestorePromise
   }
 

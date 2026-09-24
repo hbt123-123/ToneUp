@@ -74,7 +74,18 @@ html.dark {
   --tu-text-secondary: #a3aac0;
   --tu-text-disabled: #666d84;
   --tu-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
+  --tu-shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.55);
   --tu-gradient-hero: url('/background/night.png') center/cover no-repeat;
+  --tu-gradient-card: #1e212b;
+
+  /* H-129：补齐暗色下缺失的扩展 token，避免继承亮色值导致对比度不足 */
+  --tu-surface-muted: #262a36;
+  --tu-primary-surface: rgba(255, 255, 255, 0.08);
+  --tu-primary-overlay: rgba(255, 255, 255, 0.2);
+  --tu-success-surface: rgba(48, 200, 120, 0.14);
+  --tu-error-surface: rgba(240, 82, 110, 0.16);
+  --tu-scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --tu-scrollbar-thumb-hover: rgba(255, 255, 255, 0.35);
 }
 
 /* ===== 预设主题（data-theme 与 dark 正交） ===== */

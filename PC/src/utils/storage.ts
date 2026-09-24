@@ -35,6 +35,15 @@ function safeRemove(key: string): void {
   }
 }
 
+/** H-157：序列化纳入 try——循环引用/BigInt/抛错的 toJSON 不得让异常冲出写缓存路径 */
+function safeSetJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    /* 不可序列化或配额满：静默降级为内存态 */
+  }
+}
+
 /* ---------- 通用 JSON 缓存（EC-05 catalog 持久缓存等） ---------- */
 
 /** 读取 JSON 缓存：缺失/损坏返回 null（安全语义，调用方走网络路径） */
@@ -49,7 +58,7 @@ export function readJsonCache<T>(key: string): T | null {
 }
 
 export function writeJsonCache(key: string, value: unknown): void {
-  safeSet(key, JSON.stringify(value))
+  safeSetJson(key, value)
 }
 
 export function removeJsonCache(key: string): void {
@@ -75,7 +84,7 @@ export function readDraft(userId: number | string, bankId: string, questionId: n
 }
 
 export function writeDraft(userId: number | string, bankId: string, questionId: number, answer: unknown): void {
-  safeSet(draftKey(userId, bankId, questionId), JSON.stringify({ answer, updatedAt: Date.now() }))
+  safeSetJson(draftKey(userId, bankId, questionId), { answer, updatedAt: Date.now() })
 }
 
 export function clearDraft(userId: number | string, bankId: string, questionId: number): void {
@@ -109,7 +118,7 @@ export function writeProgress(
   bankId: string,
   payload: Omit<ProgressPayload, 'updatedAt'>,
 ): void {
-  safeSet(progressKey(userId, bankId), JSON.stringify({ ...payload, updatedAt: Date.now() }))
+  safeSetJson(progressKey(userId, bankId), { ...payload, updatedAt: Date.now() })
 }
 
 /* ---------- 疑问标记集合 ---------- */

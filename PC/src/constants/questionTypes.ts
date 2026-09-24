@@ -23,7 +23,7 @@ export const QUESTION_TYPES: readonly QuestionTypeItem[] = [
   { typeCode: 'JUDGE', label: '判断题', subject: 'reserved' },
 ] as const
 
-/** 按 typeCode 快速查找 */
-export const QUESTION_TYPE_MAP = new Map(
-  QUESTION_TYPES.map(t => [t.typeCode, t])
+/** 按 typeCode 快速查找（H-120：显式元组类型，否则 Map 推断为 (string|QuestionTypeItem)[][]） */
+export const QUESTION_TYPE_MAP = new Map<string, QuestionTypeItem>(
+  QUESTION_TYPES.map((t): [string, QuestionTypeItem] => [t.typeCode, t]),
 )

@@ -31,9 +31,10 @@ export const useReviewStore = defineStore('review', () => {
 
   /** 暂缓本题（FR-REV-03）：从队列移除并提示下次时间 */
   async function skipCurrent(question: ReviewItem): Promise<string | null> {
-    await apiSkipReview(question.question_id, question.bank_id)
+    // H-124：返回服务端给出的下次复习时间（此前被丢弃，恒为 null）
+    const result = await apiSkipReview(question.question_id, question.bank_id)
     queue.value = queue.value.filter((q) => q.question_id !== question.question_id)
-    return null
+    return result?.next_review_at ?? null
   }
 
   function removeFromQueue(questionId: number): void {

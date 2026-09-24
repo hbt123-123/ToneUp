@@ -17,7 +17,9 @@ const text = ref(typeof props.ctx.answer === 'string' ? props.ctx.answer : '')
 watch(
   () => props.ctx.answer,
   (v) => {
-    if (typeof v === 'string' && v !== text.value) text.value = v
+    // H-147：外部清空（null/undefined）也要同步本地镜像，否则输入框残留旧答案
+    const next = typeof v === 'string' ? v : ''
+    if (next !== text.value) text.value = next
   },
 )
 

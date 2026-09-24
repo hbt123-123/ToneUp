@@ -60,12 +60,13 @@ const registerRules: FormRules = {
 }
 
 async function doLogin(): Promise<void> {
+  if (submitting.value) return // H-161：先拦重复提交，避免校验期间连点叠加请求
   try {
     await loginFormRef.value?.validate()
   } catch {
     return // 字段校验未通过，错误提示由表单展示
   }
-  if (submitting.value) return // 防重复提交（FR-AUTH-05）
+  if (submitting.value) return // 防重复提交（FR-AUTH-05，校验后再查一次双保险）
   submitting.value = true
   try {
     await auth.login(loginModel.username.trim(), loginModel.password)
@@ -78,6 +79,7 @@ async function doLogin(): Promise<void> {
 }
 
 async function doRegister(): Promise<void> {
+  if (submitting.value) return
   try {
     await registerFormRef.value?.validate()
   } catch {
@@ -95,9 +97,14 @@ async function doRegister(): Promise<void> {
   }
 }
 
+// H-162：只允许站内相对路径，防开放重定向（//evil.com、/\evil.com、绝对 URL 一律回退首页）
+function safeRedirect(target: string): string {
+  return target.startsWith('/') && !target.startsWith('//') && !target.startsWith('/\\') ? target : '/'
+}
+
 function goAfterAuth(): void {
   const redirectQuery = typeof route.query.redirect === 'string' ? route.query.redirect : null
-  const target = redirectQuery ?? takeRedirectPath() ?? '/'
+  const target = safeRedirect(redirectQuery ?? takeRedirectPath() ?? '/')
   void router.replace(target)
 }
 </script>

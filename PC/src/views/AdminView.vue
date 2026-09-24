@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NAlert, NButton, NInput, NSpin, NTag } from 'naive-ui'
 import {
   apiAdminHealthStart,
@@ -76,6 +76,13 @@ watch(healthPolling.data, (latest) => {
   if (latest) healthTask.value = latest
 })
 
+// H-159：按任务 status 判定终态——即时结论可能只有 summary 没有 issues，
+// 以"无 issues"判进行中会导致 spinner 永远旋转；status 缺失（刚发起）视为进行中
+const healthRunning = computed(() => {
+  const status = healthTask.value?.status
+  return status !== 'succeeded' && status !== 'failed' && status !== 'done'
+})
+
 async function startHealthCheck(): Promise<void> {
   if (starting.value) return
   starting.value = true
@@ -121,7 +128,7 @@ async function startHealthCheck(): Promise<void> {
 
       <n-alert v-if="healthError" type="error" style="margin-top: 12px">{{ healthError }}</n-alert>
 
-      <n-spin v-if="healthTask && (healthPolling.loading.value || !healthTask.issues)" :show="true" style="margin-top: 14px">
+      <n-spin v-if="healthTask && healthRunning" :show="true" style="margin-top: 14px">
         检查进行中… 任务 ID：{{ healthTask.task_id }}
       </n-spin>
 

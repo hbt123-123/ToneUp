@@ -50,8 +50,11 @@ function cellClass(index: number): string[] {
   return classes
 }
 
+/* H-138：answeredIds 可能包含不在本次 ids 范围内的题（跨会话残留），进度必须取交集 */
+const answeredCount = computed(() => props.ids.filter((id) => props.answeredIds.has(id)).length)
+
 const progressPercent = computed(() =>
-  props.ids.length === 0 ? 0 : Math.round((props.answeredIds.size / props.ids.length) * 100),
+  props.ids.length === 0 ? 0 : Math.round((answeredCount.value / props.ids.length) * 100),
 )
 </script>
 
@@ -69,7 +72,7 @@ const progressPercent = computed(() =>
       />
       <div class="stats">
         <p class="big">{{ currentIndex + 1 }}<span class="dim"> / {{ ids.length }}</span></p>
-        <p class="text-secondary">已答 {{ answeredIds.size }} 题 · 完成 {{ progressPercent }}%</p>
+        <p class="text-secondary">已答 {{ answeredCount }} 题 · 完成 {{ progressPercent }}%</p>
       </div>
     </div>
 

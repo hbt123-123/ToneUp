@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NImage, NSkeleton } from 'naive-ui'
 import { imageUrl } from '@/api/endpoints'
 import { loadToken } from '@/api/token'
@@ -52,7 +52,8 @@ function revoke(): void {
   }
 }
 
-onMounted(() => {
+function setupObserver(): void {
+  observer?.disconnect()
   observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
@@ -66,7 +67,22 @@ onMounted(() => {
     { rootMargin: '200px' },
   )
   if (holder.value) observer.observe(holder.value)
+}
+
+onMounted(() => {
+  setupObserver()
 })
+
+// H-135：v-for 复用实例时 imageId/bankId 可能变化，需重置状态、回收 blob 并重新观察
+watch(
+  () => [props.imageId, props.bankId],
+  () => {
+    seq++ // 使在途请求失效
+    revoke()
+    state.value = 'idle'
+    setupObserver()
+  },
+)
 
 onBeforeUnmount(() => {
   observer?.disconnect()

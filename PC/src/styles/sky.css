@@ -47,7 +47,7 @@ html[data-theme="sky-blue"] .side-nav {
   background-color: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  will-change: transform;
+  /* H-128：backdrop-filter 已建立合成层，显式 will-change: transform 反而增加显存与重绘负担 */
 }
 
 html.dark[data-theme="sky-blue"] .side-nav {

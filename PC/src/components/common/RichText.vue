@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { NButton } from 'naive-ui'
 import { renderRichText } from '@/utils/richtext'
 
@@ -26,13 +26,17 @@ let renderSeq = 0
 
 async function refresh(): Promise<void> {
   const seq = ++renderSeq
-  const result = await renderRichText(props.content)
+  const raw = props.content
+  const result = await renderRichText(raw)
   if (seq !== renderSeq) return // 只应用最后一次渲染，防止切题闪烁
   html.value = result
-  failed.value = !result
+  // H-136：内容本身为空不算渲染失败；只有"有内容却渲染不出"才展示兜底
+  failed.value = !!raw && !result
 }
 
-function checkOverflow(): void {
+async function checkOverflow(): Promise<void> {
+  // H-137：v-html 的 DOM patch 在下一个微任务才落盘，先等 nextTick 再量 scrollHeight
+  await nextTick()
   const el = bodyRef.value
   if (!el || !props.collapseLines) {
     overflowing.value = false

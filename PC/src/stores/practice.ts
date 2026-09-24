@@ -373,6 +373,10 @@ export const usePracticeStore = defineStore('practice', () => {
     const key = currentKey.value
     if (!rt || !key) return
     if (rt.phase === 'submitted' || rt.phase === 'submitting') return
+    if (rt.phase === 'error' && rt.pendingRequestId !== null) {
+      // H-148：失败后用户修改了作答，旧幂等键必须释放；下次提交以新键提交新内容
+      rt.pendingRequestId = null
+    }
     rt.answer = answer
     if (rt.phase === 'idle' || rt.phase === 'loading') rt.phase = 'editing'
     if (rt.pendingDraft !== null) rt.pendingDraft = null
@@ -606,7 +610,12 @@ export const usePracticeStore = defineStore('practice', () => {
         synced++
         dequeueUnsubmitted(uid, rec.clientRequestId)
         const key = qKey(rec.bankId, rec.questionId)
-        if (runtimes.has(key)) applyAttemptResult(key, result)
+        const rt = runtimes.get(key)
+        // H-149：仅当该题仍停留在这次提交（幂等键匹配）时才把重放结果写回会话，
+        // 避免覆盖用户离线期间重新作答/重新提交产生的最新状态
+        if (rt && rt.pendingRequestId === rec.clientRequestId) {
+          applyAttemptResult(key, result)
+        }
       } catch (err) {
         const isNetwork = err instanceof ApiError && err.networkError
         if (isNetwork) {

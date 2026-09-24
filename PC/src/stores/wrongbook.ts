@@ -7,7 +7,7 @@ import {
   addWrongQuestion,
   removeWrongQuestion,
   syncWrongQuestions,
-  type WrongQuestionItem,
+  type WrongQuestionSyncItem,
 } from '@/api/wrongQuestions'
 import { ApiError } from '@/api/http'
 
@@ -21,6 +21,9 @@ import { ApiError } from '@/api/http'
  */
 
 const OFFLINE_QUEUE_KEY = (userId: number | string): string => `toneup:wrongbook:offline:${userId}`
+
+/** H-153：online 监听器只注册一次的模块级标志 */
+let onlineSyncBound = false
 
 interface WrongRecord extends WrongBookItem {
   /** 服务端错题记录 id（DELETE /wrong-questions/{id} 的路径参数），离线未同步时缺省 */
@@ -42,10 +45,9 @@ interface OfflineQueueEntry {
   queuedAt: string
 }
 
-/** 将本地 WrongRecord 字段映射为后端 API 请求体字段 */
-function transformToApiBody(record: WrongRecord): WrongQuestionItem {
+/** 将本地 WrongRecord 字段映射为后端 API 请求体字段（H-117：同步请求不携带服务端 id） */
+function transformToApiBody(record: WrongRecord): WrongQuestionSyncItem {
   return {
-    id: 0,
     bank_id: record.bank_id,
     question_id: record.question_id,
     attempt_count: record.wrong_count ?? 1,
@@ -96,8 +98,9 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
   }
 
   /** 仅管理离线队列；主错题数据以服务端为准，不再写本地 wrongbook 键 */
-  function persist(queue: OfflineQueueEntry[]): void {
-    const uid = currentUserId()
+  function persist(queue: OfflineQueueEntry[], userId?: number | string): void {
+    // H-151：显式传入 userId（入队/同步必须与队列读取同键），避免与 currentUserId() 漂移
+    const uid = userId ?? currentUserId()
     if (uid === -1) return // 会话未恢复时不落盘
     try {
       if (queue.length === 0) {
@@ -118,7 +121,7 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
       id: crypto.randomUUID(),
       queuedAt: new Date().toISOString(),
     })
-    persist(queue)
+    persist(queue, userId) // H-151：与 readOfflineQueue 同键，禁止写往 currentUserId()
   }
 
   /** 网络恢复后批量上传离线队列 */
@@ -129,7 +132,7 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
     if (queue.length === 0) return
     syncing.value = true
     try {
-      const items: WrongQuestionItem[] = queue.map((e) =>
+      const items: WrongQuestionSyncItem[] = queue.map((e) =>
         transformToApiBody({
           bank_id: e.bank_id,
           question_id: e.question_id,
@@ -139,8 +142,17 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
           last_practice_at: e.queuedAt,
         }),
       )
-      await syncWrongQuestions(items)
-      persist([])
+      const result = await syncWrongQuestions(items)
+      // H-126：同步期间新入队的条目不得被清掉——只移除本次已上传的条目
+      // H-152：sync 返回 errors 非空说明部分条目被拒，保留整个队列下次重试
+      // （sync 端点按 (user, bank, question) 幂等 upsert，重放安全）
+      if (result.errors.length === 0) {
+        const doneIds = new Set(queue.map((e) => e.id))
+        persist(
+          readOfflineQueue(uid).filter((e) => !doneIds.has(e.id)),
+          uid,
+        )
+      }
     } catch {
       /* 仍离线，保留队列等待下次重试 */
     } finally {
@@ -277,10 +289,13 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
     keyword.value = ''
   }
 
-  // 网络恢复时自动同步离线队列
-  window.addEventListener('online', () => {
-    void syncOfflineQueue()
-  })
+  // 网络恢复时自动同步离线队列（H-153：模块级防重，store 重复实例化不再叠加监听器）
+  if (!onlineSyncBound && typeof window !== 'undefined') {
+    onlineSyncBound = true
+    window.addEventListener('online', () => {
+      void syncOfflineQueue()
+    })
+  }
 
   return {
     records,

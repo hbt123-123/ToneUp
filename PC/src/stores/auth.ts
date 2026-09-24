@@ -11,12 +11,9 @@ import type { CurrentUser } from '@/api/generated/schema'
  * 若 VITE_DEV_BYPASS_AUTH 为 true 且当前为 dev，则直接注入 mock 登录态，
  * 跳过所有路由守卫校验，无需后端运行即可浏览全部页面。
  */
-const DEV_BYPASS_AUTH =
-  !!import.meta.env.DEV &&
-  (import.meta.env.VITE_DEV_BYPASS_AUTH === 'true' ||
-    (typeof (import.meta as unknown as { env?: Record<string, unknown> }).env?.VITE_DEV_BYPASS_AUTH ===
-      'undefined' &&
-      true)) // 默认 dev 环境也启用，方便测试
+// H-122：必须显式开启（.env.local 设 VITE_DEV_BYPASS_AUTH=true）；
+// 原先 `typeof env === 'undefined' && true` 死代码使 dev 默认放行全部路由，存在误用风险
+const DEV_BYPASS_AUTH = !!import.meta.env.DEV && import.meta.env.VITE_DEV_BYPASS_AUTH === 'true'
 
 const MOCK_USER: CurrentUser = {
   id: 1,

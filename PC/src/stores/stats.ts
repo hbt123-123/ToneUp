@@ -32,10 +32,11 @@ export const useStatsStore = defineStore('stats', () => {
   })
 
   async function fetchOverview(force = false): Promise<StatsOverview> {
-    if (overviewLoaded.value && !force && !overviewLoading.value) return overview
+    // H-125：已在加载中时不重复发起请求（原先条件漏了 overviewLoading，会并发双请求）
+    if ((overviewLoaded.value || overviewLoading.value) && !force) return overview
     overviewLoading.value = true
     try {
-      const data = await apiStatsOverview({ ...rangeQuery.value, subject_id: subjectId.value ?? undefined })
+      const data = await apiStatsOverview({ ...rangeQuery.value, subject_id: subjectId.value || undefined })
       Object.assign(overview, data)
       overviewLoaded.value = true
       return data
@@ -48,7 +49,8 @@ export const useStatsStore = defineStore('stats', () => {
     if (weaknesses.value.length > 0 && !force) return
     weaknessLoading.value = true
     try {
-      const data = await apiStatsWeaknesses({ subject_id: subjectId.value ?? undefined, limit: 10 })
+      // H-164：''（"全部学科"）与 null 均归一为不携带 subject_id
+      const data = await apiStatsWeaknesses({ subject_id: subjectId.value || undefined, limit: 10 })
       weaknesses.value = data.items ?? []
     } catch {
       /* 拉取失败保持现有列表；页面以空态呈现，可手动刷新重试 */

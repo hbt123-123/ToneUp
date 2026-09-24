@@ -23,11 +23,12 @@ export const useCatalogStore = defineStore('catalog', () => {
   const loading = ref(false)
 
   // EC-05 cache-first：store 创建时立即水合持久缓存（损坏/缺失 → null 走网络路径）
+  // H-123：水合只提供首屏占位，不得置 loaded=true——否则挂载时的 fetchCatalog()
+  // 提前返回，缓存过期后永不网络刷新
   const cached = readJsonCache<CatalogCachePayload>(CATALOG_CACHE_KEY)
   if (cached && Array.isArray(cached.subjects) && Array.isArray(cached.banks)) {
     subjects.value = cached.subjects
     banks.value = cached.banks
-    loaded.value = true
   }
 
   /** 面包屑三级联动数据源：学科 / 题型 / 年份（§4.3） */

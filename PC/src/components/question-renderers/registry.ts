@@ -1,39 +1,57 @@
-import { defineAsyncComponent, defineComponent, h } from 'vue'
+import { defineComponent, h, shallowRef, ref } from 'vue'
 import type { Component } from 'vue'
 import UnknownTypeRenderer from './UnknownTypeRenderer.vue'
 import { CONTRACT_TYPE_CODES } from './types'
 
 /**
- * EC-04 懒加载包装：defineAsyncComponent + chunk 加载失败兜底
+ * EC-04 懒加载包装：chunk 加载失败兜底
  * （部署发版后旧标签页引用已失效的 chunk 文件名 → 404，渲染占位而非白屏崩溃）。
+ * H-118：不用 defineAsyncComponent——其 onError 里 fail() 之后 retry 闭包即失效，
+ * 内置错误态无法可靠重试；改为自管加载状态，重试时重新触发 loader。
  */
 function lazyRenderer(loader: () => Promise<Component>): Component {
-  let lastRetry: (() => void) | null = null
-  return defineAsyncComponent({
-    loader,
-    onError(error, retry, fail) {
-      console.error('[ToneUp] 题型渲染组件加载失败，已降级为占位', error)
-      lastRetry = retry
-      fail()
+  return defineComponent({
+    name: 'AsyncRenderer',
+    setup() {
+      const state = ref<'loading' | 'ready' | 'error'>('loading')
+      const resolved = shallowRef<Component | null>(null)
+
+      async function load(): Promise<void> {
+        state.value = 'loading'
+        try {
+          resolved.value = await loader()
+          state.value = 'ready'
+        } catch (error) {
+          console.error('[ToneUp] 题型渲染组件加载失败，已降级为占位', error)
+          state.value = 'error'
+        }
+      }
+
+      void load()
+
+      return () => {
+        if (state.value === 'ready' && resolved.value) return h(resolved.value)
+        if (state.value === 'error') {
+          return h(
+            'div',
+            { class: 'renderer-load-error', style: 'padding:24px;text-align:center;font-size:13px;' },
+            [
+              h('p', { style: 'margin:0 0 8px;color:var(--tu-error,#d03050);' }, '组件加载失败'),
+              h(
+                'button',
+                { type: 'button', onClick: () => void load(), style: 'padding:4px 14px;cursor:pointer;' },
+                '加载失败，点击重试',
+              ),
+            ],
+          )
+        }
+        return h(
+          'div',
+          { style: 'padding:24px;text-align:center;font-size:13px;color:var(--tu-text-secondary);' },
+          '组件加载中…',
+        )
+      }
     },
-    errorComponent: defineComponent({
-      name: 'RendererLoadError',
-      setup() {
-        return () =>
-          h('div', { class: 'renderer-load-error', style: 'padding:24px;text-align:center;font-size:13px;' }, [
-            h('p', { style: 'margin:0 0 8px;color:var(--tu-error,#d03050);' }, '组件加载失败'),
-            h(
-              'button',
-              {
-                type: 'button',
-                onClick: () => lastRetry?.(),
-                style: 'padding:4px 14px;cursor:pointer;',
-              },
-              '加载失败，点击重试',
-            ),
-          ])
-      },
-    }),
   })
 }
 

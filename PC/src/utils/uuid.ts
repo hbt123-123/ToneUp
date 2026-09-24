@@ -25,5 +25,7 @@ export function hashString(input: string): string {
   }
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
-  return (((h2 >>> 0) * 4294967296 + (h1 >>> 0)) >>> 0).toString(36)
+  // H-158：数值合并 (h2>>>0)*2^32 + (h1>>>0) 会超出 2^53 且低 32 位丢失 h2 的全部熵；
+  // 改为 base36 字符串拼接，两个 32 位段的熵都保留
+  return `${(h2 >>> 0).toString(36)}${(h1 >>> 0).toString(36).padStart(7, '0')}`
 }

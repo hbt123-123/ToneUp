@@ -84,6 +84,9 @@ export function usePolling<T>(
 
   function stop(): void {
     stopped = true
+    // H-119：推进代次使 in-flight 的 task 结果过期，stop() 后不再写回 data/error
+    // （原先 stop() 不改 generation，await 恢复后 gen === generation 照常写回）
+    generation++
     if (timer !== null) {
       clearTimeout(timer)
       timer = null

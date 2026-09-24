@@ -119,9 +119,16 @@ export const useUiStore = defineStore('ui', () => {
     // 旧版 base64 数据：先直接应用保证本次可用，再后台迁移进 IndexedDB
     applyCustomBackground(customBackgroundUrl.value)
     void (async () => {
+      // H-150：迁移是异步的，期间用户可能已清除/更换背景；记录源 URL，
+      // await 后若已漂移则丢弃迁移结果（并清掉刚写入的 IndexedDB），防止旧背景复活
+      const sourceUrl = customBackgroundUrl.value
       try {
-        const blob = await (await fetch(customBackgroundUrl.value)).blob()
+        const blob = await (await fetch(sourceUrl)).blob()
         await saveBackground(blob)
+        if (customBackgroundUrl.value !== sourceUrl) {
+          void deleteBackground().catch(() => undefined)
+          return
+        }
         setCustomBackgroundUrl(URL.createObjectURL(blob))
       } catch (err) {
         // 迁移失败则本次会话继续用 base64，下次启动重试；打日志便于排查损坏数据

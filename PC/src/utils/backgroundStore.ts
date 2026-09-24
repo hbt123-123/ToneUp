@@ -19,12 +19,30 @@ function openDb(): Promise<IDBDatabase> {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
+      // H-154：其他标签页持有旧版本连接时升级请求会卡在 blocked，
+      // 必须显式失败让 dbPromise 复位，否则缓存 promise 永不 settle
+      req.onblocked = () => {
+        dbPromise = null
+        reject(new Error('IndexedDB 升级被其他标签页阻塞'))
+      }
       req.onupgradeneeded = () => {
         if (!req.result.objectStoreNames.contains(STORE)) {
           req.result.createObjectStore(STORE)
         }
       }
-      req.onsuccess = () => resolve(req.result)
+      req.onsuccess = () => {
+        const db = req.result
+        // H-132：另一标签页升级版本时本连接会被浏览器强制关闭；
+        // 主动关闭并复位缓存 promise，下次操作自动重连新版本
+        db.onversionchange = () => {
+          db.close()
+          dbPromise = null
+        }
+        db.onclose = () => {
+          dbPromise = null
+        }
+        resolve(db)
+      }
       req.onerror = () => {
         dbPromise = null // 失败后允许下次重试
         reject(req.error ?? new Error('IndexedDB 打开失败'))
@@ -40,7 +58,12 @@ async function withStore<T>(
 ): Promise<T> {
   const db = await openDb()
   return new Promise<T>((resolve, reject) => {
-    const req = fn(db.transaction(STORE, mode).objectStore(STORE))
+    const tx = db.transaction(STORE, mode)
+    // H-133/H-155：事务级失败（配额超限 abort 等）不依附于单个请求，
+    // 必须显式观察 tx.onabort/onerror，否则 commit 失败会被静默吞掉
+    tx.onabort = () => reject(tx.error ?? new Error('IndexedDB 事务中止'))
+    tx.onerror = () => reject(tx.error ?? new Error('IndexedDB 事务失败'))
+    const req = fn(tx.objectStore(STORE))
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error ?? new Error('IndexedDB 操作失败'))
   })

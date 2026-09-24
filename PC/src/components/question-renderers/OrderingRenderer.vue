@@ -15,8 +15,6 @@ const props = defineProps<{ ctx: QuestionContext }>()
 
 const cards = computed<OptionItem[]>(() => props.ctx.question.options ?? [])
 
-const order = ref<string[]>([])
-
 // 受控同步：ctx.answer 为空时按原始顺序初始化
 function currentOrder(): string[] {
   if (Array.isArray(props.ctx.answer) && (props.ctx.answer as unknown[]).length > 0) {
@@ -25,31 +23,25 @@ function currentOrder(): string[] {
   return cards.value.map((c) => c.label)
 }
 
+// H-144：删除 order 影子 ref——所有操作直接以 currentOrder()（ctx.answer）为唯一事实源，
+// 避免 draft 恢复/换题时影子状态与真实答案漂移错位
 function commit(next: string[]): void {
-  order.value = next
   props.ctx.onAnswerChange([...next])
-}
-
-function ensureInit(): void {
-  const cur = currentOrder()
-  if (order.value.length !== cur.length || order.value.some((v, i) => v !== cur[i])) {
-    order.value = cur
-  }
 }
 
 function move(index: number, delta: -1 | 1): void {
   if (props.ctx.readonly || props.ctx.disabled) return
-  ensureInit()
+  const cur = currentOrder()
   const target = index + delta
-  if (target < 0 || target >= order.value.length) return
-  const next = [...order.value]
+  if (target < 0 || target >= cur.length) return
+  const next = [...cur]
   const [item] = next.splice(index, 1)
   next.splice(target, 0, item as string)
   commit(next)
 }
 
 /* 原生拖拽 */
-const dragFrom = ref<number | null>(null)
+const dragFromLabel = ref<string | null>(null)
 const dragOver = ref<number | null>(null)
 
 function onDragStart(index: number, event: DragEvent): void {
@@ -57,7 +49,8 @@ function onDragStart(index: number, event: DragEvent): void {
     event.preventDefault()
     return
   }
-  dragFrom.value = index
+  // H-146：记录卡片 label 而非渲染索引——draft 恢复等场景下索引可能失效
+  dragFromLabel.value = currentOrder()[index] ?? null
   event.dataTransfer?.setData('text/plain', String(index))
 }
 
@@ -66,14 +59,19 @@ function onDragOver(index: number): void {
 }
 
 function onDrop(index: number): void {
-  if (dragFrom.value === null || props.ctx.readonly || props.ctx.disabled) return
-  ensureInit()
-  const from = dragFrom.value
-  const next = [...order.value]
+  if (dragFromLabel.value === null || props.ctx.readonly || props.ctx.disabled) return
+  const next = [...currentOrder()]
+  // H-145：以 label 定位起点，防拖拽期间答案被外部更新导致索引漂移
+  const from = next.indexOf(dragFromLabel.value)
+  if (from === -1) {
+    dragFromLabel.value = null
+    dragOver.value = null
+    return
+  }
   const [moved] = next.splice(from, 1)
   next.splice(index, 0, moved as string)
   commit(next)
-  dragFrom.value = null
+  dragFromLabel.value = null
   dragOver.value = null
 }
 
@@ -90,12 +88,12 @@ function labelOf(id: string): OptionItem | undefined {
         v-for="(id, index) in currentOrder()"
         :key="id"
         class="seq-card option-row tu-card"
-        :class="{ dragging: dragOver === index && dragFrom !== null && dragFrom !== index }"
+        :class="{ dragging: dragOver === index && dragFromLabel !== null && dragFromLabel !== id }"
         draggable="true"
         @dragstart="onDragStart(index, $event)"
         @dragover.prevent="onDragOver(index)"
         @drop.prevent="onDrop(index)"
-        @dragend="() => { dragFrom = null; dragOver = null }"
+        @dragend="() => { dragFromLabel = null; dragOver = null }"
       >
         <div class="seq-head">
           <span class="seq-badge">{{ index + 1 }}</span>

@@ -39,7 +39,9 @@ function valueOf(index: number): string {
 
 function update(index: number, value: string): void {
   if (props.ctx.readonly || props.ctx.disabled) return
-  const next = Array.from({ length: blankCount.value }, (_, i) => valueOf(i))
+  // H-139：历史答案可能比当前空数长（换题/重算空位），数组长度取两者较大值避免截断丢失
+  const base = answers.value
+  const next = Array.from({ length: Math.max(blankCount.value, base.length) }, (_, i) => base[i] ?? '')
   next[index] = value
   props.ctx.onAnswerChange(next)
 }
@@ -80,7 +82,7 @@ function selectState(index: number): 'error' | undefined {
             :options="perBlankOptions.map((o) => ({ label: o.label, value: o.label }))"
             :disabled="ctx.disabled || ctx.readonly"
             :status="selectState(i - 1)"
-            @update:value="(v: string) => update(i - 1, String(v))"
+            @update:value="(v: string | null) => update(i - 1, v ?? '')"
             @focus="focusBlank(i - 1)"
           />
           <n-input

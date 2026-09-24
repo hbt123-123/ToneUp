@@ -69,19 +69,22 @@ const dirty = computed(() => editText.value !== savedSnapshot.value)
 
 async function saveEdit(): Promise<void> {
   if (!editing.value || !dirty.value || editSaving.value) return
+  // H-163：await 前快照正在编辑的条目——用户可能中途关闭弹窗换了别的笔记，
+  // 恢复后必须写回快照对应的条目，且只有仍是该条目时才关闭编辑态
+  const entry = editing.value
   const content = editText.value
   editSaving.value = true
   try {
-    await apiPutNote(editing.value.questionId, editing.value.bankId, content)
+    await apiPutNote(entry.questionId, entry.bankId, content)
     savedSnapshot.value = content
     upsertNoteIndex(auth.userId, {
-      bankId: editing.value.bankId,
-      questionId: editing.value.questionId,
+      bankId: entry.bankId,
+      questionId: entry.questionId,
       noteText: content,
     })
     entries.value = listNoteIndex(auth.userId)
     appMessage.success('笔记已保存')
-    editing.value = null
+    if (editing.value === entry) editing.value = null
   } catch (err) {
     appMessage.error(humanizeError(err))
   } finally {
