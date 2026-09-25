@@ -40,6 +40,9 @@ async function reloadCatalog(): Promise<void> {
   reloading.value = true
   try {
     const summary = await apiAdminReloadCatalog()
+    // M-511：先拉取成功再失效旧索引——重拉失败时旧目录（内存+持久缓存）保持可用，仅提示错误
+    await catalog.fetchCatalog(true)
+    // 失效旧索引（清会话级题库详情缓存与持久键）后立即重拉，补齐内存目录与持久缓存
     catalog.invalidateAll()
     await catalog.fetchCatalog(true)
     appMessage.success(

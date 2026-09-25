@@ -71,6 +71,21 @@ function qKey(bankId: string, questionId: number): string {
   return `${bankId}:${questionId}`
 }
 
+/**
+ * M-484：统一解析复合键 `${bankId}:${questionId}`，替代散落各处的 `split(':')` + 非空断言。
+ * 从右侧定位分隔符（lastIndexOf）：题号是不含 ':' 的数字，即使 bankId 自身含 ':' 也能正确切分。
+ * 合法性校验：必须有分隔符、题号段非空且为正整数；非法键返回 null，由调用方决定降级行为。
+ */
+function parseKey(key: string): { bankId: string; questionId: number } | null {
+  const idx = key.lastIndexOf(':')
+  if (idx === -1) return null
+  const rawId = key.slice(idx + 1)
+  if (rawId === '') return null
+  const questionId = Number(rawId)
+  if (!Number.isSafeInteger(questionId) || questionId <= 0) return null
+  return { bankId: key.slice(0, idx), questionId }
+}
+
 export interface StartBankOptions {
   bankId: string
   year?: number | null
@@ -212,12 +227,17 @@ export const usePracticeStore = defineStore('practice', () => {
   /* ---------- 详情加载 ---------- */
 
   async function loadDetailInto(key: string, force = false): Promise<void> {
-    const [bId, qIdStr] = key.split(':')
-    const qId = Number(qIdStr)
     const rt = runtimeFor(key)
     if (!force && rt.detail) return
+    // M-484：parseKey 统一解析复合键；非法键进入错误态，不再依赖非空断言
+    const parsed = parseKey(key)
+    if (!parsed) {
+      rt.errorMessage = `非法题目键：${key}`
+      rt.phase = 'error'
+      return
+    }
     try {
-      const detail = detailCache.get(key) ?? (await apiQuestionDetail(bId!, qId))
+      const detail = detailCache.get(key) ?? (await apiQuestionDetail(parsed.bankId, parsed.questionId))
       detailCache.set(key, detail)
       rt.detail = detail
       if (rt.listMeta === null) rt.listMeta = detail
@@ -275,7 +295,10 @@ export const usePracticeStore = defineStore('practice', () => {
     })
   }
 
-  async function gotoIndex(index: number, opts: { skipEnsure?: boolean } = {}): Promise<void> {
+  async function gotoIndex(
+    index: number,
+    opts: { skipEnsure?: boolean; expectFrom?: number } = {},
+  ): Promise<void> {
     accumulateCurrentTime()
     flushDraftFor(currentKey.value)
     if (!opts.skipEnsure) {
@@ -287,6 +310,9 @@ export const usePracticeStore = defineStore('practice', () => {
         return
       }
     }
+    // M-485：await 期间用户可能已切到其他题；若调用方声明的起始题已失效，放弃本次过期导航，
+    // 防止旧的 next()/prev() 目标在 ensureWindow 完成后覆盖新导航
+    if (opts.expectFrom !== undefined && currentIndex.value !== opts.expectFrom) return
     if (index < 0 || index >= orderedIds.value.length) return
     currentIndex.value = index
     const id = orderedIds.value[index]!
@@ -328,13 +354,18 @@ export const usePracticeStore = defineStore('practice', () => {
   }
 
   async function next(): Promise<boolean> {
-    if (currentIndex.value + 1 >= orderedIds.value.length && !hasMore.value) return false
-    await gotoIndex(currentIndex.value + 1)
-    return true
+    // M-485：先固化起始 index 再 await；gotoIndex 内部校验起始未变才提交跳转，
+    // 返回值反映是否真正落位（过期导航不再误报成功）
+    const start = currentIndex.value
+    if (start + 1 >= orderedIds.value.length && !hasMore.value) return false
+    await gotoIndex(start + 1, { expectFrom: start })
+    return currentIndex.value === start + 1
   }
 
   async function prev(): Promise<void> {
-    if (currentIndex.value > 0) await gotoIndex(currentIndex.value - 1)
+    // M-485：同 next()，await 期间起始题被切换则放弃本次导航
+    const start = currentIndex.value
+    if (start > 0) await gotoIndex(start - 1, { expectFrom: start })
   }
 
   /* ---------- 作答与草稿 ---------- */
@@ -362,10 +393,12 @@ export const usePracticeStore = defineStore('practice', () => {
     }
     const rt = runtimes.get(key)
     if (!rt || rt.phase === 'submitted') return
-    const [bId, qIdStr] = key.split(':')
+    // M-484：parseKey 解析失败则放弃落盘，避免以非法参数写草稿
+    const parsed = parseKey(key)
+    if (!parsed) return
     const uid = userIdProvider()
     if (uid === -1 || rt.answer === null || rt.answer === undefined) return
-    writeDraft(uid, bId!, Number(qIdStr), rt.answer)
+    writeDraft(uid, parsed.bankId, parsed.questionId, rt.answer)
   }
 
   function setAnswer(answer: unknown): void {
@@ -392,17 +425,19 @@ export const usePracticeStore = defineStore('practice', () => {
       rt.answer = rt.pendingDraft
       if (rt.phase === 'idle') rt.phase = 'editing'
     } else if (!restore) {
-      const [bId, qIdStr] = key.split(':')
+      // M-484：parseKey 解析失败则跳过草稿清理
+      const parsed = parseKey(key)
       const uid = userIdProvider()
-      if (uid !== -1) clearDraft(uid, bId!, Number(qIdStr))
+      if (parsed && uid !== -1) clearDraft(uid, parsed.bankId, parsed.questionId)
     }
     rt.pendingDraft = null
   }
 
   function discardDraftOf(key: string): void {
-    const [bId, qIdStr] = key.split(':')
+    // M-484：parseKey 解析失败则跳过草稿清理
+    const parsed = parseKey(key)
     const uid = userIdProvider()
-    if (uid !== -1) clearDraft(uid, bId!, Number(qIdStr))
+    if (parsed && uid !== -1) clearDraft(uid, parsed.bankId, parsed.questionId)
   }
 
   /* ---------- 疑问标记（FR-PRAC-08） ---------- */
@@ -439,16 +474,21 @@ export const usePracticeStore = defineStore('practice', () => {
     }
     accumulateCurrentTime()
     rt.errorMessage = null
+    // M-484：先解析复合键（含合法性校验），非法键不进入 submitting 态
+    const parsed = parseKey(key)
+    if (!parsed) {
+      rt.errorMessage = '题目标识异常，无法提交'
+      return
+    }
     rt.phase = 'submitting'
     // 幂等键固化：错误重试沿用同一 id（§8.3）
     const requestId = rt.pendingRequestId ?? uuidV4()
     rt.pendingRequestId = requestId
     flushDraftFor(key)
 
-    const [bId, qIdStr] = key.split(':')
     const body = {
-      bank_id: bId!,
-      question_id: Number(qIdStr),
+      bank_id: parsed.bankId,
+      question_id: parsed.questionId,
       answer: rt.answer,
       time_spent: Math.max(1, rt.timeSpent || 1),
       mode: (sessionKind.value === 'review' ? 'review' : 'practice') as 'review' | 'practice',
@@ -471,8 +511,8 @@ export const usePracticeStore = defineStore('practice', () => {
         const uid = userIdProvider()
         if (uid !== -1) {
           enqueueUnsubmitted(uid, {
-            bankId: bId!,
-            questionId: Number(qIdStr),
+            bankId: parsed.bankId,
+            questionId: parsed.questionId,
             mode: body.mode,
             answer: rt.answer,
             timeSpent: body.time_spent,
@@ -500,7 +540,9 @@ export const usePracticeStore = defineStore('practice', () => {
     } else if (status === 'failed') {
       rt.selfJudgeReady = true
     }
-    // 服务端判定为错 → 写入本地错题本缓存；答对 → 移出（FR-WRONG-01 数据源）
+    // M-486：仅服务端判定为错时写入本地错题本缓存（FR-WRONG-01 数据源）。
+    // 答对不在此处"移出错题本"：错题移除接口按错题记录 id 管理（DELETE /wrong-questions/{id}），
+    // practice 侧仅持有 (bankId, questionId) 无法安全定位记录，掌握移除由错题本页面/复习流程负责
     if (result.is_correct === false) {
       recordWrongAnswer(key)
     }
@@ -509,8 +551,11 @@ export const usePracticeStore = defineStore('practice', () => {
   const activeGradingPolls = new Set<string>()
 
   async function startGradingPoll(key: string, attemptId: number): Promise<void> {
-    if (activeGradingPolls.has(key)) return // 同题已有活动轮询（手动重试/队列重放重复触发），跳过
-    activeGradingPolls.add(key)
+    // M-487：防重入键加入 attempt_id——同题产生新 attempt（队列重放/手动重试）时，
+    // 旧轮询不再阻塞新 attempt 的轮询；同一 attempt 仍只允许一个活动轮询
+    const guardKey = `${key}:${attemptId}`
+    if (activeGradingPolls.has(guardKey)) return
+    activeGradingPolls.add(guardKey)
     try {
       const startedAt = Date.now()
       let delay = POLL_START_MS
@@ -534,6 +579,9 @@ export const usePracticeStore = defineStore('practice', () => {
           const latest = await apiAttemptResult(attemptId)
           const cur = runtimes.get(key)
           if (!cur) return
+          // M-487：并发轮询下仅当该题仍停留在本次轮询的 attempt 上才写回，
+          // 防止旧轮询结果覆盖新 attempt 的状态（也使自评后的 rt.attempt 替换能终止旧轮询）
+          if (cur.attempt?.attempt_id !== attemptId) return
           cur.attempt = { ...cur.attempt, ...latest, attempt_id: attemptId }
           const s = normalizeGrading(latest)
           cur.grading = s
@@ -547,7 +595,7 @@ export const usePracticeStore = defineStore('practice', () => {
         }
       }
     } finally {
-      activeGradingPolls.delete(key)
+      activeGradingPolls.delete(guardKey)
     }
   }
 
@@ -556,14 +604,21 @@ export const usePracticeStore = defineStore('practice', () => {
     const key = currentKey.value
     const rt = currentRuntime.value
     if (!key || !rt) return
-    const [bId, qIdStr] = key.split(':')
+    // M-488：幂等守卫（与 submit() 对齐）：提交中忽略重复触发，防止双击/连点重复发送自评
+    if (rt.phase === 'submitting') return
+    // M-484：parseKey 统一解析复合键；非法键不进入 submitting 态
+    const parsed = parseKey(key)
+    if (!parsed) {
+      rt.errorMessage = '题目标识异常，无法提交自评'
+      return
+    }
     // 原始作答已 submitted；自评请求失败不能回到 error 态，
     // 否则确认按钮会以新幂等键重放原答案，产生重复流水
     rt.phase = 'submitting'
     try {
       const result = await apiSubmitAttempt({
-        bank_id: bId!,
-        question_id: Number(qIdStr),
+        bank_id: parsed.bankId,
+        question_id: parsed.questionId,
         answer: { self_rating: rating },
         time_spent: 0,
         mode: 'self_judge',
@@ -632,12 +687,14 @@ export const usePracticeStore = defineStore('practice', () => {
 
   /** 服务端判错 → 记入本地错题本缓存（FR-WRONG-01 数据源） */
   function recordWrongAnswer(key: string): void {
-    const [bId, qIdStr] = key.split(':')
+    // M-484：parseKey 解析失败则跳过错题记录
+    const parsed = parseKey(key)
+    if (!parsed) return
     const rt = runtimes.get(key)
     const meta = rt?.listMeta ?? rt?.detail
     wrongRecorder?.({
-      bankId: bId!,
-      questionId: Number(qIdStr),
+      bankId: parsed.bankId,
+      questionId: parsed.questionId,
       preview: meta?.content?.slice(0, 100),
       year: meta?.year,
       typeCode: meta?.type_code,
@@ -687,6 +744,9 @@ export const usePracticeStore = defineStore('practice', () => {
     if (uid === -1 || !bankId.value) return false
     const saved = readProgress(uid, bankId.value)
     if (!saved || saved.lastIndex <= 0) return false
+    // M-489：校验进度所属过滤器与当前过滤器（年份/题型组合）一致才恢复；
+    // 旧版本进度无 filterHash 时 readProgress 返回 ''，与当前哈希必然不等，同样忽略
+    if (saved.filterHash !== filterHash()) return false
     void gotoIndex(Math.min(saved.lastIndex, Math.max(0, orderedIds.value.length - 1)))
     return true
   }

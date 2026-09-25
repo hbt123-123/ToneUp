@@ -67,8 +67,22 @@ async function openEditor(entry: NoteIndexEntry): Promise<void> {
 
 const dirty = computed(() => editText.value !== savedSnapshot.value)
 
+// M-526：关闭弹窗时推进代际计数，使在途的 openEditor GET 响应落地时因 mySeq !== editSeq
+// 被丢弃，不会复活编辑态或覆盖其他笔记的数据；同步收掉 loading 避免悬挂态
+function closeEditor(): void {
+  editSeq++
+  editing.value = null
+  editLoading.value = false
+}
+
 async function saveEdit(): Promise<void> {
   if (!editing.value || !dirty.value || editSaving.value) return
+  // M-527：空内容覆盖保存会把服务端笔记清空，且 upsertNoteIndex 会丢弃 trim 后为空的条目，
+  // 造成本地索引与服务端不一致——阻止保存并提示，而非静默覆盖
+  if (editText.value.trim() === '') {
+    appMessage.warning('笔记内容为空，已阻止保存；请输入正文后再保存')
+    return
+  }
   // H-163：await 前快照正在编辑的条目——用户可能中途关闭弹窗换了别的笔记，
   // 恢复后必须写回快照对应的条目，且只有仍是该条目时才关闭编辑态
   const entry = editing.value
@@ -136,12 +150,13 @@ function gotoQuestion(entry: NoteIndexEntry): void {
     </n-empty>
 
     <!-- 编辑与保存（FR-NOTE-02） -->
+    <!-- M-526：关闭弹窗走 closeEditor（bump editSeq），使在途详情 GET 失效 -->
     <n-modal
       :show="editing !== null"
       preset="card"
       title="编辑笔记"
       style="max-width: 640px"
-      @update:show="(v: boolean) => { if (!v) editing = null }"
+      @update:show="(v: boolean) => { if (!v) closeEditor() }"
     >
       <n-input
         v-model:value="editText"

@@ -35,7 +35,16 @@ const registerModel = reactive<FormModel>({ username: '', password: '', password
 const rules: FormRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
-    { min: 3, max: 32, message: '用户名长度为 3~32 个字符', trigger: 'blur' },
+    {
+      // M-524：长度校验基于 trim 后的值，与请求负载 username.trim() 对齐，
+      // 避免 "  ab  " 这类首尾带空格的输入通过客户端校验却被服务端拒绝
+      validator: (_rule, value: string) => {
+        const len = (value ?? '').trim().length
+        return len >= 3 && len <= 32
+      },
+      message: '用户名长度为 3~32 个字符',
+      trigger: 'blur',
+    },
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
@@ -118,28 +127,34 @@ function goAfterAuth(): void {
       </div>
 
       <n-tabs v-model:value="activeTab" type="segment" animated>
-        <n-tab-pane name="login" tab="登录">
-          <n-form ref="loginFormRef" :model="loginModel" :rules="rules" label-placement="top" @keyup.enter="doLogin">
+        <!-- M-523：submitting 期间禁用两个 tab，防止请求在途时切到另一张表单造成状态混乱 -->
+        <n-tab-pane name="login" tab="登录" :disabled="submitting">
+          <!-- M-525：Enter 统一走表单原生提交路径（表单内有 attr-type="submit" 按钮），
+               @submit.prevent 阻止页面刷新；移除 form 上重复的 @keyup.enter，单次 Enter 只提交一次 -->
+          <n-form ref="loginFormRef" :model="loginModel" :rules="rules" label-placement="top" @submit.prevent="doLogin">
             <n-form-item label="用户名" path="username">
               <n-input v-model:value="loginModel.username" placeholder="用户名" autofocus />
             </n-form-item>
             <n-form-item label="密码" path="password">
+              <!-- M-525：去掉密码框重复的 @keyup.enter，Enter 由表单原生隐式提交统一处理 -->
               <n-input
                 v-model:value="loginModel.password"
                 type="password"
                 show-password-on="click"
                 placeholder="密码"
-                @keyup.enter="doLogin"
               />
             </n-form-item>
-            <n-button type="primary" block :loading="submitting" :disabled="submitting" attr-type="submit" @click="doLogin">
+            <!-- M-525：保留 attr-type="submit" 走原生表单提交，移除重复的 @click -->
+            <n-button type="primary" block :loading="submitting" :disabled="submitting" attr-type="submit">
               登录
             </n-button>
           </n-form>
         </n-tab-pane>
 
-        <n-tab-pane name="register" tab="注册">
-          <n-form ref="registerFormRef" :model="registerModel" :rules="registerRules" label-placement="top" @keyup.enter="doRegister">
+        <!-- M-523：同上，请求在途时禁用注册 tab -->
+        <n-tab-pane name="register" tab="注册" :disabled="submitting">
+          <!-- M-525：同登录表单，Enter 统一走 @submit.prevent 的原生提交路径 -->
+          <n-form ref="registerFormRef" :model="registerModel" :rules="registerRules" label-placement="top" @submit.prevent="doRegister">
             <n-form-item label="用户名" path="username">
               <n-input v-model:value="registerModel.username" placeholder="3~32 个字符" autofocus />
             </n-form-item>
@@ -147,15 +162,16 @@ function goAfterAuth(): void {
               <n-input v-model:value="registerModel.password" type="password" show-password-on="click" placeholder="至少 8 位" />
             </n-form-item>
             <n-form-item label="确认密码" path="password2">
+              <!-- M-525：去掉确认密码框重复的 @keyup.enter -->
               <n-input
                 v-model:value="registerModel.password2"
                 type="password"
                 show-password-on="click"
                 placeholder="再次输入密码"
-                @keyup.enter="doRegister"
               />
             </n-form-item>
-            <n-button type="primary" block :loading="submitting" :disabled="submitting" @click="doRegister">
+            <!-- M-525：补 attr-type="submit" 使注册表单同样走原生隐式提交，移除重复的 @click -->
+            <n-button type="primary" block :loading="submitting" :disabled="submitting" attr-type="submit">
               注册并登录
             </n-button>
           </n-form>

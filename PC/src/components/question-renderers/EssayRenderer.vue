@@ -25,14 +25,26 @@ function onInput(value: string): void {
   props.ctx.onAnswerChange(value)
 }
 
-const wordCount = computed(() => text.value.split(/\s+/).filter(Boolean).length)
+// M-463：字数统计支持 CJK——拉丁词按空白/全角标点分词，CJK 字符逐字计数，二者相加；
+// "hello，world" 不再被全角标点连成 1 词，中文段落不再整体计 1 词
+const CJK_CHAR_RE = /[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]/g
+
+function countWords(value: string): number {
+  const cjkCount = value.match(CJK_CHAR_RE)?.length ?? 0
+  const latinPart = value.replace(CJK_CHAR_RE, ' ')
+  const latinWords = latinPart.split(/[\s，、。！？；：,.!?;:]+/).filter(Boolean).length
+  return cjkCount + latinWords
+}
+
+const wordCount = computed(() => countWords(text.value))
 
 /** 从题干提取建议词数（如 "about 200 words" / "词数不少于100"） */
 const suggestedWords = computed<number | null>(() => {
   const content = props.ctx.question.content ?? ''
-  const en = content.match(/(\d{2,4})\s*(?:words|word)/i)
+  // M-464：数字组加前后非数字边界，"12000 words" 不再误截为 "2000"
+  const en = content.match(/(?<!\d)(\d{2,4})\s*(?:words|word)\b/i)
   if (en?.[1]) return Number(en[1])
-  const zh = content.match(/(\d{2,4})\s*词/)
+  const zh = content.match(/(?<!\d)(\d{2,4})\s*词/)
   if (zh?.[1]) return Number(zh[1])
   return null
 })

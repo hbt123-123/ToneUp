@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, watch } from 'vue'
-import { NConfigProvider, NDialogProvider, NMessageProvider, NGlobalStyle, darkTheme, zhCN, dateZhCN } from 'naive-ui'
-import type { GlobalTheme } from 'naive-ui'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import SideNav from './SideNav.vue'
 import TopBar from './TopBar.vue'
 import BreadcrumbNav from './BreadcrumbNav.vue'
@@ -14,7 +12,7 @@ import { useUiStore } from '@/stores/ui'
  */
 const ui = useUiStore()
 
-const theme = computed<GlobalTheme | null>(() => (ui.isDark ? darkTheme : null))
+// M-429：theme / themeOverrides 已随 provider 栈上移至 App.vue
 
 /** 昔涟（sakura-pink）主题开启视频背景；天空蓝（sky-blue）主题开启 webp 图片背景；流萤（firefly）主题开启 hh.svg 图片背景 */
 const isXilianTheme = computed(() => ui.colorTheme === 'sakura-pink')
@@ -51,8 +49,10 @@ watch(
 // 防御：浏览器插件/外部脚本可能篡改 data-theme（如被改成 'light' 导致主题 CSS 全部失配），
 // 监听到外部改动时立即纠正回 store 中的值
 const themeGuard = new MutationObserver(() => {
-  const expected = ui.colorTheme || ''
-  if (document.documentElement.dataset.theme !== expected) {
+  // M-442：dataset.theme 缺失时读取为 undefined，与 '' 比较恒不等会误判；
+  // 统一归一为 null 口径再比较
+  const expected = ui.colorTheme || null
+  if ((document.documentElement.dataset.theme ?? null) !== expected) {
     if (expected) document.documentElement.dataset.theme = expected
     else delete document.documentElement.dataset.theme
   }
@@ -60,85 +60,76 @@ const themeGuard = new MutationObserver(() => {
 themeGuard.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 onUnmounted(() => themeGuard.disconnect())
 
-const themeOverrides = computed(() => {
-  // 带彩色底的主题：body 底色按主题+明暗覆盖 Naive UI 默认注入的白色 [浅色, 深色]
-  const THEME_BODY_COLORS: Record<string, [string, string]> = {
-    'sakura-pink': ['#ffe4ec', '#1c1216'],
-    'sky-blue': ['#dbeefc', '#0d1b26'],
-    'firefly': ['#eef4e6', '#10140c'],
+// M-444：背景视频在标签页隐藏、系统要求减少动效或应用关闭动效时暂停，回前台恢复，节省 CPU/电量
+const bgVideo = ref<HTMLVideoElement | null>(null)
+const prefersReducedMotion =
+  typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null
+
+function syncBgVideo(): void {
+  const video = bgVideo.value
+  if (!video) return
+  if (document.hidden || (prefersReducedMotion?.matches ?? false) || !ui.motionEnabled) {
+    video.pause()
+  } else {
+    // 静音视频的编程播放不受自动播放策略限制；被拒绝时静默忽略
+    void video.play().catch(() => undefined)
   }
-  const bodyColors = THEME_BODY_COLORS[ui.colorTheme]
-  return {
-    common: {
-      primaryColor: '#2B3A67',
-      primaryColorHover: '#3A4D85',
-      primaryColorPressed: '#22305A',
-      primaryColorSuppl: '#7C3AED',
-      infoColor: '#2080F0',
-      successColor: '#18A058',
-      warningColor: '#F0A020',
-      errorColor: '#D03050',
-      borderRadius: '4px',
-      borderRadiusSmall: '3px',
-      fontSize: '14px',
-      lineHeight: '1.75',
-      ...(bodyColors ? { bodyColor: ui.isDark ? bodyColors[1] : bodyColors[0] } : {}),
-    },
-  }
+}
+
+watch(isXilianTheme, () => void nextTick(syncBgVideo))
+watch(
+  () => ui.motionEnabled,
+  syncBgVideo,
+)
+
+onMounted(() => {
+  syncBgVideo()
+  document.addEventListener('visibilitychange', syncBgVideo)
+  prefersReducedMotion?.addEventListener('change', syncBgVideo)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', syncBgVideo)
+  prefersReducedMotion?.removeEventListener('change', syncBgVideo)
 })
 </script>
 
 <template>
-  <n-config-provider :theme="theme" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
-    <n-message-provider placement="top-right">
-      <n-dialog-provider>
-        <n-global-style />
+  <!-- M-429：provider 栈已上移至 App.vue，本组件只保留布局骨架与背景层 -->
+  <!-- 主题专属全屏背景：昔涟为循环视频，天空蓝为 webp 图片，透明度均 0.3 -->
+  <transition name="bg-fade">
+    <video
+      v-if="isXilianTheme"
+      ref="bgVideo"
+      class="bg-media"
+      src="/background/xilian/cyrene.webm"
+      autoplay
+      muted
+      loop
+      playsinline
+    />
+    <img v-else-if="isSkyTheme" class="bg-media bg-image" src="/background/sky/∞.webp" alt="" />
+    <img v-else-if="isFireflyTheme" class="bg-media bg-image" src="/background/Firefly/hh.svg" alt="" />
+  </transition>
 
-        <!-- 主题专属全屏背景：昔涟为循环视频，天空蓝为 webp 图片，透明度均 0.3 -->
-        <transition name="bg-fade">
-          <video
-            v-if="isXilianTheme"
-            class="bg-media"
-            src="/background/xilian/cyrene.webm"
-            autoplay
-            muted
-            loop
-            playsinline
-          />
-          <img
-            v-else-if="isSkyTheme"
-            class="bg-media bg-image"
-            src="/background/sky/∞.webp"
-            alt=""
-          />
-          <img
-            v-else-if="isFireflyTheme"
-            class="bg-media bg-image"
-            src="/background/Firefly/hh.svg"
-            alt=""
-          />
-        </transition>
-
-        <div class="app-shell">
-          <SideNav />
-          <div class="main-column">
-            <top-bar>
-              <template #breadcrumb>
-                <breadcrumb-nav />
-              </template>
-            </top-bar>
-            <main class="content-area">
-              <router-view v-slot="{ Component: PageComponent }">
-                <transition name="page" mode="out-in">
-                  <component :is="PageComponent" />
-                </transition>
-              </router-view>
-            </main>
-          </div>
-        </div>
-      </n-dialog-provider>
-    </n-message-provider>
-  </n-config-provider>
+  <div class="app-shell">
+    <SideNav />
+    <div class="main-column">
+      <top-bar>
+        <template #breadcrumb>
+          <breadcrumb-nav />
+        </template>
+      </top-bar>
+      <main class="content-area">
+        <router-view v-slot="{ Component: PageComponent, route: viewRoute }">
+          <transition name="page" mode="out-in">
+            <!-- M-445：按路径键控，同组件不同参数（如切换 bankId）时强制重建，避免复用旧实例 -->
+            <component :is="PageComponent" :key="viewRoute.path" />
+          </transition>
+        </router-view>
+      </main>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -171,8 +162,10 @@ const themeOverrides = computed(() => {
   transition: opacity 0.6s var(--tu-ease);
 }
 
-.bg-fade-enter-from,
-.bg-fade-leave-to {
+/* M-446：提高转场起止规则特异性（0,2,0）且置于 .bg-media.bg-image 之后，
+   否则后者的 opacity:0.45 会覆盖起止态，导致背景图切换时不淡入淡出 */
+.bg-media.bg-fade-enter-from,
+.bg-media.bg-fade-leave-to {
   opacity: 0;
 }
 
@@ -216,7 +209,8 @@ const themeOverrides = computed(() => {
   width: 100%;
 }
 
-/* 带彩色底的主题：让 html 与 body 锁定对应底色，覆盖 Naive UI 注入的 body 背景 */
+/* 带彩色底的主题：让 html 与 body 锁定对应底色，覆盖 Naive UI 注入的 body 背景。
+   M-443：以下色值需与 App.vue 的 THEME_BODY_COLORS 及 styles/tokens.css 的 --tu-bg 保持同步 */
 html[data-theme="sakura-pink"],
 html[data-theme="sakura-pink"] body {
   background: #ffe4ec;

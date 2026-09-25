@@ -105,7 +105,8 @@ html[data-theme="sakura-pink"] .home-view .feature-icon {
   display: block;
   width: 100%;
   height: 100%;
-  font-size: 0; /* 隐藏 emoji 文本 */
+  /* M-416：feature-icon 现为 <img alt="">（见 HomeView.vue），已无 emoji 文本可隐藏；
+     移除 font-size: 0 旧 hack，避免影响继承字号与读屏播报行为 */
   background: center / contain no-repeat;
   transition: transform 0.4s var(--tu-ease);
 }
@@ -138,6 +139,13 @@ html[data-theme="sakura-pink"] .home-view .hero-section::after {
 @keyframes xilian-float {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-12px); }
+}
+
+/* M-417：偏好减弱动效时停用无限装饰动画（tokens.css 的全局 reduce 仅缩短时长，此处显式关闭） */
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="sakura-pink"] .home-view .hero-section::after {
+    animation: none;
+  }
 }
 
 /* 功能区块装饰：移到角落（避免与中央 SVG 图标竞争视觉），每个 section 不同插画 */
@@ -231,6 +239,7 @@ html[data-theme="sakura-pink"] .home-view .more-card::after {
   height: 80px;
   background: var(--tu-deco-1) center / contain no-repeat;
   opacity: 0.06;
+  pointer-events: none; /* M-413：纯装饰统一不拦截指针交互 */
   transition: opacity 0.4s var(--tu-ease), transform 0.4s var(--tu-ease);
 }
 

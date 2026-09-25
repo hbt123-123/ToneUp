@@ -1,3 +1,6 @@
+/* M-411（部分）：@import 串行加载在 Vite 构建期会被内联打包（生产无额外往返），开发模式下仍是逐个请求。
+   四个主题/基础样式文件目前仅经此处引入（main.ts 只引 base.css），直接移除会丢样式；
+   如需彻底消除阻塞，可改为在 main.ts 中逐个 import，由 Vite 并行打包。 */
 @import './tokens.css';
 @import './xilian.css';
 @import './sky.css';
@@ -39,11 +42,12 @@ a {
   text-decoration: none;
 }
 
-/* 焦点可见性：强调色焦点环（§12.2） */
+/* 焦点可见性：强调色焦点环（§12.2）
+   M-412：outline 会自动跟随元素自身 border-radius（Chrome 94+/Firefox 88+/Safari 16.4+）；
+   原先在此声明 border-radius 会给无圆角元素强加圆角，且对不支持的浏览器 outline 无效，故移除 */
 :focus-visible {
   outline: 2px solid var(--tu-accent);
   outline-offset: 2px;
-  border-radius: var(--tu-radius-control);
 }
 
 /* ---------- 富文本渲染区（第 7 章） ---------- */

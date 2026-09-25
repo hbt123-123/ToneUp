@@ -22,8 +22,9 @@ import { ApiError } from '@/api/http'
 
 const OFFLINE_QUEUE_KEY = (userId: number | string): string => `toneup:wrongbook:offline:${userId}`
 
-/** H-153：online 监听器只注册一次的模块级标志 */
+/** H-153/M-410：online 监听器只注册一次的模块级标志；回调经委托转发到最新 store 实例，避免过期闭包 */
 let onlineSyncBound = false
+let onlineSyncDelegate: (() => void) | null = null
 
 interface WrongRecord extends WrongBookItem {
   /** 服务端错题记录 id（DELETE /wrong-questions/{id} 的路径参数），离线未同步时缺省 */
@@ -188,18 +189,24 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
                   (it): it is WrongRecord =>
                     !!it &&
                     typeof it === 'object' &&
-                    typeof (it as WrongRecord).question_id === 'number',
+                    // M-408/496：仅校验 question_id 过松——缺/坏 bank_id 的旧条目会让
+                    // markedProvider(r.bank_id) 拿到非字符串强转出错，须一并校验
+                    typeof (it as WrongRecord).question_id === 'number' &&
+                    typeof (it as WrongRecord).bank_id === 'string' &&
+                    (it as WrongRecord).bank_id !== '',
                 )
                 .map((r) => ({ ...r, marked: markedProvider(r.bank_id).includes(r.question_id) }))
               return
             }
           }
-        } catch {
-          /* ignore */
+        } catch (parseErr) {
+          // M-409：回退缓存损坏解析失败同样不能无声
+          console.warn('[wrongbook] 断网回退缓存解析失败', parseErr)
         }
         records.value = []
       } else {
-        // 服务端业务错误：回退为空列表，避免阻塞视图
+        // 服务端业务错误：回退为空列表，避免阻塞视图；M-409：但须控制台留痕供排查
+        console.warn('[wrongbook] 错题列表拉取失败（服务端错误）', err)
         records.value = []
       }
     }
@@ -220,8 +227,11 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
           question_id: entry.questionId,
           preview: entry.preview,
         })
+      } else {
+        // M-497：非网络错误（或无法确定用户）意味着服务端未落库且无离线兜底，
+        // 静默吞掉会让错题凭空消失；至少控制台留痕
+        console.warn('[wrongbook] 错题上报失败（非网络错误），仅保留本地视图', err)
       }
-      // 非网络错误或无法确定用户：仅维护本地视图
     }
     // 本地视图缓存始终更新
     const existing = records.value.find((r) => r.bank_id === entry.bankId && r.question_id === entry.questionId)
@@ -251,13 +261,14 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
   async function recordCorrect(bankId: string, questionId: number): Promise<void> {
     const rec = records.value.find((r) => r.bank_id === bankId && r.question_id === questionId)
     if (rec) {
-      rec.total_attempts = (rec.total_attempts ?? 0) + 1
-      rec.last_practice_at = new Date().toISOString()
       // DELETE /wrong-questions/{id} 需要"错题记录 id"而非题目 id；离线未同步的记录无服务端 id，无记录可删
       if (rec.id !== undefined) {
         try {
           await removeWrongQuestion(rec.id)
         } catch {
+          // M-498：统计字段只在"保留条目"的失败路径更新——原先无条件更新随后条目即被移除，属于死代码
+          rec.total_attempts = (rec.total_attempts ?? 0) + 1
+          rec.last_practice_at = new Date().toISOString()
           return // 删除失败：保留本地条目，待下次答对重试
         }
       }
@@ -289,11 +300,14 @@ export const useWrongBookStore = defineStore('wrongbook', () => {
     keyword.value = ''
   }
 
-  // 网络恢复时自动同步离线队列（H-153：模块级防重，store 重复实例化不再叠加监听器）
+  // 网络恢复时自动同步离线队列
+  // H-153/M-410：监听器模块级只注册一次（防重复注册/泄漏）；实例重建时仅替换委托目标，
+  // 回调始终调用最新 store 实例的 syncOfflineQueue，避免命中过期闭包
+  onlineSyncDelegate = syncOfflineQueue
   if (!onlineSyncBound && typeof window !== 'undefined') {
     onlineSyncBound = true
     window.addEventListener('online', () => {
-      void syncOfflineQueue()
+      void onlineSyncDelegate?.()
     })
   }
 

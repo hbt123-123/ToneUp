@@ -12,6 +12,8 @@ const props = defineProps<{ ctx: QuestionContext }>()
 
 const MIN_ROWS = 8
 const MAX_ROWS = 20
+// M-480：输入长度上限——超大粘贴内容不再无限膨胀 ref/DOM 与后续 AI 判分载荷
+const MAX_CHARS = 5000
 const text = ref(typeof props.ctx.answer === 'string' ? props.ctx.answer : '')
 
 watch(
@@ -26,7 +28,9 @@ watch(
 function onInput(value: string): void {
   if (props.ctx.readonly || props.ctx.disabled) return
   text.value = value
-  props.ctx.onAnswerChange(value)
+  // M-479：空白输入不外发——trim 后为空上报 null（未作答语义；QuestionContext：输入校验在组件内），
+  // 草稿与提交载荷不再残留纯空白
+  props.ctx.onAnswerChange(value.trim() ? value : null)
 }
 
 const charCount = computed(() => text.value.length)
@@ -40,6 +44,7 @@ const charCount = computed(() => text.value.length)
       :disabled="ctx.disabled || ctx.readonly"
       :min-rows="MIN_ROWS"
       :max-rows="MAX_ROWS"
+      :maxlength="MAX_CHARS"
       placeholder="写下完整解答过程：关键步骤、推导与结论"
       @update:value="onInput"
     />

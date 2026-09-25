@@ -56,21 +56,32 @@ const emit = defineEmits<{ select: [] }>()
 
 .opt.selected:not(.correct):not(.wrong) {
   border-color: var(--tu-accent);
-  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.25);
+  /* M-472：硬编码色改用设计令牌，跟随主题/accent 变体（tokens.css 按主题重定义） */
+  box-shadow: 0 0 0 2px var(--tu-accent-hover-surface);
 }
 
 .opt.correct {
   border-color: var(--tu-success);
-  background: rgba(24, 160, 88, 0.07);
+  /* M-472：背景色改用 success 令牌（亮/暗模式各自定义） */
+  background: var(--tu-success-surface);
 }
 
 .opt.wrong {
   border-color: var(--tu-error);
-  background: rgba(208, 48, 80, 0.06);
+  /* M-472：背景色改用 error 令牌（亮/暗模式各自定义） */
+  background: var(--tu-error-surface);
 }
 
+/* M-473：抵消 base.css 全局 .option-row:hover/:active（上浮 + 光晕阴影），
+   禁用行不再跟随悬停动效；scoped 属性选择器保证特异性高于全局规则 */
 .opt.disabled {
   cursor: default;
+}
+
+.opt.disabled:hover,
+.opt.disabled:active {
+  transform: none;
+  box-shadow: none;
 }
 
 .badge {

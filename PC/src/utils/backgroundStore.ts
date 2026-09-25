@@ -17,7 +17,12 @@ let dbPromise: Promise<IDBDatabase> | null = null
 
 function openDb(): Promise<IDBDatabase> {
   if (!dbPromise) {
-    dbPromise = new Promise((resolve, reject) => {
+    // M-419：indexedDB 在非安全上下文/旧内核可能缺失，直接 open 会同步抛出 TypeError；
+    // 显式检查并转为可读错误，且不缓存（保持可重试语义）
+    if (typeof indexedDB === 'undefined' || indexedDB === null) {
+      return Promise.reject(new Error('当前环境不支持 IndexedDB'))
+    }
+    const opened = new Promise<IDBDatabase>((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
       // H-154：其他标签页持有旧版本连接时升级请求会卡在 blocked，
       // 必须显式失败让 dbPromise 复位，否则缓存 promise 永不 settle
@@ -48,6 +53,16 @@ function openDb(): Promise<IDBDatabase> {
         reject(req.error ?? new Error('IndexedDB 打开失败'))
       }
     })
+    // M-418/M-499：任何失败路径（含 executor 同步抛错）reject 时统一复位缓存，
+    // 避免永久缓存 rejected promise 导致后续全部失败；引用比对防止误清并发重建的新连接
+    const chain = opened.then(
+      (db) => db,
+      (err: unknown) => {
+        if (dbPromise === chain) dbPromise = null
+        throw err
+      },
+    )
+    dbPromise = chain
   }
   return dbPromise
 }
@@ -75,8 +90,11 @@ export function saveBackground(blob: Blob): Promise<IDBValidKey> {
 }
 
 /** 读取自定义背景图，未设置时返回 null */
-export function loadBackground(): Promise<Blob | null> {
-  return withStore<Blob | null>('readonly', (s) => s.get(KEY))
+export async function loadBackground(): Promise<Blob | null> {
+  // M-500：IndexedDB 返回值无运行时校验，脏数据（手改/结构升级残留）直接当 Blob 用
+  // 会在 createObjectURL 处抛错；此处显式收窄，非 Blob 一律视为未设置
+  const value = await withStore<unknown>('readonly', (s) => s.get(KEY))
+  return value instanceof Blob ? value : null
 }
 
 /** 删除自定义背景图 */

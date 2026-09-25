@@ -29,11 +29,19 @@ interface UiPersist {
  */
 const THEME_KEY_MIGRATIONS: Record<string, ColorTheme> = { 'deep-ocean': 'sky-blue', 'morandi-green': 'firefly' }
 
+/** M-406/491：分栏比例统一钳制——持久化恢复与 setAnalysisSplitRatio 走同一套校验（非法值回退默认，再夹到 [0.3, 0.85]） */
+function clampAnalysisSplitRatio(ratio: number): number {
+  const safe = Number.isFinite(ratio) ? ratio : 0.6
+  return Math.min(0.85, Math.max(0.3, safe))
+}
+
 function loadPersist(): Partial<UiPersist> {
   try {
     const raw = localStorage.getItem(UI_KEY)
     const saved = raw ? (JSON.parse(raw) as Partial<UiPersist>) : {}
-    if (saved.colorTheme && saved.colorTheme in THEME_KEY_MIGRATIONS) {
+    // M-405/490：in 会沿原型链误判（"constructor"/"toString"/"valueOf" 等命中 Object.prototype），
+    // 改用 Object.hasOwn 仅匹配自身键，防止把原型属性值当作迁移目标写入主题
+    if (saved.colorTheme && Object.hasOwn(THEME_KEY_MIGRATIONS, saved.colorTheme)) {
       saved.colorTheme = THEME_KEY_MIGRATIONS[saved.colorTheme]
     }
     return saved
@@ -50,6 +58,11 @@ function persist(state: UiPersist): void {
   }
 }
 
+/** M-492：matchMedia change 监听器模块级只注册一次，防止 HMR/多次实例化累积监听器 */
+let systemDarkListenerBound = false
+/** M-492：blob: URL 引用提升到模块级——store 重新实例化时仍持有引用，替换/清除时可正确 revoke，避免泄漏 */
+let activeObjectUrl = ''
+
 export const useUiStore = defineStore('ui', () => {
   const saved = loadPersist()
 
@@ -58,8 +71,8 @@ export const useUiStore = defineStore('ui', () => {
   const sidebarCollapsed = ref(saved.sidebarCollapsed ?? false)
   const motionEnabled = ref(saved.motionEnabled ?? true)
   const shortcutBarVisible = ref(saved.shortcutBarVisible ?? true)
-  /** 解析视图左右分栏比例（FR-ANA-01 记忆位置） */
-  const analysisSplitRatio = ref(saved.analysisSplitRatio ?? 0.6)
+  /** 解析视图左右分栏比例（FR-ANA-01 记忆位置）；M-406/491：恢复时同样钳制，损坏/被篡改的持久值不再直接溢出容器 */
+  const analysisSplitRatio = ref(clampAnalysisSplitRatio(saved.analysisSplitRatio ?? 0.6))
   /** 当前生效的自定义背景 URL（blob:/data:，不持久化；图片本体存 IndexedDB），空串表示未设置 */
   const customBackgroundUrl = ref(saved.customBackgroundUrl ?? '')
 
@@ -69,7 +82,9 @@ export const useUiStore = defineStore('ui', () => {
       : false,
   )
 
-  if (typeof window !== 'undefined' && window.matchMedia) {
+  if (typeof window !== 'undefined' && window.matchMedia && !systemDarkListenerBound) {
+    // M-492：模块级守卫防重复注册（store 重复实例化不再叠加监听器）
+    systemDarkListenerBound = true
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
       systemDark.value = e.matches
     })
@@ -84,9 +99,6 @@ export const useUiStore = defineStore('ui', () => {
       themeMode.value = 'dark'
     }
   }
-
-  /** 当前持有的 blob: URL，替换/清除时释放，避免内存泄漏 */
-  let activeObjectUrl = ''
 
   function applyCustomBackground(url: string): void {
     if (url) {
@@ -112,7 +124,8 @@ export const useUiStore = defineStore('ui', () => {
 
   function clearCustomBackground(): void {
     setCustomBackgroundUrl('')
-    void deleteBackground().catch(() => undefined)
+    // M-493：删除是用户显式操作，失败不能完全吞掉——否则 UI 显示已清除、下次启动背景"复活"
+    void deleteBackground().catch((err) => console.warn('[ui] 自定义背景删除失败，可能于下次启动重新出现', err))
   }
 
   if (customBackgroundUrl.value) {
@@ -131,7 +144,8 @@ export const useUiStore = defineStore('ui', () => {
         }
         setCustomBackgroundUrl(URL.createObjectURL(blob))
       } catch (err) {
-        // 迁移失败则本次会话继续用 base64，下次启动重试；打日志便于排查损坏数据
+        // M-407/494：迁移失败则本次会话继续用 base64；persist 现会保留 data: URL，
+        // "下次启动重试"真正成立（旧实现会被任意偏好变更覆盖丢失）；打日志便于排查损坏数据
         console.warn('[ui] 自定义背景 base64 → IndexedDB 迁移失败，将在下次启动重试', err)
       }
     })()
@@ -154,6 +168,11 @@ export const useUiStore = defineStore('ui', () => {
         shortcutBarVisible: shortcutBarVisible.value,
         analysisSplitRatio: analysisSplitRatio.value,
         customBackground: customBackgroundUrl.value !== '',
+        // M-407/494：base64 → IndexedDB 迁移完成前（含迁移失败），旧 base64 必须随状态持久化——
+        // 否则用户改动任意偏好就会把它覆盖丢失，"下次启动重试"沦为空话；blob: URL 会话失效，不可持久化
+        ...(customBackgroundUrl.value.startsWith('data:')
+          ? { customBackgroundUrl: customBackgroundUrl.value }
+          : {}),
       })
     },
     { deep: true },
@@ -182,7 +201,8 @@ export const useUiStore = defineStore('ui', () => {
     setCustomBackgroundUrl,
     clearCustomBackground,
     setAnalysisSplitRatio(ratio: number): void {
-      analysisSplitRatio.value = Math.min(0.85, Math.max(0.3, ratio))
+      // M-406/491：与持久化恢复路径共用同一 clamp 逻辑
+      analysisSplitRatio.value = clampAnalysisSplitRatio(ratio)
     },
   }
 })

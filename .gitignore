@@ -12,9 +12,10 @@ __pycache__/
 .Python
 *.so
 .venv/
-venv/
-env/
-ENV/
+# M-423：虚拟环境目录逐条锚定到仓库根，避免误伤任意深度的同名 Python 包/资源目录
+/venv/
+/env/
+/ENV/
 pip-wheel-metadata/
 *.egg-info/
 dist/
@@ -27,6 +28,8 @@ htmlcov/
 
 # Runtime data and logs
 *.log
+# M-424：以下 SQLite 库若此前已被 git 跟踪，仅靠 ignore 不会从索引/历史移除，
+# 需执行 git rm --cached backend/data/user_data.db backend/data/knowledge_tags.db 跟进
 backend/data/user_data.db
 backend/data/knowledge_tags.db
 backend/data/backups/

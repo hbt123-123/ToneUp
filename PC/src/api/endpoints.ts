@@ -1,4 +1,4 @@
-import { request, requestForm } from './http'
+import { apiBase, request, requestForm } from './http'
 import type {
   AdminReloadSummary,
   AiFeedbackTask,
@@ -43,8 +43,10 @@ export function apiBankDetail(bankId: string, signal?: AbortSignal): Promise<Ban
   return request(`/question-banks/${encodeURIComponent(bankId)}`, { signal })
 }
 
-export interface QuestionListQuery {
-  [key: string]: unknown
+// M-359：移除 `[key: string]: unknown` 索引签名，恢复编译期检查——
+// 拼错参数名（如 typeCode）或传错类型不再静默通过；
+// type 别名的对象字面量类型具备隐式索引签名，仍可赋给 http.ts 的 Record<string, unknown>
+export type QuestionListQuery = {
   year?: number
   type_code?: string
   page?: number
@@ -67,9 +69,10 @@ export function apiQuestionDetail(bankId: string, questionId: number, signal?: A
 
 /* ---------- 图片（M1）：二进制走 LazyImage 的 fetch，不在此封装 ---------- */
 
+// M-360：复用 http.ts 统一导出的 apiBase()，不再重复解析 VITE_API_BASE
+//（utils/richtext.ts 因需按 URL 解析比对 origin，场景不同暂保留独立实现）
 export function imageUrl(imageId: string | number, bankId: string): string {
-  const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api'
-  return `${base}/images/${imageId}?bank_id=${encodeURIComponent(bankId)}`
+  return `${apiBase()}/images/${imageId}?bank_id=${encodeURIComponent(bankId)}`
 }
 
 /* ---------- 答题（M1） ---------- */

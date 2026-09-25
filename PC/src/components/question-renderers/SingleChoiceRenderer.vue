@@ -18,22 +18,36 @@ const { isCompactOrNarrower } = useLayoutMode()
 
 const options = computed(() => props.ctx.question.options ?? [])
 
+// M-477：label 统一 trim+upper 归一化——extractCorrectLabel 输出大写，而 opt.label 为原值，
+// 直接 === 会因大小写/首尾空白差异漏配
+function normalizeLabel(label: string): string {
+  return label.trim().toUpperCase()
+}
+
 function isSelected(label: string): boolean {
-  return props.ctx.answer === label
+  // M-477：answer（受控 unknown）先收窄字符串，再与 label 归一化比较
+  return typeof props.ctx.answer === 'string' && normalizeLabel(props.ctx.answer) === normalizeLabel(label)
 }
 
 function optionState(label: string): 'none' | 'correct' | 'wrong' {
   if (!props.ctx.showAnswer) return 'none'
   const correctLabel = extractCorrectLabel(props.ctx)
-  if (correctLabel && label === correctLabel) return 'correct'
-  if (isSelected(label) && correctLabel && label !== correctLabel) return 'wrong'
+  // M-477：统一归一化后比较；命中 correct 分支已返回，此处无需再比原值
+  if (correctLabel && normalizeLabel(label) === correctLabel) return 'correct'
+  if (isSelected(label) && correctLabel) return 'wrong'
   return 'none'
 }
 
-/** 正确答案标签提取：优先 attempt.correct_answer/answer_text 的 "A" 形态 */
+/** 正确答案标签提取：M-478 修正优先级——attempt 反馈载荷的 correct_answer 优先（契约未固化的
+ * 运行时扩展字段，收窄读取），回退 question.answer_text 的 "A" 形态；输出统一 trim+upper（M-477 口径） */
 function extractCorrectLabel(ctx: QuestionContext): string | null {
+  const fb: unknown = ctx.grading?.feedback ?? null
+  const fbCorrect = (fb as { correct_answer?: unknown } | null)?.correct_answer
   const detail = ctx.question as QuestionContext['question'] & { answer_text?: string | null }
-  const raw = (detail as { answer_text?: string | null }).answer_text ?? null
+  const raw =
+    typeof fbCorrect === 'string' && fbCorrect.trim()
+      ? fbCorrect
+      : (detail.answer_text ?? '')
   if (!raw) return null
   const match = raw.trim().match(/^([A-Za-z])\b/)
   return match?.[1]?.toUpperCase() ?? null

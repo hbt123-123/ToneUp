@@ -80,7 +80,14 @@ onMounted(async () => {
       stats.fetchOverview().catch(() => undefined),
       review.fetchQueue(50).catch(() => undefined),
     ])
-    const lastBankId = localStorage.getItem('toneup:last-bank') ?? ''
+    // M-520：localStorage 在隐私模式/被策略禁用时会抛异常（storage.ts 的 safe 助手未按字符串键导出，
+    // 且 last-bank 由多页面以纯文本写入，不宜换 readJsonCache 的 JSON 语义），就地 try/catch 降级
+    let lastBankId = ''
+    try {
+      lastBankId = localStorage.getItem('toneup:last-bank') ?? ''
+    } catch {
+      /* 存储不可用：跳过"继续上次"恢复，不影响首屏其余逻辑 */
+    }
     if (lastBankId) {
       const saved = readProgress(auth.userId, lastBankId)
       const bank = saved ? catalog.bankById.get(lastBankId) : undefined
@@ -120,7 +127,10 @@ function initScrollAnimation(): void {
         }
       }
     },
-    { threshold: 0.15 },
+    // M-521：.section 为 min-height:100vh 且可能更高（more-grid 换行、窄窗口），比例阈值 0.15
+    // 在超高 section 上永远达不到，入场动画不触发——改为 threshold:0 + 底部 rootMargin 收口，
+    // 元素顶部越过视口下方 85% 线即触发，与原"约 15% 可见"意图等价且对任意高度成立
+    { threshold: 0, rootMargin: '0px 0px -15% 0px' },
   )
 
   document.querySelectorAll<HTMLElement>('.section').forEach((el) => {
@@ -179,7 +189,15 @@ function continuePractice(): void {
       </section>
 
       <!-- Section 1: 今日目标 -->
-      <section class="section feature-section" @click="router.push('/catalog')">
+      <!-- M-522：整屏点击区补齐可访问性——role/tabindex/Enter 键触发，键盘与读屏用户可达 -->
+      <section
+        class="section feature-section"
+        role="link"
+        tabindex="0"
+        aria-label="前往题库开始今日练习"
+        @click="router.push('/catalog')"
+        @keydown.enter="router.push('/catalog')"
+      >
         <div class="feature-inner feature-right">
           <div class="feature-visual">
             <img class="feature-icon icon-target" :src="featureIconSrc.target" alt="" draggable="false" />
@@ -206,7 +224,15 @@ function continuePractice(): void {
       </section>
 
       <!-- Section 2: 继续上次 -->
-      <section class="section feature-section" @click="continuePractice">
+      <!-- M-522：同上，整屏点击区补齐 role/tabindex/Enter 键触发 -->
+      <section
+        class="section feature-section"
+        role="link"
+        tabindex="0"
+        aria-label="继续上次未完成的练习"
+        @click="continuePractice"
+        @keydown.enter="continuePractice"
+      >
         <div class="feature-inner feature-left">
           <div class="feature-body">
             <p class="section-tag">02</p>
@@ -231,7 +257,15 @@ function continuePractice(): void {
       </section>
 
       <!-- Section 3: 学科入口 -->
-      <section class="section feature-section" @click="router.push('/catalog')">
+      <!-- M-522：同上，整屏点击区补齐 role/tabindex/Enter 键触发 -->
+      <section
+        class="section feature-section"
+        role="link"
+        tabindex="0"
+        aria-label="浏览全部学科"
+        @click="router.push('/catalog')"
+        @keydown.enter="router.push('/catalog')"
+      >
         <div class="feature-inner feature-right">
           <div class="feature-visual">
             <img class="feature-icon icon-subjects" :src="featureIconSrc.subjects" alt="" draggable="false" />
@@ -248,7 +282,15 @@ function continuePractice(): void {
       </section>
 
       <!-- Section 4: 今日复习 -->
-      <section class="section feature-section" @click="router.push('/review/today')">
+      <!-- M-522：同上，整屏点击区补齐 role/tabindex/Enter 键触发 -->
+      <section
+        class="section feature-section"
+        role="link"
+        tabindex="0"
+        aria-label="开始今日复习"
+        @click="router.push('/review/today')"
+        @keydown.enter="router.push('/review/today')"
+      >
         <div class="feature-inner feature-left">
           <div class="feature-body">
             <p class="section-tag">04</p>

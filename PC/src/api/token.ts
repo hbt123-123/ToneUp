@@ -15,11 +15,14 @@ export function loadToken(): string | null {
   }
 }
 
-export function saveToken(token: string): void {
+export function saveToken(token: string): boolean {
   try {
     localStorage.setItem(TOKEN_KEY, token)
+    return true
   } catch {
-    /* 存储不可用时忽略，会话仅存活于内存 */
+    // M-369：存储不可用（Safari 隐私模式/禁用存储/配额满）不再静默吞掉，
+    // 向调用方报告持久化失败，由调用方决定降级行为（会话仅内存存活）
+    return false
   }
 }
 
@@ -31,7 +34,14 @@ export function clearToken(): void {
   }
 }
 
+/** M-370：防开放重定向——仅接受以单个 “/” 开头、且不以 “//” 或 “/\” 开头的站内相对路径 */
+function isSafeRedirectTarget(target: string): boolean {
+  return target.startsWith('/') && !target.startsWith('//') && !target.startsWith('/\\')
+}
+
 export function saveRedirectPath(path: string): void {
+  // M-370：写入侧同样过滤，避免非法目标进入 sessionStorage
+  if (!isSafeRedirectTarget(path)) return
   try {
     sessionStorage.setItem(REDIRECT_KEY, path)
   } catch {
@@ -43,7 +53,9 @@ export function takeRedirectPath(): string | null {
   try {
     const p = sessionStorage.getItem(REDIRECT_KEY)
     if (p) sessionStorage.removeItem(REDIRECT_KEY)
-    return p
+    // M-370：存储值可能被篡改，直接作为导航目标存在 open redirect 风险；
+    // 非法值回退 null，由调用方（LoginView.safeRedirect）落到默认首页
+    return p && isSafeRedirectTarget(p) ? p : null
   } catch {
     return null
   }

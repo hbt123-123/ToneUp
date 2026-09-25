@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { NAvatar, NBadge } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { useReviewStore } from '@/stores/review'
 
 /** 左侧导航：默认隐藏，鼠标移入左侧触发区或点击触发器后滑入 */
 const route = useRoute()
-const router = useRouter()
 const auth = useAuthStore()
 const review = useReviewStore()
 
@@ -76,6 +75,8 @@ const items = computed<NavItem[]>(() => {
     { label: '笔记', icon: '✏️', to: '/notes', match: (n) => n === 'notes' },
     { label: 'AI 纠错', icon: '🤖', to: '/ai-feedback', match: (n) => n === 'ai-feedback' },
   ]
+  // M-453：admin 入口仅按前端登录角色做展示级隐藏（装饰性 gate），客户端标志可被篡改，
+  // 不构成安全边界；真正的权限控制在后端——/admin 页面数据与全部管理接口均以服务端鉴权为准
   if (auth.isAdmin) {
     base.push({ label: '管理', icon: '🛠️', to: '/admin', match: (n) => n === 'admin' })
   }
@@ -84,15 +85,30 @@ const items = computed<NavItem[]>(() => {
 
 const activeTo = computed(() => items.value.find((it) => it.match(String(route.name)))?.to ?? null)
 
-function navTo(to: string): void {
-  visible.value = false
-  void router.push(to)
-}
+/* M-457：badge 每项只求值一次（computed 缓存），避免模板 v-if 与 :value 各调一次
+ * 造成重复读 store，且两次调用结果可能不一致 */
+const badgeValues = computed<Record<string, number>>(() => {
+  const map: Record<string, number> = {}
+  for (const it of items.value) {
+    if (it.badge) map[it.to] = it.badge()
+  }
+  return map
+})
 </script>
 
 <template>
-  <!-- 左侧触发区：悬停或点击均唤起侧边栏 -->
-  <div class="nav-trigger" @mouseenter="openNav" @click="openNav">
+  <!-- 左侧触发区：悬停或点击均唤起侧边栏；
+       M-454：补齐键盘可达性（role="button" + tabindex + Enter/Space 触发），纯键盘用户也能打开侧栏 -->
+  <div
+    class="nav-trigger"
+    role="button"
+    tabindex="0"
+    aria-label="打开导航菜单"
+    @mouseenter="openNav"
+    @click="openNav"
+    @keydown.enter.prevent="openNav"
+    @keydown.space.prevent="openNav"
+  >
     <span class="trigger-bar" />
   </div>
 
@@ -112,24 +128,27 @@ function navTo(to: string): void {
     </div>
 
     <nav class="nav-list" aria-label="主导航">
-      <a
+      <!-- M-456：改用 router-link 恢复原生链接行为（中键 / Ctrl+点击新标签打开），
+           保留原类名与样式；左键点击后仍收起侧栏（closeNav） -->
+      <router-link
         v-for="item in items"
         :key="item.to"
-        href="#"
+        :to="item.to"
         class="nav-item"
         :class="{ active: activeTo === item.to }"
-        @click.prevent="navTo(item.to)"
+        @click="closeNav"
       >
         <span class="icon" aria-hidden="true">{{ item.icon }}</span>
         <span class="label">{{ item.label }}</span>
+        <!-- M-457：badge 值取自缓存 map（每项每次渲染只求值一次） -->
         <n-badge
-          v-if="item.badge && item.badge() > 0"
-          :value="item.badge()"
+          v-if="(badgeValues[item.to] ?? 0) > 0"
+          :value="badgeValues[item.to] ?? 0"
           :max="99"
           type="warning"
           class="badge"
         />
-      </a>
+      </router-link>
     </nav>
 
     <!-- 主题装饰：底部插画 -->
@@ -220,7 +239,12 @@ function navTo(to: string): void {
   -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid var(--tu-border);
   transform: translateX(-100%);
-  transition: transform var(--tu-duration-expand) var(--tu-ease);
+  /* M-455：关闭态 visibility:hidden 使元素移出 Tab 序与可访问性树；
+   * visibility 过渡延迟到滑出动画结束后生效，不影响收起动画的可见性 */
+  visibility: hidden;
+  transition:
+    transform var(--tu-duration-expand) var(--tu-ease),
+    visibility 0s linear var(--tu-duration-expand);
   overflow: hidden;
 }
 
@@ -230,7 +254,12 @@ html.dark .side-nav {
 
 .side-nav.visible {
   transform: translateX(0);
+  /* M-455：展开时立即恢复可见（无延迟），滑入动画全程可见 */
+  visibility: visible;
   box-shadow: var(--tu-shadow-pop);
+  transition:
+    transform var(--tu-duration-expand) var(--tu-ease),
+    visibility 0s;
 }
 
 .brand {

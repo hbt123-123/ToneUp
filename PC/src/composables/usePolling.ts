@@ -44,10 +44,13 @@ export function usePolling<T>(
   let delay = intervalStartMs
   /** 代次 token：start() 自增；await 恢复后代次不一致的结果/排程一律丢弃 */
   let generation = 0
+  /** M-385：请求互斥标志——tick 与 manualRefresh 共用，同一时刻只允许一个在途请求 */
+  let inFlight = false
 
   async function tick(): Promise<void> {
     const gen = generation
-    if (stopped) return
+    if (stopped || inFlight) return // M-385：已有在途请求时跳过本轮，避免重复调用 task()
+    inFlight = true
     loading.value = true
     try {
       const result = await task()
@@ -70,6 +73,7 @@ export function usePolling<T>(
       }
     } finally {
       if (gen === generation) loading.value = false
+      inFlight = false // M-385：无论结果是否过期都释放互斥标志
     }
   }
 
@@ -94,7 +98,11 @@ export function usePolling<T>(
   }
 
   async function manualRefresh(): Promise<void> {
+    // M-385：轮询在途或已有手动刷新时直接返回，由在途请求交付最新数据，
+    // 不再并发发出第二个相同请求
+    if (inFlight) return
     const gen = generation
+    inFlight = true
     loading.value = true
     try {
       const result = await task()
@@ -107,6 +115,7 @@ export function usePolling<T>(
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
       if (gen === generation) loading.value = false
+      inFlight = false
     }
   }
 

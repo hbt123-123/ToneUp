@@ -14,17 +14,28 @@ export interface NoteIndexEntry {
 
 const KEY = (userId: number | string): string => `toneup:notes-index:${userId}`
 
+// M-503：持久化条目完整校验——原仅查 questionId，缺 bankId/updatedAt/snippet 的
+// 损坏或旧版数据会以残缺形态混入索引，进而污染列表页
+function isValidEntry(e: unknown): e is NoteIndexEntry {
+  if (!e || typeof e !== 'object') return false
+  const rec = e as Partial<NoteIndexEntry>
+  return (
+    typeof rec.bankId === 'string' &&
+    rec.bankId !== '' &&
+    typeof rec.questionId === 'number' &&
+    Number.isFinite(rec.questionId) &&
+    typeof rec.updatedAt === 'number' &&
+    Number.isFinite(rec.updatedAt) &&
+    typeof rec.snippet === 'string'
+  )
+}
+
 function load(userId: number | string): NoteIndexEntry[] {
   try {
     const raw = localStorage.getItem(KEY(userId))
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (e): e is NoteIndexEntry =>
-            !!e && typeof e === 'object' && typeof (e as NoteIndexEntry).questionId === 'number',
-        )
-      : []
+    return Array.isArray(parsed) ? parsed.filter(isValidEntry) : []
   } catch {
     return []
   }
@@ -33,8 +44,10 @@ function load(userId: number | string): NoteIndexEntry[] {
 function save(userId: number | string, entries: NoteIndexEntry[]): void {
   try {
     localStorage.setItem(KEY(userId), JSON.stringify(entries))
-  } catch {
-    /* ignore */
+  } catch (err) {
+    // M-504：配额满/隐私模式等写失败不可完全静默——本地索引将与服务端失同步，
+    // 至少输出 warn 便于排查（维持 void 契约，不向调用方抛出）
+    console.warn('[notesIndex] 笔记索引写入 localStorage 失败', err)
   }
 }
 

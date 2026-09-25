@@ -60,15 +60,18 @@ const subjectFilter = ref('')
 const typeFilter = ref('')
 const yearFilter = ref(-1)
 
-const filtered = computed(() =>
-  wrongbook.filtered.filter(
+const filtered = computed(() => {
+  // M-535：目录未加载/加载失败（bankById 为空）时无法解析 bank→subject，
+  // 学科过滤降级为不过滤，避免筛选结果恒为空被误读为"错题本是空的"
+  const subjectActive = subjectFilter.value !== '' && catalog.bankById.size > 0
+  return wrongbook.filtered.filter(
     (r) =>
-      (!subjectFilter.value ||
+      (!subjectActive ||
         catalog.bankById.get(r.bank_id)?.subject_id === subjectFilter.value) &&
       (!typeFilter.value || r.type_code === typeFilter.value) &&
       (yearFilter.value < 0 || r.year === yearFilter.value),
-  ),
-)
+  )
+})
 
 function repractice(bankId: string, questionId?: number): void {
   localStorage.setItem('toneup:last-bank', bankId)
@@ -120,7 +123,12 @@ function repractice(bankId: string, questionId?: number): void {
       </virtual-list>
     </div>
 
-    <n-empty v-else description="错题本是空的，继续加油保持！" class="empty-pad">
+    <!-- M-536：区分"错题本为空"与"筛选无结果"——有记录但被筛选条件滤光时提示放宽筛选 -->
+    <n-empty
+      v-else
+      :description="wrongbook.records.length > 0 ? '没有匹配当前筛选条件的错题，试试放宽筛选条件' : '错题本是空的，继续加油保持！'"
+      class="empty-pad"
+    >
       <template #extra>
         <n-button size="small" @click="$router.push('/catalog')">去刷题</n-button>
       </template>

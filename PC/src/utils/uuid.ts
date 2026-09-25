@@ -1,4 +1,21 @@
 /** client_request_id 生成（UUID v4，§8.3） */
+
+// M-510：Web Crypto 完全不可用时的降级熵源——时间戳 + 模块级单调计数器 + Math.random
+// 组合填充，相比纯 Math.random 显著降低碰撞与可预测风险；
+// 注意：这不是 CSPRNG，仅作降级路径使用（目标环境为旧内嵌 webview/非安全上下文）
+let fallbackCounter = 0
+
+function fillInsecureRandomBytes(bytes: Uint8Array): void {
+  const ts = Date.now()
+  fallbackCounter = (fallbackCounter + 1) >>> 0
+  for (let i = 0; i < bytes.length; i++) {
+    // 毫秒时间戳约 2^41，6 字节循环覆盖；计数器 4 字节循环；逐字节与 Math.random 异或混合
+    const tsByte = Math.floor(ts / 256 ** (i % 6)) & 0xff
+    const ctrByte = (fallbackCounter >>> ((i % 4) * 8)) & 0xff
+    bytes[i] = (Math.floor(Math.random() * 256) ^ tsByte ^ ctrByte) & 0xff
+  }
+}
+
 export function uuidV4(): string {
   const c = globalThis.crypto
   if (c && typeof c.randomUUID === 'function') return c.randomUUID()
@@ -7,7 +24,7 @@ export function uuidV4(): string {
   if (c?.getRandomValues) {
     c.getRandomValues(bytes)
   } else {
-    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
+    fillInsecureRandomBytes(bytes) // M-510：非 CSPRNG 降级，见上方说明
   }
   bytes[6] = (bytes[6]! & 0x0f) | 0x40
   bytes[8] = (bytes[8]! & 0x3f) | 0x80

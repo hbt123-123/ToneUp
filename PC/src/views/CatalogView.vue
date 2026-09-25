@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NCard, NEmpty, NSelect, NSpin, NTag } from 'naive-ui'
 import { useCatalogStore } from '@/stores/catalog'
+import type { BankDetail } from '@/api/generated/schema'
 import { humanizeError } from '@/api/http'
 import { appMessage } from '@/utils/feedback'
 import { typeCodeLabel } from '@/utils/format'
@@ -26,10 +27,12 @@ onMounted(async () => {
     // 从 URL query 恢复选择（FR-CAT-03）
     const subject = typeof route.query.subject === 'string' ? route.query.subject : null
     const type = typeof route.query.type === 'string' ? route.query.type : null
-    const year = typeof route.query.year === 'string' ? Number(route.query.year) : null
+    // M-517：严格校验年份——'' 会转成 0、'abc' 转 NaN、'1.5' 非整数，均视为未选择
+    const yearNum = typeof route.query.year === 'string' ? Number(route.query.year) : null
+    const year = yearNum !== null && Number.isInteger(yearNum) && yearNum > 0 ? yearNum : null
     if (subject) catalog.selectSubject(subject)
     if (type) catalog.selectType(type)
-    if (year !== null && !Number.isNaN(year)) catalog.selectYear(year)
+    if (year !== null) catalog.selectYear(year)
   } catch (err) {
     appMessage.error(humanizeError(err))
   }
@@ -61,16 +64,39 @@ const yearOptions = computed(() => {
   return []
 })
 
+/** M-517：题库可用年份集合（years 优先，缺失时按 year_min~year_max 构造，与 yearOptions 口径一致） */
+function bankYears(detail: BankDetail): number[] {
+  if (detail.years && detail.years.length > 0) return detail.years
+  if (detail.year_min != null && detail.year_max != null) {
+    const out: number[] = []
+    for (let y = detail.year_max; y >= detail.year_min; y--) out.push(y)
+    return out
+  }
+  return []
+}
+
+// M-518：详情请求序号守卫——快速连点多个卡片时，只有最新一次请求可写回结果
+let detailSeq = 0
+
 async function onPickBank(bankId: string): Promise<void> {
+  const seq = ++detailSeq
   detailLoading.value = true
   try {
-    bankDetail.value = await catalog.fetchBankDetail(bankId)
+    const detail = await catalog.fetchBankDetail(bankId)
+    if (seq !== detailSeq) return // M-518：过期响应直接丢弃，不覆盖新选择
+    bankDetail.value = detail
     const bank = catalog.bankById.get(bankId)
-    catalog.currentBankName = bank?.name ?? bankDetail.value.name
+    catalog.currentBankName = bank?.name ?? detail.name
+    // M-517：已选年份必须存在于当前题库年份集合，否则视为未选择并同步移出 URL
+    if (catalog.selectedYear !== null && !bankYears(detail).includes(catalog.selectedYear)) {
+      catalog.selectYear(null)
+      syncQuery()
+    }
   } catch (err) {
+    if (seq !== detailSeq) return // M-518：过期请求的失败不打扰新选择
     appMessage.error(humanizeError(err))
   } finally {
-    detailLoading.value = false
+    if (seq === detailSeq) detailLoading.value = false // M-518：仅最新请求可结束 loading
   }
 }
 

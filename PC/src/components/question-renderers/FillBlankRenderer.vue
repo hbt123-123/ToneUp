@@ -19,8 +19,12 @@ const blankCount = computed(() => {
   return Math.max(1, markers?.length ?? 1)
 })
 
+// M-465：answer 元素类型不可信（后端可能下发 number/null），逐项归一化 String(x)；
+// null/undefined 归一化为 '' 占位保持空位索引，不再混入非字符串元素
 const answers = computed<string[]>(() =>
-  Array.isArray(props.ctx.answer) ? (props.ctx.answer as string[]) : [],
+  Array.isArray(props.ctx.answer)
+    ? props.ctx.answer.map((v) => (v === null || v === undefined ? '' : String(v)))
+    : [],
 )
 
 function valueOf(index: number): string {
@@ -40,7 +44,11 @@ function isBlankWrong(index: number): boolean {
   /* 逐空判分结构以后端契约为准：若反馈携带 per_blank 布尔数组则展示，否则不标错 */
   const fb: unknown = props.ctx.grading?.feedback ?? null
   const per = (fb as { per_blank?: unknown } | null)?.per_blank
-  return Array.isArray(per) ? per[index] === false : false
+  if (!Array.isArray(per)) return false
+  // M-466：严格解析——仅 boolean true 视为该空正确；false/null/0/'false' 等均标错，
+  // 越界（undefined，反馈未覆盖该空）不标错
+  const v = per[index]
+  return v !== undefined && v !== true
 }
 </script>
 

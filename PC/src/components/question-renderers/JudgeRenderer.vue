@@ -5,19 +5,34 @@ import type { QuestionContext } from './types'
 /** JUDGE（判断，预留扩容，§6.4.3）：对/错两个大按钮（≥44px 命中区），快捷键 A/B */
 const props = defineProps<{ ctx: QuestionContext }>()
 
-const answer = computed(() => (props.ctx.answer === 'A' || props.ctx.answer === 'B' ? props.ctx.answer : null))
+// M-467：持久化答案的大小写/别名归一化（'a'、'B '→B，'对'/'true'→A，'错'/'false'→B），
+// 恢复草稿/旧编码答案不再被判为空
+function normalizeJudgeAnswer(v: unknown): 'A' | 'B' | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim().toLowerCase()
+  if (s === 'a' || s === '对' || s === '正确' || s === 'true') return 'A'
+  if (s === 'b' || s === '错' || s === '错误' || s === 'false') return 'B'
+  return null
+}
+
+const answer = computed(() => normalizeJudgeAnswer(props.ctx.answer))
 
 function choose(value: 'A' | 'B'): void {
   if (props.ctx.readonly || props.ctx.disabled) return
-  // 再次点击同一项视为取消选择
-  props.ctx.onAnswerChange(answer.value === value ? null : value)
+  // M-468：点击已选项保持选中，不再上报 null 静默清空（避免草稿被清、提交被空答案拦截）
+  props.ctx.onAnswerChange(value)
 }
 
 const correctLabel = computed<'A' | 'B' | null>(() => {
   const detail = props.ctx.question as typeof props.ctx.question & { answer_text?: string | null }
-  const raw = detail.answer_text ?? ''
-  if (/^(A|对|正确|true)/i.test(raw.trim())) return 'A'
-  if (/^(B|错|错误|false)/i.test(raw.trim())) return 'B'
+  // M-469：先剥离「正确答案/参考答案/标准答案/答案」前缀（兼容全/半角冒号与空白）再取 A/B，
+  // "答案：A"、"参考答案: B" 等常见形态不再 fall through；"不正确/不对" 归入 B 侧
+  const raw = (detail.answer_text ?? '')
+    .trim()
+    .replace(/^(?:正确答案|参考答案|标准答案|答案)\s*[：:]\s*/, '')
+    .trim()
+  if (/^(A|对|正确|true)/i.test(raw)) return 'A'
+  if (/^(B|错|错误|不正确|不对|false)/i.test(raw)) return 'B'
   return null
 })
 

@@ -26,6 +26,23 @@ function asItemData(items: T[]): NaiveItemData[] {
 
 /** 缓存包装结果：避免模板内每次重渲染都新建数组导致 NVirtualList 整段重建 */
 const wrappedItems = computed(() => asItemData(props.items))
+
+/**
+ * M-439：非虚拟分支的 key 改用项自身标识——对象优先取 id/key 字段，原始值直接用值本身，
+ * 避免 :key="index" 使组件身份依赖位置，在重排/插入/删除时复用错位的组件状态；
+ * 无稳定标识字段的对象退回 index（与原行为一致）。
+ */
+function itemKey(item: T, index: number): string | number {
+  if (typeof item === 'object' && item !== null) {
+    const rec = item as Record<string, unknown>
+    const id = rec.id ?? rec.key
+    if (typeof id === 'string' || typeof id === 'number') return id
+    return index
+  }
+  return item
+}
+// vue-tsc 2.2.4 对泛型组件（generic 属性）模板中引用 setup 函数误报 TS6133（模板 :key 处实际已使用），显式读取绕过
+void itemKey
 </script>
 
 <template>
@@ -43,7 +60,7 @@ const wrappedItems = computed(() => asItemData(props.items))
     </template>
   </n-virtual-list>
   <div v-else class="plain-list">
-    <template v-for="(item, index) in items" :key="index">
+    <template v-for="(item, index) in items" :key="itemKey(item, index)">
       <slot :item="item" :index="index" />
     </template>
   </div>

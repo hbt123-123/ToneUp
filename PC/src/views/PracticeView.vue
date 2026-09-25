@@ -336,7 +336,9 @@ const markedActive = computed(() => {
 
 function hasUnsubmittedWork(): boolean {
   for (const r of practice.runtimes.values()) {
-    if ((r.phase === 'editing' && r.answer !== null && r.answer !== undefined && r.answer !== '') || r.pendingRequestId) {
+    // M-528：复用 isBlankAnswer 的空答案判定，与 handleSubmit 语义保持一致——
+    // 原 `!== ''` 判定会把 MULTI 的全空数组等"实际未作答"状态误判为有未提交工作
+    if ((r.phase === 'editing' && !isBlankAnswer(r.answer)) || r.pendingRequestId) {
       return true
     }
   }
@@ -441,7 +443,9 @@ const splitRatio = computed({
   set: (v: number) => ui.setAnalysisSplitRatio(v),
 })
 
-const splitContainer = ref<HTMLElement | null>(null)
+// M-529：拖拽参照改为外层 .workspace 容器——side-col 自身宽度受 flex-basis/max-width 约束
+// 且随拖动实时变化，用它算比例会失真；splitRatio 的语义是"左栏占 workspace 的比例"
+const workspaceEl = ref<HTMLElement | null>(null)
 let draggingSplit = false
 
 function startSplitDrag(e: MouseEvent): void {
@@ -449,8 +453,8 @@ function startSplitDrag(e: MouseEvent): void {
   e.preventDefault()
 }
 function onSplitMove(e: MouseEvent): void {
-  if (!draggingSplit || !splitContainer.value) return
-  const rect = splitContainer.value.getBoundingClientRect()
+  if (!draggingSplit || !workspaceEl.value) return
+  const rect = workspaceEl.value.getBoundingClientRect()
   splitRatio.value = (e.clientX - rect.left) / rect.width
 }
 function endSplitDrag(): void {
@@ -476,6 +480,17 @@ function refreshCache(): void {
   appMessage.success('题目缓存已失效，正在重新拉取')
 }
 
+// M-531：错误屏统一重试入口——先清 bootError（否则重试成功后错误屏仍被旧错误卡死成死路）；
+// 重试若再失败，startBankSession 会写入 practice.listError，错误屏继续兜底显示
+function retryFromErrorScreen(): void {
+  if (reviewBootError.value) {
+    void retryReviewBoot()
+    return
+  }
+  bootError.value = null
+  refreshCache()
+}
+
 /* ---------- 全局监听绑定 ---------- */
 
 onMounted(() => {
@@ -487,6 +502,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // M-530：卸载时中止在途的背题详情请求，避免组件销毁后响应仍在跑、落地成无效写入
+  reciteDetailAbort?.abort()
+  reciteDetailAbort = null
   if (onlineBound) {
     window.removeEventListener('online', onOnline)
     window.removeEventListener('beforeunload', beforeUnloadHandler)
@@ -510,7 +528,7 @@ onBeforeUnmount(() => {
     <div v-else-if="practice.listError || bootError || reviewBootError" class="content-inner error-state">
       <n-result-lite
         :message="bootError ?? reviewBootError ?? practice.listError ?? ''"
-        @retry="reviewBootError ? retryReviewBoot() : refreshCache()"
+        @retry="retryFromErrorScreen"
       />
     </div>
 
@@ -537,7 +555,8 @@ onBeforeUnmount(() => {
     </n-empty>
 
     <!-- 工作区 -->
-    <div v-else class="workspace" :class="{ loose: layoutMode === 'loose' }">
+    <!-- M-529：workspace 是分栏拖拽比例的正确参照容器 -->
+    <div v-else ref="workspaceEl" class="workspace" :class="{ loose: layoutMode === 'loose' }">
       <section class="question-col tu-card">
         <!-- 题头信息 -->
         <header class="q-header">
@@ -640,9 +659,9 @@ onBeforeUnmount(() => {
       </section>
 
       <!-- 右侧信息栏：未答=题号面板；已提交=解析视图（FR-ANA-01 分栏） -->
+      <!-- M-529：side-col 不再作为拖拽参照，移除旧 ref 绑定 -->
       <aside
         v-if="!isCompactOrNarrower"
-        ref="splitContainer"
         class="side-col"
         :style="{ flexBasis: `${(1 - splitRatio) * 100}%` }"
       >

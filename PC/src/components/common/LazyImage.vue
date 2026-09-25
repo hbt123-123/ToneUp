@@ -25,14 +25,27 @@ const holder = ref<HTMLElement | null>(null)
 
 let observer: IntersectionObserver | null = null
 let seq = 0
+// M-433：当前在途请求的中止控制器
+let abortController: AbortController | null = null
+
+/** M-433：中止在途图片请求，避免卸载/换图后继续下载无效字节 */
+function cancelFetch(): void {
+  abortController?.abort()
+  abortController = null
+}
 
 async function fetchImage(): Promise<void> {
   const mySeq = ++seq
+  cancelFetch() // M-433：新请求开始前先中止上一次仍在途的请求（重试竞态）
   state.value = 'loading'
+  // M-433：为本次请求建立 AbortController，卸载/换图时可中止下载
+  const controller = new AbortController()
+  abortController = controller
   try {
     const token = loadToken()
     const response = await fetch(imageUrl(props.imageId, props.bankId), {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: controller.signal, // M-433：随组件生命周期中止
     })
     if (!response.ok) throw new Error(`图片加载失败（HTTP ${response.status}）`)
     const blob = await response.blob()
@@ -41,7 +54,11 @@ async function fetchImage(): Promise<void> {
     objectUrl.value = URL.createObjectURL(blob)
     state.value = 'ready'
   } catch {
+    // M-433：主动中止不算加载失败，保持当前占位状态
+    if (controller.signal.aborted) return
     if (mySeq === seq) state.value = 'error'
+  } finally {
+    if (abortController === controller) abortController = null
   }
 }
 
@@ -54,6 +71,13 @@ function revoke(): void {
 
 function setupObserver(): void {
   observer?.disconnect()
+  observer = null
+  // M-434：无 IntersectionObserver（旧浏览器/非标准环境）或拿不到挂载元素时降级为直接加载，
+  // 避免图片永远停留在占位态
+  if (typeof IntersectionObserver === 'undefined' || !holder.value) {
+    void fetchImage()
+    return
+  }
   observer = new IntersectionObserver(
     (entries) => {
       for (const entry of entries) {
@@ -66,7 +90,7 @@ function setupObserver(): void {
     },
     { rootMargin: '200px' },
   )
-  if (holder.value) observer.observe(holder.value)
+  observer.observe(holder.value)
 }
 
 onMounted(() => {
@@ -78,6 +102,7 @@ watch(
   () => [props.imageId, props.bankId],
   () => {
     seq++ // 使在途请求失效
+    cancelFetch() // M-433：换图时立即中止旧图在途请求
     revoke()
     state.value = 'idle'
     setupObserver()
@@ -89,6 +114,7 @@ onBeforeUnmount(() => {
   observer = null
   // 使在途请求失效：否则卸载后完成的 fetch 会给已卸载组件创建永不回收的 blob URL
   seq++
+  cancelFetch() // M-433：卸载时中止在途 HTTP 请求
   revoke()
 })
 

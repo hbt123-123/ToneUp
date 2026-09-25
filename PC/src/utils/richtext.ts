@@ -137,6 +137,11 @@ function loadPipeline(): Promise<RichTextPipeline> {
           RETURN_DOM_FRAGMENT: false,
         })
       return { md, renderMath, sanitize }
+    }).catch((err: unknown) => {
+      // M-505：动态 import 失败（离线/部署后 chunk hash 失配）时不能缓存 rejected promise，
+      // 清空后下次调用可重新加载重试
+      pipelinePromise = null
+      throw err
     })
   }
   return pipelinePromise
@@ -165,11 +170,19 @@ export async function renderRichText(raw: string | null | undefined): Promise<st
       /* KaTeX 整体失败时保留 markdown 结果，片段级错误已由 throwOnError=false 兜底 */
     }
     normalizeImages(holder)
-    const sanitizedHtml = pipeline.sanitize(holder.innerHTML)
+    // M-506：空输出判定前移到 sanitize 之前——<hr>（--- 分隔线）等不在 ALLOWED_TAGS
+    // 的标签会被 sanitize 整体剥离，若在 sanitize 后判空，会把"仅含分隔线"的合法内容
+    // 误报为"内容渲染异常"；此处忽略 br/hr/&nbsp;/空白后为空即视为无可渲染内容，返回空串
+    const preSanitize = holder.innerHTML
+    if (!preSanitize.replace(/<br\s*\/?>|<hr\s*\/?>|&nbsp;|\s/g, '')) {
+      return ''
+    }
+    const sanitizedHtml = pipeline.sanitize(preSanitize)
     const cleanHolder = document.createElement('div')
     cleanHolder.innerHTML = sanitizedHtml
     hardenStyles(cleanHolder)
     const safe = cleanHolder.innerHTML
+    // M-506：sanitize 后兜底——preSanitize 非空但结果被剥光（真正异常）才提示渲染异常
     if (!safe.replace(/<br\s*\/?>|&nbsp;|\s/g, '')) {
       return '<p class="tu-rich-error">内容渲染异常</p>'
     }

@@ -91,21 +91,14 @@ export function validateRegistry(env: 'development' | 'production' = import.meta
   const registered = Object.keys(RENDERER_REGISTRY)
   const expected: string[] = [...CONTRACT_TYPE_CODES]
 
-  // 1. 重复注册检测（合并/展开可能引入）
-  const seen = new Set<string>()
-  const duplicated: string[] = []
-  for (const key of registered) {
-    if (seen.has(key)) duplicated.push(key)
-    seen.add(key)
-  }
+  // M-376：原「重复注册检测」已移除——RENDERER_REGISTRY 为对象字面量，
+  // Object.keys() 依 JS 语义恒返回唯一键，且 TS 会对字面量重复键报编译错误，该检测永不触发。
+  // 缺失检测：契约枚举中存在但注册表没有
+  const missing = expected.filter((code) => !registered.includes(code))
 
-  // 2. 缺失检测：契约枚举中存在但注册表没有
-  const missing = expected.filter((code) => !seen.has(code))
-
-  // 3. 多余键检测：不在契约枚举中的自定义别名一律视为非法
+  // 多余键检测：不在契约枚举中的自定义别名一律视为非法
   const unknownKeys = registered.filter((key) => !expected.includes(key))
   const problems: string[] = []
-  if (duplicated.length > 0) problems.push(`重复注册的题型键：${duplicated.join(', ')}`)
   if (missing.length > 0) problems.push(`缺失注册的题型键：${missing.join(', ')}`)
   if (unknownKeys.length > 0) problems.push(`契约之外的题型键（禁止自定义别名）：${unknownKeys.join(', ')}`)
 

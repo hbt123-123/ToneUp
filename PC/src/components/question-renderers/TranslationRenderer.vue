@@ -6,7 +6,7 @@ import type { QuestionContext } from './types'
 
 /**
  * TRANSLATION（英语翻译，§6.4.8）：
- * - 左原文面板、右译文多行输入；英文按空白分词计数；
+ * - 左原文面板、右译文多行输入；词数统计为空格分词 + CJK 逐字计数（M-482）；
  * - 判分结果（评分/参考译文/批注）由解析视图承载。
  */
 const props = defineProps<{ ctx: QuestionContext }>()
@@ -16,7 +16,9 @@ const text = ref(typeof props.ctx.answer === 'string' ? props.ctx.answer : '')
 watch(
   () => props.ctx.answer,
   (v) => {
-    if (typeof v === 'string' && v !== text.value) text.value = v
+    // M-481：外部清空（null/undefined）也同步清空本地值，草稿清空/放弃修改后不再残留旧译文
+    const next = typeof v === 'string' ? v : ''
+    if (next !== text.value) text.value = next
   },
 )
 
@@ -26,7 +28,18 @@ function onInput(value: string): void {
   props.ctx.onAnswerChange(value)
 }
 
-const wordCount = computed(() => text.value.split(/\s+/).filter(Boolean).length)
+// M-482：与 EssayRenderer 同一计数逻辑——拉丁词按空白/全角标点分词，CJK 字符逐字计数；
+// 中文译文整段无空格不再被计为 1 词
+const CJK_CHAR_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/g
+
+function countWords(value: string): number {
+  const cjkCount = value.match(CJK_CHAR_RE)?.length ?? 0
+  const latinPart = value.replace(CJK_CHAR_RE, ' ')
+  const latinWords = latinPart.split(/[\s，、。！？；：,.!?;:]+/).filter(Boolean).length
+  return cjkCount + latinWords
+}
+
+const wordCount = computed(() => countWords(text.value))
 </script>
 
 <template>

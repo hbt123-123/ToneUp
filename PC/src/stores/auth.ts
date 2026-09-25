@@ -46,12 +46,17 @@ export const useAuthStore = defineStore('auth', () => {
     const result = await apiLogin(username, password)
     if (!result?.access_token) throw new Error('登录响应缺少访问令牌')
     token.value = result.access_token
-    saveToken(result.access_token)
-    // 登录后立即拉取用户信息，失败则回滚会话
+    // M-369：saveToken 现在报告持久化是否成功；失败仅告警，会话降级为仅内存存活
+    if (!saveToken(result.access_token)) {
+      console.warn('[auth] 令牌持久化失败（存储不可用），关闭页面后需重新登录')
+    }
+    // 登录后立即拉取用户信息
     try {
       user.value = await apiMe()
     } catch (err) {
-      logoutLocally()
+      // M-389：区分「令牌被拒（401）」与「me 请求暂时性失败（网络/5xx）」——
+      // 刚获取的令牌不应因暂时性失败被丢弃；仅 401 才清场，其余保留令牌待联网后经 restoreSession 重试
+      if (err instanceof ApiError && err.status === 401) await logoutLocally()
       throw err
     }
   }
@@ -75,48 +80,50 @@ export const useAuthStore = defineStore('auth', () => {
       return true
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        logoutLocally()
+        await logoutLocally() // M-390：等待清理完成再返回
       }
       return false
     }
   }
 
-  function logoutLocally(): void {
+  /** M-390：登出改为可等待——清完 localStorage 与各业务 store 后才返回，
+   *  避免调用方在域数据清理完成前继续导航而命中上一用户的残留缓存 */
+  async function logoutLocally(): Promise<void> {
     token.value = DEV_BYPASS_AUTH ? 'dev-bypass-token' : null
     user.value = DEV_BYPASS_AUTH ? MOCK_USER : null
     if (!DEV_BYPASS_AUTH) clearToken()
     clearAllUserDomainData()
-    resetDomainStores()
+    await resetDomainStores()
   }
 
-  function logout(): void {
-    logoutLocally()
+  function logout(): Promise<void> {
+    return logoutLocally()
   }
 
   /** 清各业务 store 内存态（懒加载避免模块环）：换账号后不得命中上一用户的缓存/残留 */
-  function resetDomainStores(): void {
-    void Promise.all([
-      import('@/stores/practice'),
-      import('@/stores/wrongbook'),
-      import('@/stores/review'),
-    ])
-      .then(([practiceMod, wrongbookMod, reviewMod]) => {
-        practiceMod.usePracticeStore().resetSession()
-        wrongbookMod.useWrongBookStore().reset()
-        reviewMod.useReviewStore().reset()
-      })
-      .catch((err: unknown) => {
-        // chunk 加载失败也不能让残留缓存跨账号泄漏：降级为整页刷新（带节流防循环）
-        console.error('resetDomainStores failed, reloading', err)
-        try {
-          const last = Number(sessionStorage.getItem('toneup:chunk-reload-at') ?? 0)
-          if (Date.now() - last < 10_000) return
-          sessionStorage.setItem('toneup:chunk-reload-at', String(Date.now()))
-        } catch {
-          /* sessionStorage 不可用时直接刷新 */
-        }
-        window.location.reload()
-      })
+  async function resetDomainStores(): Promise<void> {
+    try {
+      // M-390：动态导入与三个 store 重置全部完成后才 resolve（原先 fire-and-forget）
+      const [practiceMod, wrongbookMod, reviewMod] = await Promise.all([
+        import('@/stores/practice'),
+        import('@/stores/wrongbook'),
+        import('@/stores/review'),
+      ])
+      practiceMod.usePracticeStore().resetSession()
+      wrongbookMod.useWrongBookStore().reset()
+      reviewMod.useReviewStore().reset()
+    } catch (err) {
+      // chunk 加载失败也不能让残留缓存跨账号泄漏：降级为整页刷新（带节流防循环）
+      console.error('resetDomainStores failed, reloading', err)
+      try {
+        const last = Number(sessionStorage.getItem('toneup:chunk-reload-at') ?? 0)
+        if (Date.now() - last < 10_000) return
+        sessionStorage.setItem('toneup:chunk-reload-at', String(Date.now()))
+      } catch {
+        /* sessionStorage 不可用时直接刷新 */
+      }
+      window.location.reload()
+    }
   }
 
   return {

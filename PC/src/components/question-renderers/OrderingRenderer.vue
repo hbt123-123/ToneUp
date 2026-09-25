@@ -15,12 +15,34 @@ const props = defineProps<{ ctx: QuestionContext }>()
 
 const cards = computed<OptionItem[]>(() => props.ctx.question.options ?? [])
 
-// 受控同步：ctx.answer 为空时按原始顺序初始化
-function currentOrder(): string[] {
-  if (Array.isArray(props.ctx.answer) && (props.ctx.answer as unknown[]).length > 0) {
-    return props.ctx.answer as string[]
+// M-474：label→卡片索引表，computed 建一次 Map，替换 labelOf 的 O(n) 每行两次线性扫描
+const cardByLabel = computed<Map<string, OptionItem>>(() => {
+  const map = new Map<string, OptionItem>()
+  for (const c of cards.value) map.set(c.label, c)
+  return map
+})
+
+// M-476：渲染与交互统一使用净化后的序列——过滤不在选项集内的项（过期服务端序列、损坏草稿）
+// 与重复项；空/非数组 answer 回退原始顺序。无效 label 不再整行渲染（M-475 行为修正）
+const displayOrder = computed<string[]>(() => {
+  const fallback = cards.value.map((c) => c.label)
+  const ans = props.ctx.answer
+  const list = Array.isArray(ans) && ans.length > 0 ? ans : fallback
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const id of list) {
+    if (typeof id === 'string' && !seen.has(id) && cardByLabel.value.has(id)) {
+      seen.add(id)
+      out.push(id)
+    }
   }
-  return cards.value.map((c) => c.label)
+  // 全部无效（极端脏数据）时回退原始顺序，避免渲染空列表
+  return out.length > 0 ? out : fallback
+})
+
+// 受控同步：以净化序列为唯一事实源（computed 缓存引用，避免每次调用重复分配数组）
+function currentOrder(): string[] {
+  return displayOrder.value
 }
 
 // H-144：删除 order 影子 ref——所有操作直接以 currentOrder()（ctx.answer）为唯一事实源，
@@ -75,8 +97,9 @@ function onDrop(index: number): void {
   dragOver.value = null
 }
 
+// M-474：Map 查找 O(1)；displayOrder 已过滤无效 label，此处 undefined 仅剩防御兜底
 function labelOf(id: string): OptionItem | undefined {
-  return cards.value.find((c) => c.label === id)
+  return cardByLabel.value.get(id)
 }
 </script>
 
@@ -97,7 +120,8 @@ function labelOf(id: string): OptionItem | undefined {
       >
         <div class="seq-head">
           <span class="seq-badge">{{ index + 1 }}</span>
-          <span class="orig-label">卡片 {{ labelOf(id)?.label ?? id }}</span>
+          <!-- M-475：无效 label 不再原样回显误导（displayOrder 已过滤），此处仅防御性兜底 -->
+          <span class="orig-label">卡片 {{ labelOf(id)?.label ?? '?' }}</span>
           <span class="ops">
             <n-button size="tiny" quaternary :disabled="index <= 0 || ctx.disabled || ctx.readonly" aria-label="上移" @click="move(index, -1)">↑</n-button>
             <n-button size="tiny" quaternary :disabled="index >= currentOrder().length - 1 || ctx.disabled || ctx.readonly" aria-label="下移" @click="move(index, 1)">↓</n-button>

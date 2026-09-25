@@ -38,12 +38,18 @@ const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 function beforeUpload(options: { file: UploadFileInfo }): boolean {
   const raw = options.file.file
-  if (!raw) return false
+  // M-512：选择无效文件时清掉旧选择，避免 canSubmit 残留 true
+  if (!raw) {
+    fileRef.value = null
+    return false
+  }
   if (!ALLOWED_TYPES.includes(raw.type)) {
+    fileRef.value = null
     message.error('仅支持 jpg / png / webp 格式的图片')
     return false
   }
   if (raw.size > MAX_SIZE_MB * 1024 * 1024) {
+    fileRef.value = null
     message.error(`图片大小不能超过 ${MAX_SIZE_MB}MB`)
     return false
   }
@@ -56,12 +62,22 @@ const canSubmit = computed(() => !!fileRef.value)
 async function createTask(): Promise<void> {
   const file = fileRef.value
   if (!file || uploading.value) return
+  // M-513：数字 ID 严格校验——Number('12abc')→NaN、Number('1.5')→非整数均拦截，非法直接提示不提交
+  const questionIdRaw = questionIdInput.value.trim()
+  if (questionIdRaw && !Number.isInteger(Number(questionIdRaw))) {
+    message.error('关联题目 ID 必须为整数')
+    return
+  }
+  if (attemptIdFromQuery && !Number.isInteger(Number(attemptIdFromQuery))) {
+    message.error('本次作答 ID 非法，请从解析页重新进入')
+    return
+  }
   uploading.value = true
   try {
     const result = await apiCreateAiFeedback({
       file,
       bankId: bankIdInput.value || undefined,
-      questionId: questionIdInput.value ? Number(questionIdInput.value) : undefined,
+      questionId: questionIdRaw ? Number(questionIdRaw) : undefined,
       attemptId: attemptIdFromQuery ? Number(attemptIdFromQuery) : undefined,
     })
     task.value = result
@@ -87,6 +103,10 @@ const polling = usePolling<AiFeedbackTask>(
     until: (t) => t.status === 'succeeded' || t.status === 'failed',
   },
 )
+
+// M-514/M-515：轮询错误与 in-flight 状态——模板展示失败提示，并禁用手动刷新避免与定时轮询并发
+const pollError = polling.error
+const pollLoading = polling.loading
 
 /* 轮询结果同步到本地状态与历史列表；离开页面时轮询随作用域自动停止 */
 watch(polling.data, (latest) => {
@@ -161,8 +181,12 @@ function recordHistory(t: AiFeedbackTask): void {
       <div class="status-head">
         <h3>诊断结果</h3>
         <span class="text-secondary">任务 ID：{{ task.feedback_id }}</span>
-        <n-button size="tiny" quaternary @click="manualRefresh">手动刷新</n-button>
+        <!-- M-515：请求进行中时禁用手动刷新，避免与定时轮询并发 -->
+        <n-button size="tiny" quaternary :disabled="pollLoading" @click="manualRefresh">手动刷新</n-button>
       </div>
+
+      <!-- M-514：状态接口失败时给出可见提示（轮询保持自动重试） -->
+      <n-alert v-if="pollError" type="error" style="margin-top: 12px">刷新任务状态失败：{{ pollError }}，将自动重试</n-alert>
 
       <n-alert v-if="task.status === 'queued'" type="info">排队中，请稍候…</n-alert>
       <n-alert v-else-if="task.status === 'pending'" type="info">已受理，等待处理…</n-alert>
@@ -182,8 +206,8 @@ function recordHistory(t: AiFeedbackTask): void {
         <n-alert type="error" title="任务失败">
           {{ task.error_message ?? 'AI 服务暂时不可用' }}
         </n-alert>
-        <!-- 失败重试（FR-AI-05）：新建任务 -->
-        <n-button type="primary" secondary :disabled="!canSubmit" @click="createTask">重新发起</n-button>
+        <!-- 失败重试（FR-AI-05）：新建任务；M-516：uploading 期间禁用，防止重复创建反馈任务 -->
+        <n-button type="primary" secondary :disabled="!canSubmit || uploading" @click="createTask">重新发起</n-button>
         <span v-if="!canSubmit" class="text-secondary retry-hint">请重新选择图片后再发起</span>
       </template>
 

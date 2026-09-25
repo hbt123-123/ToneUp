@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { NButton, NCard, NSelect, NSpin, NTag } from 'naive-ui'
 import { useStatsStore } from '@/stores/stats'
 import { useCatalogStore } from '@/stores/catalog'
+import { appMessage } from '@/utils/feedback'
 import { formatPercent, typeCodeLabel } from '@/utils/format'
 import DailyTrendChart from '@/components/charts/DailyTrendChart.vue'
 
@@ -20,12 +21,24 @@ onMounted(() => {
   void refreshAll()
 })
 
+// M-533：代际计数——快速连续切换 range/subject 时，旧代际请求的全部后续处理在落地前作废，
+// 防止晚到的旧筛选结果覆盖新筛选结果
+let refreshSeq = 0
+
 async function refreshAll(): Promise<void> {
-  await Promise.allSettled([
+  const mySeq = ++refreshSeq
+  // M-532：allSettled 收集 rejected 并以 message 明示"加载失败"，
+  // 与指标卡显示"—"、榜单显示"暂无数据"的空态区分开
+  const results = await Promise.allSettled([
     stats.fetchOverview(true),
     stats.fetchWeaknesses(true),
     stats.fetchDailyTrend(undefined, true),
   ])
+  if (mySeq !== refreshSeq) return // M-533：已有更新代际的筛选请求在途，本代际结果作废
+  const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (failed.length > 0) {
+    appMessage.error('统计数据加载失败，请稍后点击"刷新"重试')
+  }
 }
 
 function onFilterChange(): void {
@@ -46,9 +59,17 @@ const rangeOptions = [
 ]
 
 /** 薄弱项跳转对应题库定向练习（FR-STAT-03） */
-function practiceWeakness(item: { bank_id?: string; type_code?: string }): void {
+async function practiceWeakness(item: { bank_id?: string; type_code?: string }): Promise<void> {
   if (!item.bank_id) {
     router.push('/catalog')
+    return
+  }
+  // M-534：目录未加载时 bankById 为空会跳过 selectSubject，带着"未选中学科"的状态进练习页——
+  // 先 await fetchCatalog（store 内有 in-flight 合并，重复调用安全），失败则提示并不跳转
+  try {
+    await catalog.fetchCatalog()
+  } catch {
+    appMessage.error('题库目录加载失败，请稍后重试')
     return
   }
   localStorage.setItem('toneup:last-bank', item.bank_id)

@@ -10,8 +10,9 @@ import { NVirtualList } from 'naive-ui'
 const props = defineProps<{
   ids: number[]
   currentIndex: number
-  answeredIds: Set<number>
-  markedIds: Set<number>
+  /* M-450：兼容 Set 或 Array 传参；组件内只经 computed 引用读取（不解构复制），父组件引用替换或响应式变更均可追踪 */
+  answeredIds: Set<number> | number[]
+  markedIds: Set<number> | number[]
 }>()
 
 const emit = defineEmits<{ jump: [index: number] }>()
@@ -19,17 +20,27 @@ const emit = defineEmits<{ jump: [index: number] }>()
 const filterUnanswered = defineModel<boolean>('unansweredOnly', { default: false })
 const filterMarked = defineModel<boolean>('markedOnly', { default: false })
 
+/* M-450：以 props 引用参与 computed（而非复制为本地 Set），保持对父组件数据变化的响应 */
+const answeredSet = computed<ReadonlySet<number>>(() =>
+  Array.isArray(props.answeredIds) ? new Set(props.answeredIds) : props.answeredIds,
+)
+const markedSet = computed<ReadonlySet<number>>(() =>
+  Array.isArray(props.markedIds) ? new Set(props.markedIds) : props.markedIds,
+)
+
 const visibleIndices = computed<number[]>(() => {
   const out: number[] = []
   props.ids.forEach((id, index) => {
-    if (filterUnanswered.value && !props.answeredIds.has(id)) return
-    if (filterMarked.value && !props.markedIds.has(id)) return
+    if (filterUnanswered.value && !answeredSet.value.has(id)) return
+    if (filterMarked.value && !markedSet.value.has(id)) return
     out.push(index)
   })
   return out
 })
 
-/* 虚拟化：>50 条时按行列块渲染（每行 8 格） */
+/* 虚拟化：按行列块渲染（每行 8 格）。
+ * M-451：阈值以「题目数」定义（>50 题启用虚拟滚动），直接用可见题数判断，
+ * 不再以行数换算，避免注释语义与实现脱节 */
 const COLS_PER_ROW = 8
 const VIRTUAL_THRESHOLD = 50
 
@@ -45,13 +56,13 @@ function cellClass(index: number): string[] {
   const id = props.ids[index]
   const classes: string[] = []
   if (index === props.currentIndex) classes.push('current')
-  if (id !== undefined && props.answeredIds.has(id)) classes.push('answered')
-  if (id !== undefined && props.markedIds.has(id)) classes.push('marked')
+  if (id !== undefined && answeredSet.value.has(id)) classes.push('answered')
+  if (id !== undefined && markedSet.value.has(id)) classes.push('marked')
   return classes
 }
 
 /* H-138：answeredIds 可能包含不在本次 ids 范围内的题（跨会话残留），进度必须取交集 */
-const answeredCount = computed(() => props.ids.filter((id) => props.answeredIds.has(id)).length)
+const answeredCount = computed(() => props.ids.filter((id) => answeredSet.value.has(id)).length)
 
 const progressPercent = computed(() =>
   props.ids.length === 0 ? 0 : Math.round((answeredCount.value / props.ids.length) * 100),
@@ -93,7 +104,14 @@ const progressPercent = computed(() =>
       <span><i class="dot marked" />疑问标记</span>
     </div>
 
-    <n-virtual-list v-if="rows.length > VIRTUAL_THRESHOLD / COLS_PER_ROW" :items="rows" :item-size="40" class="grid-virtual">
+    <!-- M-451：按「题目数」判断是否虚拟化（>VIRTUAL_THRESHOLD 题启用），与阈值常量语义一致 -->
+    <!-- M-452：item-size 与真实行高对齐（按钮 min-height 32px + 行 margin-bottom 6px = 38px） -->
+    <n-virtual-list
+      v-if="visibleIndices.length > VIRTUAL_THRESHOLD"
+      :items="rows"
+      :item-size="38"
+      class="grid-virtual"
+    >
       <template #default="{ item }: { item: number[] }">
         <div class="grid-row">
           <n-button
@@ -204,6 +222,7 @@ const progressPercent = computed(() =>
   overflow-y: auto;
 }
 
+/* M-452：行高基准说明——.cell min-height 32px + .grid-row margin-bottom 6px = 38px（见 :item-size） */
 .grid-row {
   display: grid;
   grid-template-columns: repeat(8, 1fr);

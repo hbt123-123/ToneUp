@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NButton, NInput, NSelect } from 'naive-ui'
 import RichText from '@/components/common/RichText.vue'
 import type { QuestionContext } from './types'
@@ -8,8 +8,8 @@ import type { OptionItem } from '@/api/generated/schema'
 /**
  * CLOZE（英语完形填空，§6.4.6）：
  * - passage 面板编号空位高亮；每空对应一个输入位（选项结构存在时为小选择器，否则文本框）；
- * - 空位间快速跳转（上一空/下一空按钮）；答案按空序号数组保存；
- * - 提交后逐空标注对错（以服务端返回为准）。
+ * - 空位间快速跳转（上一空/下一空按钮）；答案按空序号数组保存。
+ * - M-462：移除「提交后逐空标注对错」——AttemptFeedback 无 per_blank 字段且客观题 grading 为 null，原判定为死代码。
  */
 const props = defineProps<{ ctx: QuestionContext }>()
 
@@ -17,14 +17,16 @@ const blankCount = computed(() => {
   const subs = props.ctx.question.sub_questions
   if (Array.isArray(subs) && subs.length > 0) return subs.length
   const passage = props.ctx.question.passage ?? ''
-  const matches = passage.match(/_{2,}\s*\d*|_{2,}|\(\s*\d+\s*\)/g)
+  // M-459：删除被首分支 _{2,}\s*\d* 完全覆盖的死分支 _{2,}
+  const matches = passage.match(/_{2,}\s*\d*|\(\s*\d+\s*\)/g)
   return Math.max(1, matches?.length ?? 1)
 })
 
-/** 若契约 options 与空数一致则视为逐空选项，渲染选择器 */
+// M-460：options 非空即返回（blankCount 恒 >=1）——单空 cloze 携带 options 时也显示选择器，
+// 与 generic 分支行为对齐；多空 cloze 共享选项集（长度可与空数不同）同样按非空渲染选择器
 const perBlankOptions = computed<OptionItem[] | null>(() => {
   const opts = props.ctx.question.options
-  if (Array.isArray(opts) && opts.length === blankCount.value && blankCount.value > 1) return opts
+  if (Array.isArray(opts) && opts.length > 0) return opts
   return null
 })
 
@@ -32,6 +34,11 @@ const answers = computed<string[]>(() =>
   Array.isArray(props.ctx.answer) ? (props.ctx.answer as string[]) : [],
 )
 const activeBlank = ref(0)
+
+// M-461：空数变化（换题/重算空位）时将 activeBlank 钳制到 [0, blankCount-1]，避免越界
+watch(blankCount, (count) => {
+  if (activeBlank.value > count - 1) activeBlank.value = count - 1
+})
 
 function valueOf(index: number): string {
   return answers.value[index] ?? ''
@@ -49,13 +56,7 @@ function update(index: number, value: string): void {
 function focusBlank(index: number): void {
   activeBlank.value = Math.min(blankCount.value - 1, Math.max(0, index))
 }
-
-function selectState(index: number): 'error' | undefined {
-  /* 逐空对错以后端契约为准 */
-  const fb: unknown = props.ctx.grading?.feedback ?? null
-  const per = (fb as { per_blank?: unknown } | null)?.per_blank
-  return Array.isArray(per) && per[index] === false ? 'error' : undefined
-}
+/* M-462：selectState 已删除（AttemptFeedback 无 per_blank 字段，逐空判错为死代码） */
 </script>
 
 <template>
@@ -66,12 +67,13 @@ function selectState(index: number): 'error' | undefined {
     </div>
 
     <div class="blanks-area">
+      <!-- M-462：移除逐空判错（selectState / :status / error class） -->
       <div class="blank-grid">
         <div
           v-for="i in blankCount"
           :key="i"
           class="blank-cell"
-          :class="{ active: activeBlank === i - 1, error: selectState(i - 1) === 'error' }"
+          :class="{ active: activeBlank === i - 1 }"
         >
           <span class="blank-index">{{ i }}</span>
           <n-select
@@ -81,7 +83,6 @@ function selectState(index: number): 'error' | undefined {
             :value="valueOf(i - 1) || null"
             :options="perBlankOptions.map((o) => ({ label: o.label, value: o.label }))"
             :disabled="ctx.disabled || ctx.readonly"
-            :status="selectState(i - 1)"
             @update:value="(v: string | null) => update(i - 1, v ?? '')"
             @focus="focusBlank(i - 1)"
           />
@@ -90,7 +91,6 @@ function selectState(index: number): 'error' | undefined {
             size="small"
             :value="valueOf(i - 1)"
             :disabled="ctx.disabled || ctx.readonly"
-            :status="selectState(i - 1)"
             placeholder=""
             @update:value="(v: string) => update(i - 1, v)"
             @focus="focusBlank(i - 1)"
@@ -146,9 +146,7 @@ function selectState(index: number): 'error' | undefined {
   background: rgba(124, 58, 237, 0.06);
 }
 
-.blank-cell.error {
-  border-color: var(--tu-error);
-}
+/* M-462：.blank-cell.error 样式随逐空判错一并移除 */
 
 .blank-index {
   flex: none;

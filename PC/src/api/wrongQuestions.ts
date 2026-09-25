@@ -50,10 +50,12 @@ export function fetchWrongQuestions(
   signal?: AbortSignal,
 ): Promise<{ items: WrongQuestionItem[]; total: number; page: number; page_size: number }> {
   const query: Record<string, unknown> = {}
-  if (params.bankId) query.bank_id = params.bankId
-  if (params.subjectId) query.subject_id = params.subjectId
-  if (params.page) query.page = params.page
-  if (params.pageSize) query.page_size = params.pageSize
+  // M-371：改用 !== undefined 判断，避免 page: 0 / pageSize: 0 等合法 falsy 值被静默丢弃
+  //（空串等无效值仍由 http.buildUrl 过滤）
+  if (params.bankId !== undefined) query.bank_id = params.bankId
+  if (params.subjectId !== undefined) query.subject_id = params.subjectId
+  if (params.page !== undefined) query.page = params.page
+  if (params.pageSize !== undefined) query.page_size = params.pageSize
   return request('/wrong-questions', { query, signal })
 }
 
@@ -84,13 +86,42 @@ export function removeWrongQuestion(id: number): Promise<void> {
   return request(`/wrong-questions/${id}`, { method: 'DELETE' })
 }
 
+/** M-372：单次 sync 请求的条目上限，超出自动分块顺序上传 */
+const SYNC_CHUNK_SIZE = 100
+
 /**
  * 批量同步错题（离线队列上传）
  * POST /api/wrong-questions/sync
+ * M-372：补齐上传防护——空数组短路返回；按 (bank_id, question_id) 去重；
+ * 显式构造请求体，剥离服务端专属字段（id/user_id，防止调用方传入 WrongQuestionItem 时一并上送）；
+ * 超过上限自动分块并聚合结果
  */
-export function syncWrongQuestions(items: WrongQuestionSyncItem[]): Promise<SyncResult> {
-  return request('/wrong-questions/sync', {
-    method: 'POST',
-    json: { items },
-  })
+export async function syncWrongQuestions(items: WrongQuestionSyncItem[]): Promise<SyncResult> {
+  if (items.length === 0) return { synced: 0, skipped: 0, errors: [] }
+  const seen = new Set<string>()
+  const payload: WrongQuestionSyncItem[] = []
+  for (const it of items) {
+    const key = `${it.bank_id}\u0000${it.question_id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    payload.push({
+      bank_id: it.bank_id,
+      question_id: it.question_id,
+      attempt_count: it.attempt_count,
+      last_wrong_at: it.last_wrong_at,
+      tags: it.tags,
+      ...(it.preview !== undefined ? { preview: it.preview } : {}),
+    })
+  }
+  const merged: SyncResult = { synced: 0, skipped: 0, errors: [] }
+  for (let i = 0; i < payload.length; i += SYNC_CHUNK_SIZE) {
+    const res = await request<SyncResult>('/wrong-questions/sync', {
+      method: 'POST',
+      json: { items: payload.slice(i, i + SYNC_CHUNK_SIZE) },
+    })
+    merged.synced += res.synced
+    merged.skipped += res.skipped
+    merged.errors.push(...res.errors)
+  }
+  return merged
 }

@@ -2,7 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- M-356：favicon 用 %BASE_URL% 前缀（Vite 构建时替换为配置的 base），
+         部署在非根路径（如 /toneup/）时不再 404 -->
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="ToneUp 考研刷题 PC 端：题库刷题、智能复习、AI 判分与统计。" />
     <title>ToneUp · 一潼上岸</title>

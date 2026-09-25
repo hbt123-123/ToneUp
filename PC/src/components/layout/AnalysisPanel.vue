@@ -82,6 +82,8 @@ const noteSaving = ref(false)
 const noteText = ref('')
 const noteSavedAt = ref<string | null>(null)
 const savedSnapshot = ref<string | null>(null)
+/* M-440：笔记加载失败标记——失败时给出可见反馈并暂停保存，避免以空内容覆盖云端笔记 */
+const noteLoadFailed = ref(false)
 
 /** 竞态保护：仅应用最后一次笔记请求的结果（快速切题时旧响应作废） */
 let noteSeq = 0
@@ -95,6 +97,7 @@ watch(
     noteText.value = ''
     noteSavedAt.value = null
     savedSnapshot.value = null
+    noteLoadFailed.value = false // M-440：切题重新加载前复位失败态
     noteLoading.value = true
     try {
       const note = await apiGetNote(qid, bankId)
@@ -102,8 +105,13 @@ watch(
       noteText.value = note?.note_text ?? ''
       noteSavedAt.value = note?.updated_at ?? null
       savedSnapshot.value = noteText.value
-    } catch {
-      /* 笔记加载失败不打断解析浏览 */
+    } catch (err) {
+      // M-440：加载失败不再静默——复用全局 message 给出可见反馈；
+      // 并将快照与文本对齐（均为空串），避免 noteDirty 误判为「已改动」而误存空笔记覆盖云端
+      if (mySeq !== noteSeq) return
+      noteLoadFailed.value = true
+      savedSnapshot.value = noteText.value
+      message.error(`笔记加载失败，云端内容可能未同步：${humanizeError(err)}`)
     } finally {
       if (mySeq === noteSeq) noteLoading.value = false
     }
@@ -149,12 +157,17 @@ async function saveNote(): Promise<void> {
 
     <!-- 主观题判分状态机（§8.2） -->
     <div v-if="grading && grading.status !== 'succeeded'" class="grading-block tu-card">
-      <div v-if="grading.status === 'queued' || grading.status === 'pending'" class="grading-state">
+      <!-- M-441：进行时提示仅在自评兜底未触发时显示；轮询超时兜底（selfJudgeReady）后
+           不再与「排队/批改中」提示并列，避免「正在批改」与「无法给出结论」互相矛盾 -->
+      <div
+        v-if="!selfJudgeReady && (grading.status === 'queued' || grading.status === 'pending')"
+        class="grading-state"
+      >
         <n-spin size="small" />
         <span>已受理，排队等待 AI 批改…</span>
         <span class="dim">可先继续浏览其他题目</span>
       </div>
-      <div v-else-if="grading.status === 'processing'" class="grading-state pulsing">
+      <div v-else-if="!selfJudgeReady && grading.status === 'processing'" class="grading-state pulsing">
         <n-spin size="small" />
         <span>AI 正在批改，请稍候…</span>
         <span class="dim">预计需要几十秒到几分钟</span>
@@ -164,6 +177,8 @@ async function saveNote(): Promise<void> {
         <span>AI 判分失败{{ grading.feedback?.error_reason ? `：${grading.feedback.error_reason}` : '' }}</span>
       </div>
 
+      <!-- M-441：自评块仅在判分失败或轮询超时兜底（store 置位 selfJudgeReady）时渲染，
+           不再出现在 queued/pending/processing 的进行时提示之下 -->
       <div v-if="selfJudgeReady" class="self-judge">
         <p class="sj-title">AI 暂时无法给出结论，你可以对照标准答案自行评定：</p>
         <div class="sj-buttons">
@@ -224,8 +239,22 @@ async function saveNote(): Promise<void> {
         :rows="3"
         placeholder="记录思路、易错点或总结…（保存后多端同步）"
       />
+      <!-- M-440：加载失败时明确提示并暂停保存入口，防止用户在云端内容未知的情况下覆盖写入 -->
+      <n-alert
+        v-if="noteLoadFailed"
+        type="warning"
+        :show-icon="true"
+        title="笔记加载失败，云端内容可能未同步，已暂停保存"
+      />
       <div class="notes-foot">
-        <n-button size="small" type="primary" :loading="noteSaving" :disabled="!noteDirty" @click="saveNote">
+        <!-- M-440：加载失败期间禁用保存，重新进入该题加载成功后恢复 -->
+        <n-button
+          size="small"
+          type="primary"
+          :loading="noteSaving"
+          :disabled="!noteDirty || noteLoadFailed"
+          @click="saveNote"
+        >
           保存笔记
         </n-button>
         <n-button

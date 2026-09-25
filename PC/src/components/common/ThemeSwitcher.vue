@@ -25,11 +25,13 @@ const processing = ref(false)
 const MAX_STORE_BYTES = 10 * 1024 * 1024
 /** GIF 上限：Canvas 重编码会丢失动画帧，GIF 一律原样保存，只设更大的体积上限 */
 const MAX_GIF_STORE_BYTES = 50 * 1024 * 1024
-/** 超限重编码时的最长边与 JPEG 降质梯度 */
+/** 超限重编码时的最长边与降质梯度 */
 const MAX_EDGE = 2560
 const ENCODE_QUALITIES = [0.85, 0.72, 0.6, 0.45, 0.3]
 /** 允许的图片扩展名（与 MIME 检查互补，防伪造 Content-Type） */
 const ALLOWED_EXTENSIONS = /\.(jpe?g|png|gif|webp|bmp|avif|svg)$/i
+/** M-437：这些输入类型可能带透明通道，重编码必须走 PNG（JPEG 无 alpha，透明像素会变黑底） */
+const ALPHA_MIME_TYPES = new Set(['image/png', 'image/webp', 'image/avif'])
 
 function onSelect(value: string) {
   ui.setColorTheme(value as ColorTheme)
@@ -78,14 +80,30 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   })
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+function canvasToBlob(canvas: HTMLCanvasElement, quality: number, mime: string): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (b) => (b ? resolve(b) : reject(new Error('图片处理失败'))),
-      'image/jpeg',
+      mime, // M-437：按透明通道选择输出类型（PNG 保透明 / JPEG 更小）
       quality,
     )
   })
+}
+
+/**
+ * M-437：抽样检测画布是否含非不透明像素；读不到像素数据时保守视为含透明（输出 PNG）。
+ * blob URL 绘制的画布不跨域，getImageData 不会污染抛错，try/catch 仅作兜底。
+ */
+function canvasHasAlpha(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
+  try {
+    const data = ctx.getImageData(0, 0, width, height).data
+    for (let i = 3; i < data.length; i += 4 * 61) { // 每约 61 像素抽 1 个 alpha 通道
+      if ((data[i] ?? 0) < 255) return true
+    }
+  } catch {
+    return true
+  }
+  return false
 }
 
 /**
@@ -93,6 +111,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
  * - 不限分辨率与宽高比，≤10MB 的图直接原样保存（保留 GIF 动画、透明通道等）
  * - GIF 走 Canvas 重编码会丢失动画帧，一律原样保存（上限 50MB）
  * - 其他格式超 10MB 才重编码：先限制最长边 2560，仍超限则逐级降质、再逐级缩边
+ * - M-437：png/webp/avif 或画布实测含透明时输出 PNG；其余继续输出 JPEG
  */
 async function processImage(file: File): Promise<Blob> {
   if (file.type === 'image/gif' || /\.gif$/i.test(file.name)) {
@@ -110,12 +129,19 @@ async function processImage(file: File): Promise<Blob> {
   if (!ctx) throw new Error('浏览器不支持 Canvas')
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
 
+  // M-437：按输入类型与画布实测 alpha 决定输出格式，重编码不再丢失透明通道
+  const mime: string = ALPHA_MIME_TYPES.has(file.type) || canvasHasAlpha(ctx, canvas.width, canvas.height)
+    ? 'image/png'
+    : 'image/jpeg'
+
   while (true) {
     for (const q of ENCODE_QUALITIES) {
-      const blob = await canvasToBlob(canvas, q)
+      const blob = await canvasToBlob(canvas, q, mime)
       if (blob.size <= MAX_STORE_BYTES) return blob
     }
-    if (canvas.width <= 640) break
+    // M-438：最长边可能在高度轴——宽与高都缩到阈值以下才放弃，
+    // 避免高瘦图在宽已达标时被误判"压缩不动"而报错
+    if (canvas.width <= 640 && canvas.height <= 640) break
     const next = document.createElement('canvas')
     next.width = Math.round(canvas.width * 0.7)
     next.height = Math.round(canvas.height * 0.7)

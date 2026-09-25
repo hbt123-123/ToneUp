@@ -66,6 +66,9 @@
 }
 
 html.dark {
+  /* M-415：暗色模式统一声明 color-scheme: dark，让滚动条/表单控件等浏览器原生 UI 跟随暗色，
+     不再只依赖 starry-purple 预设单独设置 */
+  color-scheme: dark;
   --tu-bg: #16181f;
   --tu-surface: #1e212b;
   --tu-sidebar-bg: linear-gradient(180deg, #232736 0%, #1a1d27 100%);
@@ -212,6 +215,10 @@ html[data-theme="sky-blue"] {
   --tu-gradient-hero: url('/background/day.png') center/cover no-repeat;
   --tu-gradient-card: rgba(255, 255, 255, 0.85);
   --tu-gradient-accent: #0ea5e9;
+  /* M-414：天空蓝主题色板 token 化，供 sky.css 等主题样式复用，替代散落的硬编码 hex */
+  --tu-sky-500: #0ea5e9;
+  --tu-sky-300: #7dd3fc;
+  --tu-sky-200: #bae6fd;
   --tu-accent-surface: rgba(14, 165, 233, 0.1);
   --tu-accent-overlay: rgba(14, 165, 233, 0.15);
   --tu-accent-hover-surface: rgba(14, 165, 233, 0.25);

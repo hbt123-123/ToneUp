@@ -4,11 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { NDropdown, NModal } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { useCatalogStore } from '@/stores/catalog'
-import { usePracticeStore } from '@/stores/practice'
-import { useReviewStore } from '@/stores/review'
 import { useStatsStore } from '@/stores/stats'
 import { useUiStore } from '@/stores/ui'
-import { useWrongBookStore } from '@/stores/wrongbook'
 import ThemeSwitcher from '@/components/common/ThemeSwitcher.vue'
 
 /** 顶栏（§4.1）：左面包屑，右用户菜单（主题切换、退出登录） */
@@ -18,9 +15,6 @@ const auth = useAuthStore()
 const catalog = useCatalogStore()
 const stats = useStatsStore()
 const ui = useUiStore()
-const review = useReviewStore()
-const wrongbook = useWrongBookStore()
-const practice = usePracticeStore()
 
 const showThemePanel = ref(false)
 
@@ -33,16 +27,17 @@ const userOptions = computed<DropdownOption[]>(() => [
   { key: 'logout', label: '退出登录' },
 ])
 
-function onUserAction(key: string | number): void {
+async function onUserAction(key: string | number): Promise<void> {
   if (key === 'themePanel') showThemePanel.value = true
   else if (key === 'theme') ui.toggleTheme()
   else if (key === 'logout') {
-    auth.logout()
+    // M-458：复用 auth.logout（async）——其内部已 clearAllUserDomainData 清用户域持久数据，
+    // 并重置 practice/wrongbook/review 三个 store，不再在此手动重复调用这三个 reset；
+    // await 清理完成后才跳转登录页，避免导航后命中上一用户的残留缓存
+    await auth.logout()
+    // auth.logout 未覆盖的内存态：目录选择与统计视图（其持久化部分已随清理移除）
     catalog.reset()
     stats.reset()
-    review.reset()
-    wrongbook.reset()
-    practice.resetSession()
     void router.push('/login')
   }
 }

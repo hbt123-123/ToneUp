@@ -18,6 +18,15 @@ export type TypeCode =
   | 'TRANSLATION'
   | 'ESSAY'
 
+/**
+ * M-36x（手改：generated 文件，需同步生成器）：
+ * string 兜底但不把字面量联合坍缩为 string 的辅助类型——
+ * `A | string` 在 TS 中会坍缩为纯 string，失去补全与窄化价值；
+ * `string & Record<never, never>` 保持任何 string 仍可赋值，同时保留已知字面量的
+ * IDE 补全与可辨识联合能力，并容忍后端新增的未知枚举值
+ */
+type StringBackedUnion<T extends string> = T | (string & Record<never, never>)
+
 /** 后端契约 §4.4 统一题目 DTO */
 export interface OptionItem {
   label: string
@@ -29,7 +38,9 @@ export interface QuestionDto {
   question_id: number
   collection_id: number
   year: number
-  type_code: string
+  // M-361（手改：generated 文件，需同步生成器）：type_code 使用 TypeCode 联合而非裸 string，
+  // 恢复枚举的补全/窄化价值；StringBackedUnion 兜底容忍后端新增题型
+  type_code: StringBackedUnion<TypeCode>
   number: number
   content: string
   passage?: string | null
@@ -67,7 +78,9 @@ export interface LoginResult {
 export interface CurrentUser {
   id: number
   username: string
-  role: 'user' | 'admin' | string
+  // M-362（手改：generated 文件，需同步生成器）：`'user' | 'admin' | string` 会坍缩为
+  // 纯 string，字面量成员形同虚设；改用 StringBackedUnion 保留补全与可辨识性
+  role: StringBackedUnion<'user' | 'admin'>
 }
 
 /* ---------- 目录 ---------- */
@@ -141,8 +154,15 @@ export interface AttemptResult {
   is_correct?: boolean | null
   score?: number | null
   max_score?: number | null
-  /** 主观题异步判分状态载体（§8.2）：queued/pending/processing/succeeded/failed */
+  /**
+   * M-363（手改：generated 文件，需同步生成器）：异步判分状态的权威字段（§8.2）。
+   * 判定主观题判分进度一律以本字段为准
+   */
   grading_status?: GradingStatus | null
+  /**
+   * M-363（手改：generated 文件，需同步生成器）：兼容旧响应的冗余别名，语义与
+   * grading_status 重叠且不保证权威；判定判分进度请使用 grading_status
+   */
   status?: GradingStatus | null
   feedback?: AttemptFeedback | null
   answer_text?: string | null

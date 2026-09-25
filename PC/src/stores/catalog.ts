@@ -49,18 +49,30 @@ export const useCatalogStore = defineStore('catalog', () => {
     )
   }
 
+  /** M-391：进行中请求的共享句柄——重叠调用（强制刷新与视图初始化竞态）复用同一次 apiCatalog，不再并发重复请求 */
+  let catalogInflight: Promise<void> | null = null
+
   async function fetchCatalog(force = false): Promise<void> {
     if (loaded.value && !force) return
+    if (catalogInflight) return catalogInflight // M-391：请求进行中直接复用同一 Promise
     loading.value = true
-    try {
-      const data: CatalogData = await apiCatalog()
-      subjects.value = data?.subjects ?? []
-      banks.value = data?.banks ?? []
-      loaded.value = true
-      writeJsonCache(CATALOG_CACHE_KEY, { subjects: subjects.value, banks: banks.value } satisfies CatalogCachePayload)
-    } finally {
-      loading.value = false
-    }
+    catalogInflight = (async () => {
+      try {
+        const data: CatalogData = await apiCatalog()
+        subjects.value = data?.subjects ?? []
+        banks.value = data?.banks ?? []
+        loaded.value = true
+        writeJsonCache(CATALOG_CACHE_KEY, { subjects: subjects.value, banks: banks.value } satisfies CatalogCachePayload)
+      } catch (err) {
+        // M-392：失败不能无声吞掉——控制台留痕；保留抛出契约（AdminView 等调用方依赖其呈现错误反馈）
+        console.warn('[catalog] 目录拉取失败', err)
+        throw err
+      } finally {
+        loading.value = false
+        catalogInflight = null // M-391：失败同样清空句柄，后续调用可重试
+      }
+    })()
+    return catalogInflight
   }
 
   /** 学科变化则题型与年份重置（§4.3 联动规则） */
@@ -84,13 +96,25 @@ export const useCatalogStore = defineStore('catalog', () => {
   /** 题库详情会话级缓存（§8.5 元数据缓存） */
   const bankDetailCache = new Map<string, BankDetail>()
 
+  /** M-393：同 bankId 的进行中请求合并——多组件并发挂载只发一次 apiBankDetail；失败后清句柄保证可重试 */
+  const bankDetailInflight = new Map<string, Promise<BankDetail>>()
+
   async function fetchBankDetail(bankId: string, force = false): Promise<BankDetail> {
     if (!force && bankDetailCache.has(bankId)) {
       return bankDetailCache.get(bankId)!
     }
-    const detail = await apiBankDetail(bankId)
-    bankDetailCache.set(bankId, detail)
-    return detail
+    const inflight = bankDetailInflight.get(bankId)
+    if (inflight) return inflight
+    const task = apiBankDetail(bankId)
+      .then((detail) => {
+        bankDetailCache.set(bankId, detail)
+        return detail
+      })
+      .finally(() => {
+        bankDetailInflight.delete(bankId)
+      })
+    bankDetailInflight.set(bankId, task)
+    return task
   }
 
   /** 管理侧重载后手动刷新本地缓存（FR-ADM-02）：内存与持久键一并清除 */

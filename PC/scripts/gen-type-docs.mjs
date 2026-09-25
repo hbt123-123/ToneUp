@@ -7,7 +7,7 @@
  * 避免源文件更新后文档漂移（单一事实源）。
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -35,6 +35,7 @@ const SUBJECT_LABELS = {
   reserved: '保留',
 }
 
+// M-357：未知 subject 回退为原始值而非 undefined 字面量；新增学科时应同步补全 SUBJECT_LABELS
 const subjectOf = (s) => SUBJECT_LABELS[s] ?? s
 
 const md = `# 题型定义表
@@ -57,5 +58,12 @@ ${QUESTION_TYPES.map(t =>
 `
 
 const outputPath = resolve(__dirname, '..', 'docs', 'question-types.md')
-writeFileSync(outputPath, md, 'utf-8')
+// M-358：先确保 docs/ 目录存在，写失败时输出可读错误并退出，不再抛裸 ENOENT 堆栈
+try {
+  mkdirSync(dirname(outputPath), { recursive: true })
+  writeFileSync(outputPath, md, 'utf-8')
+} catch (err) {
+  console.error(`❌ 写入文档失败: ${outputPath}`, err)
+  process.exit(1)
+}
 console.log(`✅ 已生成: ${outputPath}`)

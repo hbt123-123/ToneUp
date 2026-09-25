@@ -53,9 +53,11 @@ const ACTIVATABLE_ROLES = [
   'link',
 ]
 
-/** Naive UI 弹层（对话框/模态）打开时不劫持按键，避免 Enter/Space 穿透到底层页面 */
+/** Naive UI 弹层（对话框/模态/抽屉）打开时不劫持按键，避免 Enter/Space 穿透到底层页面 */
 function hasOpenOverlay(): boolean {
-  return document.querySelector('.n-modal, .n-dialog') !== null
+  // M-379：补上 .n-drawer（PracticeView 的信息抽屉渲染为 .n-drawer），
+  // 抽屉展开时 A~F/Enter/箭头不再穿透到下层答题逻辑
+  return document.querySelector('.n-modal, .n-dialog, .n-drawer') !== null
 }
 
 export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: () => boolean = () => true): void {
@@ -86,6 +88,9 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: () => 
         handlers.onLetter?.(key.toUpperCase())
         break
       case key === 'Enter':
+        // M-380：目标为可交互元素（button/a/[role=button] 等）时放行原生激活，
+        // 不再吞掉 Tab 聚焦后的 Enter 点击；输入类目标已由上方 isEditable 提前放行
+        if (isActivatable(e.target)) break
         e.preventDefault()
         handlers.onConfirmOrNext?.()
         break
@@ -104,6 +109,9 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: () => 
         if (!e.repeat && spaceTimer === null) {
           spaceTimer = setTimeout(() => {
             spaceTimer = null
+            // M-381：600ms 等待期间上下文可能已变化（切背题模式/提交中/弹层或抽屉打开），
+            // 触发前重新校验守卫，避免越过 enabled() 误标记题目
+            if (!enabled() || hasOpenOverlay()) return
             handlers.onLongPressMark?.()
           }, LONG_PRESS_MS)
         }

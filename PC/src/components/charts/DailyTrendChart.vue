@@ -15,10 +15,16 @@ const props = withDefaults(
     /** 绘图视口高度（viewBox 高，px），默认 140 */
     height?: number
   }>(),
-  { height: TREND_VIEW_H },
+  // M-431：points 补默认空数组，父组件绑定 undefined 时不再在 buildTrendGeometry 内解引用崩溃
+  { points: () => [], height: TREND_VIEW_H },
 )
 
-const geometry = computed(() => buildTrendGeometry(props.points, TREND_VIEW_W, props.height))
+// M-432：height 需为正有限数，否则 0/负数/NaN 会生成非法 viewBox 并破坏几何映射；非法时回退默认
+const safeHeight = computed(() =>
+  Number.isFinite(props.height) && props.height > 0 ? props.height : TREND_VIEW_H,
+)
+
+const geometry = computed(() => buildTrendGeometry(props.points, TREND_VIEW_W, safeHeight.value))
 </script>
 
 <template>
@@ -34,9 +40,10 @@ const geometry = computed(() => buildTrendGeometry(props.points, TREND_VIEW_W, p
           正确率
         </span>
       </div>
+      <!-- M-432：viewBox 使用校验后的 safeHeight，非法 height 不再写出畸形 SVG -->
       <svg
         class="daily-trend-chart"
-        :viewBox="`0 0 ${TREND_VIEW_W} ${props.height}`"
+        :viewBox="`0 0 ${TREND_VIEW_W} ${safeHeight}`"
         role="img"
         aria-label="每日作答量与正确率趋势"
       >
