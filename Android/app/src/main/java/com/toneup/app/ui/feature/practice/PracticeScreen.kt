@@ -285,6 +285,8 @@ fun PracticeScreen(
             confirmButton = {
                 Button(onClick = {
                     showExitDialog = false
+                    // H-57：兑现“保存草稿并退出”的承诺——此前仅退出，未持久化未提交编辑
+                    viewModel.persistDraftsForExit()
                     onExit()
                 }) { Text("保存草稿并退出") }
             },
@@ -734,11 +736,12 @@ fun QuestionBody(
                                         color = MaterialTheme.colorScheme.onErrorContainer
                                     )
                                     if (!removed) {
-                                        TextButton(onClick = { removed = false }) {
+                                        // H-58：原实现赋值自反（false→false/true→true），状态永不改变
+                                        TextButton(onClick = { removed = true }) {
                                             Text("⊗ 移除错题本")
                                         }
                                     } else {
-                                        TextButton(onClick = { removed = true }) {
+                                        TextButton(onClick = { removed = false }) {
                                             Text("撤销")
                                         }
                                     }
@@ -1086,16 +1089,18 @@ private fun LegendItemStar(label: String) {
 }
 
 /** 判断题目是否答对 */
-private fun isQuestionCorrect(slot: QuestionSlot): Boolean {
-    val question = slot.question ?: return false
-    if (slot.status !is PracticeStatus.Submitted) return false
-    val answer = slot.answer ?: return false
+// H-59：三态判定——null 表示未提交/未作答/非客观题，不得折叠为“答错”
+//（原实现把这些情况标红并计入“错题”筛选）
+private fun isQuestionCorrect(slot: QuestionSlot): Boolean? {
+    val question = slot.question ?: return null
+    if (slot.status !is PracticeStatus.Submitted) return null
+    val answer = slot.answer ?: return null
     val myLabels = when (answer) {
         is AnswerValue.Choice -> listOf(answer.label)
         is AnswerValue.MultiChoice -> answer.labels
-        else -> return false
+        else -> return null
     }
-    if (myLabels.isEmpty()) return false
+    if (myLabels.isEmpty()) return null
     val correctLabels = when (question.typeCode) {
         QuestionType.Multi.typeCode -> CorrectAnswerParser.multiLabels(question.answerText).toSet()
         else -> setOfNotNull(CorrectAnswerParser.singleLabel(question.answerText))

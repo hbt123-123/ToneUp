@@ -8,7 +8,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 
 private val Context.userPrefsDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "toneup_user_prefs"
@@ -33,7 +35,13 @@ class UserPreferencesStore(private val context: Context) {
         val HAPTICS = booleanPreferencesKey("haptics_enabled")
     }
 
-    val preferences: Flow<UserPreferences> = context.userPrefsDataStore.data.map { prefs ->
+    val preferences: Flow<UserPreferences> = context.userPrefsDataStore.data
+        .catch { e ->
+            // H-12：DataStore 读取失败（文件损坏/不可读）回退空偏好集，避免 collector 直接崩溃
+            if (e is IOException) emit(androidx.datastore.preferences.core.emptyPreferences())
+            else throw e
+        }
+        .map { prefs ->
         UserPreferences(
             animationsEnabled = prefs[Keys.ANIMATIONS] ?: true,
             darkModePolicy = com.toneup.app.ui.theme.DarkModePolicy.fromKey(prefs[Keys.DARK_MODE]),

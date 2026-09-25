@@ -10,6 +10,8 @@ import com.toneup.app.data.repository.PracticeSessionRegistry
 import com.toneup.app.data.repository.WrongbookRepository
 import com.toneup.app.ui.common.Load
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -33,6 +35,8 @@ class WrongbookViewModel @Inject constructor(
     private val _state = MutableStateFlow(WrongbookUiState())
     val state: StateFlow<WrongbookUiState> = _state
 
+    private var refreshJob: Job? = null
+
     init {
         viewModelScope.launch {
             _state.value = _state.value.copy(
@@ -44,7 +48,9 @@ class WrongbookViewModel @Inject constructor(
 
     /** FR-WB-01 汇总答错题目，按学科/题库筛选 */
     fun refresh(subjectId: String? = _state.value.subjectId, bankId: String? = _state.value.bankId) {
-        viewModelScope.launch {
+        // H-74：先取消在途刷新——用户快速切换筛选时，慢的旧请求晚到会把新筛选结果覆盖回去
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             _state.value = _state.value.copy(items = Load.Loading, subjectId = subjectId, bankId = bankId)
             try {
                 val page = wrongbookRepository.wrongbook(
@@ -54,6 +60,9 @@ class WrongbookViewModel @Inject constructor(
                     pageSize = 50
                 )
                 _state.value = _state.value.copy(items = Load.Ready(page.items))
+            } catch (e: CancellationException) {
+                // H-75：取消必须传播，吞掉会把正常取消变成"加载失败"
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     items = Load.Failed((e as? com.toneup.app.data.repository.AppException)?.userMessage ?: "加载失败")

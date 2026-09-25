@@ -59,12 +59,21 @@ class ReviewViewModel @Inject constructor(
             )
             runCatching { reviewRepository.skip(item.questionId, item.bankId) }
                 .onSuccess {
-                    val current = (_state.value.items as? Load.Ready)?.value ?: emptyList()
-                    _state.value = _state.value.copy(
-                        items = Load.Ready(current.filterNot { it.questionId == item.questionId }),
-                        skippingIds = _state.value.skippingIds - item.questionId,
-                        lastSkipped = item
-                    )
+                    // H-67：refresh 进行中（items 为 Loading/Failed）时不得用空列表覆盖现有状态，
+                    // 仅在 Ready 分支摘除本题；lastSkipped/skippingIds 无论如何都要更新
+                    val current = _state.value.items
+                    _state.value = if (current is Load.Ready) {
+                        _state.value.copy(
+                            items = Load.Ready(current.value.filterNot { it.questionId == item.questionId }),
+                            skippingIds = _state.value.skippingIds - item.questionId,
+                            lastSkipped = item
+                        )
+                    } else {
+                        _state.value.copy(
+                            skippingIds = _state.value.skippingIds - item.questionId,
+                            lastSkipped = item
+                        )
+                    }
                 }
                 .onFailure {
                     _state.value = _state.value.copy(

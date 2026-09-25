@@ -7,7 +7,6 @@ import androidx.datastore.core.DataStoreFactory
 import androidx.datastore.core.Serializer
 import com.toneup.app.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -23,10 +22,16 @@ object SessionDataSerializer : Serializer<SessionData> {
 
     override val defaultValue: SessionData = SessionData()
 
-    override suspend fun readFrom(input: InputStream): SessionData = try {
-        json.decodeFromString(SessionData.serializer(), input.readBytes().decodeToString())
-    } catch (e: Exception) {
-        throw CorruptionException("cannot parse session data", e)
+    override suspend fun readFrom(input: InputStream): SessionData {
+        // H-7：readBytes 的 IO 失败按 IOException 原样传播——只有解析失败才是"损坏"，
+        // 误把瞬时 IO 错误标成 CorruptionException 会让 DataStore 走错误的恢复路径
+        val bytes = input.readBytes()
+        return try {
+            json.decodeFromString(SessionData.serializer(), bytes.decodeToString())
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            throw CorruptionException("cannot parse session data", e)
+        }
     }
 
     override suspend fun writeTo(t: SessionData, output: OutputStream) {
@@ -47,7 +52,7 @@ class SessionDataStoreManager @Inject constructor(
     private val stores = ConcurrentHashMap<Long, DataStore<SessionData>>()
 
     suspend fun storeFor(userId: Long): DataStore<SessionData> {
-        stores[userId]?.let { return it }
+        // H-8：统一走互斥锁，避免锁外快路径读到即将被 wipeUser 移除/删文件的旧实例
         return mutex.withLock {
             stores.getOrPut(userId) {
                 DataStoreFactory.create(
@@ -64,8 +69,9 @@ class SessionDataStoreManager @Inject constructor(
         val file = File(context.filesDir, "practice_$userId.bin")
         mutex.withLock {
             val store = stores.remove(userId)
-            // 锁内排空旧实例在途写入后再删文件，防止并发 storeFor 为同一文件重建实例
-            if (store != null) runCatching { store.data.first() }
+            // 锁内排空旧实例在途写入后再删文件，防止并发 storeFor 为同一文件重建实例；
+            // H-9：updateData 走一次完整读-写事务，强制把 pending 写落盘（data.first() 只读快照不保证 flush）
+            if (store != null) runCatching { store.updateData { it } }
             if (file.exists()) file.delete()
         }
     }

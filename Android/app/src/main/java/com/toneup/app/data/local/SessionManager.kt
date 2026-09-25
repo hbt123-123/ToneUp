@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -35,12 +36,14 @@ class SessionManager @Inject constructor(
     var pendingRestoreRoute: String? = null
         private set
 
-    fun cachedToken(): String? = _token.value ?: tokenStore.token().also { _token.value = it }
+    // H-10：update 原子完成 miss 时落盘镜像回填，消除"读后写"与 clearSession 的交错竞态
+    fun cachedToken(): String? = _token.update { current -> current ?: tokenStore.token() }
 
     fun onLogin(token: String, user: SessionUser) {
         stageToken(token)
         _user.value = user
-        pendingRestoreRoute = null
+        // H-11：不在此清 pendingRestoreRoute——一次性消费由 consumeRestoreRoute() 负责，
+        // 401 恢复流程依赖它存活到登录页取走；常规登录时该值本来就是 null
     }
 
     /** 登录流程暂存令牌：持久化并更新内存镜像（拦截器立即可见），用户信息待 /me 成功后经 [onLogin] 写入 */

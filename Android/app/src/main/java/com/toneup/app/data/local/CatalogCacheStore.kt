@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.toneup.app.data.remote.dto.CatalogDto
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -49,13 +51,17 @@ private val Context.catalogDataStore: DataStore<Preferences> by preferencesDataS
 /** Preferences DataStore 持久化实现：JSON 串入键 `catalog_cache`，登出随 reset 双清 */
 @Singleton
 class CatalogDataStoreManager @Inject constructor(
-    private val context: Context
+    // H-3：显式限定 Application Context，防止 Activity Context 被注入造成泄漏
+    @ApplicationContext private val context: Context
 ) : CatalogCacheStore {
     private val key = stringPreferencesKey("catalog_cache")
 
     override suspend fun read(): CatalogCachePayload? = try {
         val raw = context.catalogDataStore.data.first()[key] ?: return null
         CatalogCachePayload.parseOrNull(raw)
+    } catch (e: CancellationException) {
+        // H-4：取消必须透传，吞掉会破坏结构化并发
+        throw e
     } catch (e: Exception) {
         null
     }

@@ -28,13 +28,20 @@ class AuthRepository @Inject constructor(
         }.accessToken
         // 先落库新令牌再调 me()：否则全新安装时 me() 无 Authorization 必然 401，
         // 残留旧令牌时 me() 会返回上一账号信息导致串号
+        val previousToken = sessionManager.cachedToken()
         sessionManager.stageToken(token)
         val user = try {
             me()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            sessionManager.clearSession()
+            // H-19：瞬时失败（网络/5xx）不应把整会话清掉——恢复旧令牌保留会话；
+            // 只有新令牌被后端拒绝（401）或本来就没有旧会话时才清
+            if (previousToken != null && e !is AppException.Unauthorized) {
+                sessionManager.stageToken(previousToken)
+            } else {
+                sessionManager.clearSession()
+            }
             throw e
         }
         sessionManager.onLogin(token, SessionUser(user.id, user.username, user.role))

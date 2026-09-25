@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -210,14 +211,32 @@ private fun DiagnosisResultCard(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // H-37：isCorrect 可空——null 表示 AI 未判定/数据缺失，不得折叠进“判定有误”
+        val judged = outcome.isCorrect
         Icon(
-            imageVector = if (outcome.isCorrect == true) Icons.Filled.CheckCircle else Icons.Filled.Cancel,
-            contentDescription = if (outcome.isCorrect == true) "判定正确" else "判定有误",
-            tint = if (outcome.isCorrect == true) CorrectGreen else WrongRed,
+            imageVector = when (judged) {
+                true -> Icons.Filled.CheckCircle
+                false -> Icons.Filled.Cancel
+                null -> Icons.Filled.HelpOutline
+            },
+            contentDescription = when (judged) {
+                true -> "判定正确"
+                false -> "判定有误"
+                null -> "AI 未判定"
+            },
+            tint = when (judged) {
+                true -> CorrectGreen
+                false -> WrongRed
+                null -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
             modifier = Modifier.size(64.dp)
         )
         Text(
-            text = if (outcome.isCorrect == true) "这道题做对了" else "发现解题问题",
+            text = when (judged) {
+                true -> "这道题做对了"
+                false -> "发现解题问题"
+                null -> "AI 暂未给出判定，可自行判断或重试"
+            },
             style = MaterialTheme.typography.titleLarge
         )
 

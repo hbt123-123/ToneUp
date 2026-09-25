@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,7 +54,8 @@ fun LoginScreen(
     val state by viewModel.loginState.collectAsStateWithLifecycle()
     val registeredUsername by viewModel.registeredUsername.collectAsStateWithLifecycle()
     var username by rememberSaveable { mutableStateOf(prefillUsername ?: "") }
-    var password by rememberSaveable { mutableStateOf("") }
+    // H-45：密码不进 rememberSaveable——凭据不得写入 savedInstanceState Bundle（进程死亡后残留）
+    var password by remember { mutableStateOf("") }
     var showPassword by rememberSaveable { mutableStateOf(false) }
 
     // 就地输入校验（非空、长度）
@@ -70,8 +72,9 @@ fun LoginScreen(
     val canSubmit = username.isNotBlank() && password.isNotBlank() &&
         usernameError == null && passwordError == null && state !is AuthViewModel.UiState.Loading
 
-    LaunchedEffect(state) {
-        if (state is AuthViewModel.UiState.Success) onLoginSuccess()
+    // H-46：导航信号走一次性事件流，Success 是持久状态不能重复触发导航
+    LaunchedEffect(Unit) {
+        viewModel.loginSuccess.collect { onLoginSuccess() }
     }
 
     Column(

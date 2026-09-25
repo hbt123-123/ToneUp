@@ -11,8 +11,14 @@ object PollBackoffPolicy {
     const val MAX_DELAY_MS = 5000L
     const val TOTAL_DEADLINE_MS = 60000L
 
-    fun delayForAttempt(attemptIndex: Int): Long =
-        min(INITIAL_DELAY_MS shl attemptIndex.coerceAtLeast(0), MAX_DELAY_MS)
+    fun delayForAttempt(attemptIndex: Int): Long {
+        // H-28：shl 在 attemptIndex>=53 时按 63 位掩码回绕产生负值，改为逐次倍增并在上限截断
+        var delay = INITIAL_DELAY_MS
+        repeat(attemptIndex.coerceAtLeast(0)) {
+            delay = min(delay * 2, MAX_DELAY_MS)
+        }
+        return delay
+    }
 
     fun isDeadlineExceeded(elapsedMs: Long): Boolean = elapsedMs >= TOTAL_DEADLINE_MS
 }

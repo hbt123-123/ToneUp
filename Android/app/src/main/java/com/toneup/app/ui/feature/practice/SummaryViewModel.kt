@@ -7,6 +7,7 @@ import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.SessionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -66,6 +67,9 @@ class SummaryViewModel @Inject constructor(
                 )
             } catch (_: AppException) {
                 // 静默：保留本地估算
+            } catch (e: CancellationException) {
+                // H-66：取消必须传播，吞掉会破坏结构化并发（ViewModel 清理时协程无法终止）
+                throw e
             } catch (_: Exception) {
             }
         }

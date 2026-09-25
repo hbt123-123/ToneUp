@@ -17,6 +17,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,8 +39,9 @@ fun RegisterScreen(
 ) {
     val state by viewModel.registerState.collectAsStateWithLifecycle()
     var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var confirm by rememberSaveable { mutableStateOf("") }
+    // H-45：密码/确认密码同 LoginScreen，不写入 savedInstanceState
+    var password by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
 
     // FR-AU-03 校验前置：非空、长度限制，就地提示
     val usernameError = when {
@@ -59,8 +61,9 @@ fun RegisterScreen(
         else -> null
     }
 
-    androidx.compose.runtime.LaunchedEffect(state) {
-        if (state is AuthViewModel.UiState.Success) onRegisterSuccess()
+    // H-47：注册成功导航走一次性事件流，Success 状态永不消费会导致组合重建后重复导航
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.registerSuccess.collect { onRegisterSuccess() }
     }
 
     Column(

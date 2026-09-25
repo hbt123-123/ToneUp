@@ -75,6 +75,7 @@ object NetworkModule {
     fun uploadOkHttpClient(base: OkHttpClient): OkHttpClient =
         base.newBuilder()
             .readTimeout(Duration.ofSeconds(UPLOAD_TIMEOUT_SECONDS))
+            .writeTimeout(Duration.ofSeconds(UPLOAD_TIMEOUT_SECONDS)) // H-25：上传写请求体同样放宽
             .build()
 
     @Provides

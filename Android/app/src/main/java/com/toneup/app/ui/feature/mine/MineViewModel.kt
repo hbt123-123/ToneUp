@@ -1,5 +1,6 @@
 package com.toneup.app.ui.feature.mine
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.toneup.app.data.local.SessionManager
@@ -11,7 +12,9 @@ import com.toneup.app.data.repository.AuthRepository
 import com.toneup.app.data.repository.NotesRepository
 import com.toneup.app.ui.common.Load
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -21,7 +24,6 @@ data class MineUiState(
     val notes: Load<List<com.toneup.app.data.remote.dto.NoteListItemDto>> = Load.Loading,
     val preferences: UserPreferences = UserPreferences(),
     val logoutBusy: Boolean = false,
-    val loggedOut: Boolean = false,
     val errorHint: String? = null
 )
 
@@ -35,6 +37,10 @@ class MineViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(MineUiState())
     val state: StateFlow<MineUiState> = _state
+
+    // H-50：登出导航信号改为一次性事件，loggedOut sticky 标志已移除
+    private val _logoutEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val logoutEvent: SharedFlow<Unit> = _logoutEvent
 
     init {
         loadUser()
@@ -91,9 +97,18 @@ class MineViewModel @Inject constructor(
         if (_state.value.logoutBusy) return
         _state.value = _state.value.copy(logoutBusy = true)
         viewModelScope.launch {
+            // H-51：Repository 内部已容错，本地清理若仍失败必须打点可见，
+            // 不得静默丢弃后照常宣告登出成功
             runCatching { authRepository.logout() }
+                .onFailure { Log.e(TAG, "logout local cleanup failed", it) }
             sessionManager.clearSession()
-            _state.value = _state.value.copy(logoutBusy = false, loggedOut = true)
+            _state.value = _state.value.copy(logoutBusy = false)
+            // H-50：一次性事件替代 sticky 的 loggedOut 标志，避免组合重建后重复导航
+            _logoutEvent.tryEmit(Unit)
         }
+    }
+
+    companion object {
+        private const val TAG = "MineViewModel"
     }
 }

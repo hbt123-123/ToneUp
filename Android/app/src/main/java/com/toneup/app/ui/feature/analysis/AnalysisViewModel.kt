@@ -3,6 +3,7 @@ package com.toneup.app.ui.feature.analysis
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.toneup.app.data.local.SessionDataStoreManager
 import com.toneup.app.data.local.SessionManager
 import com.toneup.app.data.remote.api.AttemptApi
 import com.toneup.app.data.remote.dto.AttemptResultDto
@@ -13,19 +14,25 @@ import com.toneup.app.data.repository.PracticeRepository
 import com.toneup.app.data.repository.QuestionRepository
 import com.toneup.app.data.remote.dto.NoteDto
 import com.toneup.app.data.remote.dto.QuestionDto
+import com.toneup.app.domain.logic.AnswerCodec
 import com.toneup.app.domain.logic.PollBackoffPolicy
+import com.toneup.app.domain.model.AnswerValue
 import com.toneup.app.ui.common.Load
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class AnalysisUiState(
     val attempt: Load<AttemptResultDto> = Load.Loading,
     val question: QuestionDto? = null,
+    /** H-41：本地草稿格式化后的“我的答案”，null 表示无本地作答记录 */
+    val myAnswerText: String? = null,
     /** 主观题判分子状态 */
     val gradingStatus: String? = null,
     val pollTimedOut: Boolean = false,
@@ -45,7 +52,8 @@ class AnalysisViewModel @Inject constructor(
     private val questionRepository: QuestionRepository,
     private val notesRepository: NotesRepository,
     private val practiceRepository: PracticeRepository,
-    private val sessionManager: SessionManager
+    private val sessionManager: SessionManager,
+    private val sessionDataStoreManager: SessionDataStoreManager
 ) : ViewModel() {
 
     val attemptId: Long = savedStateHandle.get<String>("attemptId")?.toLongOrNull() ?: -1L
@@ -83,8 +91,29 @@ class AnalysisViewModel @Inject constructor(
         if (bankId != null && questionId != null) {
             runCatching { questionRepository.questionDetail(bankId, questionId) }
                 .onSuccess { q -> _state.value = _state.value.copy(question = q) }
+            // H-41：FR-AN-01/02 答案对比需要用户作答——服务端不回显，从本地草稿取
+            runCatching { loadMyAnswer(bankId, questionId) }
         }
         loadNote(bankId, questionId)
+    }
+
+    private suspend fun loadMyAnswer(bankId: String, questionId: Long) {
+        val userId = sessionManager.currentUserId() ?: return
+        val draft = sessionDataStoreManager.storeFor(userId).data.first().drafts
+            .firstOrNull { it.bankId == bankId && it.questionId == questionId } ?: return
+        val decoded = AnswerCodec.decode(draft.answer) ?: return
+        _state.value = _state.value.copy(myAnswerText = formatAnswer(decoded))
+    }
+
+    private fun formatAnswer(answer: AnswerValue): String = when (answer) {
+        is AnswerValue.Choice -> answer.label
+        is AnswerValue.MultiChoice -> answer.labels.joinToString("、")
+        is AnswerValue.Text -> answer.text
+        is AnswerValue.Blanks -> answer.values.entries.sortedBy { it.key }
+            .joinToString("；") { it.value.ifBlank { "（空）" } }
+        is AnswerValue.BlankLabels -> answer.values.entries.sortedBy { it.key }
+            .joinToString("；") { it.value.ifBlank { "（空）" } }
+        is AnswerValue.Order -> answer.ids.joinToString(" → ")
     }
 
     /** FR-AN-04 判分状态卡：queued/processing 轮询，指数退避 2s→5s 上限 60s */
@@ -113,6 +142,8 @@ class AnalysisViewModel @Inject constructor(
                     applyResult(latest)
                     if (!latest.isSubjectivePending) return@launch
                 }
+            } catch (e: CancellationException) {
+                throw e // H-42：取消不得吞掉，保持结构化并发
             } catch (_: Exception) {
                 _state.value = _state.value.copy(pollTimedOut = true)
             }

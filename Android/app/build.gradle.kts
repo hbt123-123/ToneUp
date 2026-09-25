@@ -33,6 +33,23 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // H-1：release 必须产出可安装的签名包。若根目录存在 keystore.properties
+            // （已加入 .gitignore，见 H-134）则用它签名；否则回退 debug 签名，
+            // 保证 assembleRelease 产物可直接安装/分发（正式签名由发布环境提供）。
+            val keystorePropsFile = rootProject.file("keystore.properties")
+            if (keystorePropsFile.exists()) {
+                val keystoreProps = java.util.Properties().apply {
+                    keystorePropsFile.inputStream().use { load(it) }
+                }
+                signingConfig = signingConfigs.create("release") {
+                    storeFile = file(keystoreProps.getProperty("storeFile"))
+                    storePassword = keystoreProps.getProperty("storePassword")
+                    keyAlias = keystoreProps.getProperty("keyAlias")
+                    keyPassword = keystoreProps.getProperty("keyPassword")
+                }
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 
@@ -57,8 +74,10 @@ android {
         unitTests.isReturnDefaultValues = true
     }
     lint {
+        // H-2：恢复 lint 可见性——release 构建也执行 lint，但发现问题时只告警不阻断
+        // （历史遗留告警会在后续专项清理；关键项在 OCR 修复报告跟踪）
         abortOnError = false
-        checkReleaseBuilds = false
+        checkReleaseBuilds = true
     }
 }
 

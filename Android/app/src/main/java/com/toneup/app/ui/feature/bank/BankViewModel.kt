@@ -24,6 +24,7 @@ import com.toneup.app.ui.components.charts.TopicProgressItem
 import com.toneup.app.ui.components.charts.toChartPoint
 import com.toneup.app.ui.components.charts.toProgressItem
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +36,7 @@ import javax.inject.Inject
 
 data class HomeUiState(
     val streakDays: Int = 0,
-    val checkedToday: Boolean = false,
+    // H-15：后端 overview 无 checked_today 字段，移除假数据
     val lastContext: LastPracticeContext? = null,
     val catalog: Load<CatalogDto> = Load.Loading,
     /** EC-03 首页仪表盘：近 14 天趋势（失败静默 → 空 = 占位） */
@@ -85,9 +86,18 @@ class BankViewModel @Inject constructor(
         refreshHome(forceRefreshCatalog = false)
     }
 
+    private var homeRefreshJob: Job? = null
+
     /** FR-HM-05 下拉刷新期间保留旧内容 */
     fun refreshHome(forceRefreshCatalog: Boolean) {
-        viewModelScope.launch {
+        // H-48：重入守卫——init/openPicker/下拉刷新并发触发只保留一轮在飞，
+        // 避免多协程交错写 _home；强制刷新时以新一轮为准
+        val existing = homeRefreshJob
+        if (existing?.isActive == true) {
+            if (!forceRefreshCatalog) return
+            existing.cancel()
+        }
+        homeRefreshJob = viewModelScope.launch {
             _home.value = _home.value.copy(refreshing = true)
             try {
                 val userId = sessionManager.currentUserId()
@@ -116,8 +126,7 @@ class BankViewModel @Inject constructor(
                     }
                     overview.await().onSuccess { stats ->
                         _home.value = _home.value.copy(
-                            streakDays = stats.streakDays,
-                            checkedToday = stats.checkedToday
+                            streakDays = stats.streakDays
                         )
                     }
                     catalog.await().onSuccess { dto ->
@@ -181,6 +190,8 @@ class BankViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val detail = catalogRepository.bankDetail(bankId)
+                // H-49：过期响应丢弃——用户已切换题库或回退到根时不得覆盖当前选择
+                if (_picker.value.bankId != bankId) return@launch
                 val years = detail.years.sortedDescending().ifEmpty {
                     val (minY, maxY) = detail.yearMin to detail.yearMax
                     if (minY != null && maxY != null) (minY..maxY).toList() else emptyList()
@@ -296,7 +307,7 @@ class BankViewModel @Inject constructor(
                     serverSessionId = d.session.id,
                     restoredDraft = d.session.draft
                 )
-                synchronized(session) { session.questions.addAll(d.questions) }
+                session.appendAll(d.questions)
                 return session
             } catch (_: Exception) {
                 // 落入本地重建路径

@@ -16,19 +16,23 @@ import javax.inject.Singleton
 
 /** catalog 当日内存缓存；题库详情按 bank_id 缓存 */
 object CatalogCache {
-    @Volatile var catalog: CatalogDto? = null
-    @Volatile private var cachedAtMillis: Long = 0
+    // H-20：目录与时间戳合成单一 volatile 引用，消除两步写导致的撕裂读
+    private data class CatalogEntry(val catalog: CatalogDto, val cachedAtMillis: Long)
+
+    @Volatile private var entry: CatalogEntry? = null
     private val bankDetails = ConcurrentHashMap<String, BankDetailDto>()
 
     const val TTL_MILLIS = 24 * 60 * 60 * 1000L
 
     fun catalogIfFresh(): CatalogDto? =
-        catalog?.takeIf { System.currentTimeMillis() - cachedAtMillis < TTL_MILLIS }
+        entry?.takeIf { System.currentTimeMillis() - it.cachedAtMillis < TTL_MILLIS }?.catalog
+
+    /** 不做 fresh 判定的裸读（stale-while-revalidate 场景） */
+    fun catalogStale(): CatalogDto? = entry?.catalog
 
     /** cachedAtMillis 可指定：从磁盘水合时恢复原时间戳，避免 fresh 判定失真 */
     fun putCatalog(dto: CatalogDto, cachedAtMillis: Long = System.currentTimeMillis()) {
-        catalog = dto
-        this.cachedAtMillis = cachedAtMillis
+        entry = CatalogEntry(dto, cachedAtMillis)
     }
 
     fun bankDetail(bankId: String): BankDetailDto? = bankDetails[bankId]
@@ -37,8 +41,7 @@ object CatalogCache {
     }
 
     fun reset() {
-        catalog = null
-        cachedAtMillis = 0
+        entry = null
         bankDetails.clear()
         Log.d("CatalogCache", "reset")
     }
@@ -57,7 +60,7 @@ class CatalogRepository @Inject constructor(
     suspend fun catalog(forceRefresh: Boolean = false): CatalogDto {
         if (!forceRefresh) {
             CatalogCache.catalogIfFresh()?.let { return it }
-            CatalogCache.catalog?.let { stale ->
+            CatalogCache.catalogStale()?.let { stale ->
                 // 内存过期：先展示，同时后台刷新
                 refreshInBackground()
                 return stale
@@ -93,6 +96,8 @@ class CatalogRepository @Inject constructor(
     }
 
     /** 后台刷新（应用级 scope，不随调用方取消）；失败静默，下次调用仍走缓存 */
+    // H-21：check-then-act 与 refreshJob 写入同步化，消除并发双刷
+    @Synchronized
     private fun refreshInBackground() {
         if (refreshJob?.isActive == true) return
         refreshJob = appScope.launch { runCatching { fetchAndCache() } }

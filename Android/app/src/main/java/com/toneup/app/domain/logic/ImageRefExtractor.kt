@@ -8,7 +8,9 @@ package com.toneup.app.domain.logic
  */
 object ImageRefExtractor {
 
-    private val mdImage = Regex("!\\[([^\\]]*)]\\((https?://[^)\\s]+)\\)")
+    // H-26：仅匹配库内图片引用（/api/images/），与类契约及 PC 端行为一致，
+    // 不再把外链图片（如 CDN/插图）误抽为宿主渲染
+    private val mdImage = Regex("!\\[([^\\]]*)]\\((https?://[^)\\s]*/api/images/[^)\\s]*)\\)")
     private val bareUrl = Regex("(?<![\"'(=])((?:https?:)?//[^\\s)\"'<>]+/api/images/[^\\s)\"'<>?]+(?:\\?[^\\s)\"'<>]*)?)")
 
     data class Result(val cleanedText: String, val imageUrls: List<String>)
@@ -16,17 +18,22 @@ object ImageRefExtractor {
     fun extract(text: String): Result {
         if (!text.contains("/api/images/") && !text.contains("![")) return Result(text, emptyList())
         val found = LinkedHashSet<String>()
+
+        // H-27：统一“先收集匹配、从后往前按 range 删除”，
+        // 避免按字面量 replace 误删正文中与 URL 相同但未被匹配的子串
         var working = text
-        mdImage.findAll(text).forEach { m ->
-            found.add(m.groupValues[2])
-            working = working.replace(m.value, "")
+        val mdMatches = mdImage.findAll(working).toList()
+        mdMatches.forEach { found.add(it.groupValues[2]) }
+        for (m in mdMatches.sortedByDescending { it.range.first }) {
+            working = working.removeRange(m.range.first, m.range.last + 1)
         }
-        bareUrl.findAll(working).forEach { m ->
-            found.add(normalizeUrl(m.groupValues[1]))
-            // 按匹配值替换：findAll 是基于原串的惰性序列，replaceRange(m.range) 在
-            // 串被缩短后区间失效会删错位置（与上方 mdImage 分支保持一致）
-            working = working.replace(m.value, "")
+
+        val bareMatches = bareUrl.findAll(working).toList()
+        bareMatches.forEach { found.add(normalizeUrl(it.groupValues[1])) }
+        for (m in bareMatches.sortedByDescending { it.range.first }) {
+            working = working.removeRange(m.range.first, m.range.last + 1)
         }
+
         return Result(working.trim(), found.toList())
     }
 

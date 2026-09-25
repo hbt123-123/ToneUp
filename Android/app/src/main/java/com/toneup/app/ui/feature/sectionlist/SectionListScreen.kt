@@ -159,18 +159,20 @@ fun SectionListScreen(
     }
 
     // 选题弹窗：EC-01 服务端会话（collection_ids + count 真实约束本轮题目）
-    if (showSelectDialog && selectedSection != null) {
+    // H-68：局部快照替代 `!!`——null 检查与解引用是两次独立的属性读取（无智能转换），
+    // 中间被重组/状态重置打破时会抛 NPE
+    val dialogSection = selectedSection
+    if (showSelectDialog && dialogSection != null) {
         SelectQuestionDialog(
-            section = selectedSection!!,
+            section = dialogSection,
             onDismiss = { showSelectDialog = false },
             onStart = { count ->
                 showSelectDialog = false
-                val section = selectedSection ?: return@SelectQuestionDialog
                 onCreateSession(
                     state.bankId,
-                    section.collectionIds.ifEmpty { null },
-                    section.year,
-                    section.types.firstOrNull()?.typeCode,
+                    dialogSection.collectionIds.ifEmpty { null },
+                    dialogSection.year,
+                    dialogSection.types.firstOrNull()?.typeCode,
                     count
                 )
             }

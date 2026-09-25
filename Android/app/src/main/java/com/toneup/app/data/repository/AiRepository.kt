@@ -71,7 +71,8 @@ class AiRepository @Inject constructor(
             AiUploadOutcome.Accepted(created.feedbackId, created.status)
         } else {
             AiUploadOutcome.Succeeded(
-                AiFeedbackDetailResult(created.isCorrect, null, created.errorReason, created.tagIds)
+                // H-18：同步 200 路径后端会返回 score，不能丢弃
+                AiFeedbackDetailResult(created.isCorrect, created.score, created.errorReason, created.tagIds)
             )
         }
     }

@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.toneup.app.data.remote.dto.AttemptResultDto
-import com.toneup.app.data.remote.dto.QuestionDto
 import com.toneup.app.domain.logic.SubQuestionParser
 import com.toneup.app.domain.model.AnswerValue
 import com.toneup.app.ui.common.Load
@@ -283,7 +282,6 @@ private fun SelfJudgeRow(busy: Boolean, onSelfJudge: (Boolean) -> Unit) {
 @Composable
 private fun AnswerComparisonCard(state: AnalysisUiState) {
     val result = (state.attempt as? Load.Ready)?.value ?: return
-    val question = state.question
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("答案对比", style = MaterialTheme.typography.titleMedium)
@@ -295,7 +293,8 @@ private fun AnswerComparisonCard(state: AnalysisUiState) {
                 Spacer(Modifier.size(8.dp))
                 Text("我的答案：", style = MaterialTheme.typography.labelLarge)
             }
-            FormulaText(text = myAnswerText(result, question))
+            // H-41：优先展示本地草稿中的真实作答，服务端不回显用户答案
+            FormulaText(text = state.myAnswerText ?: "（未找到本地作答记录）")
 
             // 正确答案（绿）
             Row(modifier = Modifier.semantics { contentDescription = "正确答案" }) {
@@ -308,5 +307,3 @@ private fun AnswerComparisonCard(state: AnalysisUiState) {
     }
 }
 
-private fun myAnswerText(result: AttemptResultDto, question: QuestionDto?): String =
-    "见提交作答记录" // 服务端未回显用户答案时以提示文案兜底，避免误导

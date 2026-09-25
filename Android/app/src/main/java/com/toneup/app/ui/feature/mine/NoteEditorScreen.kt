@@ -62,7 +62,9 @@ class NoteEditorViewModel @Inject constructor(
             try {
                 val note = notesRepository.note(bankId, questionId)
                 _state.value = _state.value.copy(
-                    loaded = true, noteText = note?.noteText ?: "", dirty = false
+                    loaded = true,
+                    // H-52：请求在飞期间用户已输入（dirty）时不得覆盖其内容
+                    noteText = if (_state.value.dirty) _state.value.noteText else (note?.noteText ?: "")
                 )
             } catch (e: Exception) {
                 _state.value = _state.value.copy(loaded = true, error = (e as? AppException)?.userMessage ?: "笔记加载失败")

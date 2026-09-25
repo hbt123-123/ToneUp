@@ -261,6 +261,8 @@ fun FeedbackForm(
                                             expanded = false
                                             showForm = false
                                             content = ""
+                                        } catch (e: kotlinx.coroutines.CancellationException) {
+                                            throw e // H-54：表单/scope 取消不得转为错误提示
                                         } catch (e: Exception) {
                                             submitting = false
                                             errorMsg = e.message ?: "提交失败，请重试"

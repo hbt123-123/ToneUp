@@ -187,7 +187,11 @@ class PracticeRepository @Inject constructor(
         mode: String,
         clientRequestId: String
     ) {
-        val userId = sessionManager.currentUserId() ?: return
+        // H-22：userId 为 null（登出中/会话恢复前）时不得静默丢弃答案，至少打点可观测
+        val userId = sessionManager.currentUserId() ?: run {
+            Log.e(TAG, "enqueuePending dropped: no userId, q=$questionId (logout race or session not restored)")
+            return
+        }
         val store = sessionDataStoreManager.storeFor(userId)
         store.updateData { data ->
             data.copy(

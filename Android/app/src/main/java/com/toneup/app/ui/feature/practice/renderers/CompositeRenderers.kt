@@ -26,6 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +52,8 @@ fun ClozeRenderer(context: QuestionContext) {
     var passageExpanded by remember(context.question.passage) { mutableStateOf(false) }
     val blankCount = SubQuestionParser.passageBlankCount(context.question)
     val blanks = (context.answer as? AnswerValue.BlankLabels)?.values ?: emptyMap()
-    var focusedBlank by remember { mutableStateOf(0) }
+    // H-62：加 questionId key——切题后重置焦点空，避免下一题空数更少时 focusedBlank 越界
+    var focusedBlank by remember(context.question.questionId) { mutableStateOf(0) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (passage.isNotBlank()) {
@@ -166,8 +168,16 @@ fun OrderingRenderer(context: QuestionContext) {
     }
 
     val currentOrder = (context.answer as? AnswerValue.Order)?.ids
+    // H-63：持久化答案可能与解析出的 items 对不上（陈旧/重复/含已删除项），
+    // 必须对账过滤后再采用；对不上时回退默认顺序，避免渲染幽灵卡片
     var orderIds by remember(context.question.questionId) {
-        mutableStateOf(currentOrder ?: items.map { it.id })
+        mutableStateOf(
+            currentOrder
+                ?.filter { id -> items.any { it.id == id } }
+                ?.distinct()
+                ?.takeIf { it.size == items.size }
+                ?: items.map { it.id }
+        )
     }
     var dragMode by remember { mutableStateOf(true) }
     val haptics = LocalHapticFeedback.current
@@ -252,6 +262,9 @@ private fun DragOrderList(
     val bounds = remember { mutableStateMapOf<String, Rect>() }
     var draggingId by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    // H-64：pointerInput(id) 不会因参数变化重启，onDrag 闭包若直接捕获 orderIds 会停留在
+    // 旧快照导致连续拖拽错乱；用 rememberUpdatedState 让手势全程读取最新顺序
+    val latestOrderIds by rememberUpdatedState(orderIds)
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         orderIds.forEachIndexed { index, id ->
@@ -279,17 +292,17 @@ private fun DragOrderList(
                                         dragOffset += amount
                                         val draggedBounds = bounds[id] ?: return@detectDragGesturesAfterLongPress
                                         val centerY = draggedBounds.center.y + dragOffset.y
-                                        // 与相邻项交换位置
-                                        val target = orderIds.firstOrNull { other ->
+                                        // 与相邻项交换位置（H-64：读 latestOrderIds 避免旧快照）
+                                        val target = latestOrderIds.firstOrNull { other ->
                                             other != id &&
                                                 bounds[other]?.let { b ->
                                                     centerY in b.top..b.bottom
                                                 } == true
                                         }
                                         if (target != null) {
-                                            val from = orderIds.indexOf(id)
-                                            val to = orderIds.indexOf(target)
-                                            val next = orderIds.toMutableList().apply {
+                                            val from = latestOrderIds.indexOf(id)
+                                            val to = latestOrderIds.indexOf(target)
+                                            val next = latestOrderIds.toMutableList().apply {
                                                 removeAt(from)
                                                 add(to, id)
                                             }

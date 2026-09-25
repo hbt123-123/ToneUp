@@ -20,7 +20,9 @@ class ConnectivityMonitor @Inject constructor(
     fun isOnline(): Boolean {
         val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        // H-5：VALIDATED 表示已通过系统连通性探测，排除强制门户 Wi-Fi 的假在线
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
     val onlineFlow: Flow<Boolean> = callbackFlow {
@@ -32,6 +34,12 @@ class ConnectivityMonitor @Inject constructor(
 
             override fun onLost(network: Network) {
                 trySend(isOnline())
+            }
+
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                // H-6：网络保持连接但验证状态变化（如失去 VALIDATED）也要更新，防止流值过期
+                trySend(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
             }
         }
         trySend(isOnline())

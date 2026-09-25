@@ -15,9 +15,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -29,6 +26,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.toneup.app.data.repository.ReviewRepository
 import com.toneup.app.ui.feature.bank.BankTab
@@ -73,7 +71,21 @@ private enum class MainTab(val route: String, val label: String, val icon: Image
 @Composable
 fun MainScaffold(rootNavController: NavHostController) {
     val tabNavController = rememberNavController()
-    var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+    // H-76/77：选中态由 NavController 当前回栈条目推导（而非手工递增索引），
+    // 返回键、深链或系统恢复后高亮自动跟随真实路由
+    val backStackEntry by tabNavController.currentBackStackEntryAsState()
+    val selectedTabIndex = MainTab.entries
+        .indexOfFirst { it.route == backStackEntry?.destination?.route }
+        .coerceAtLeast(0)
+    // H-78：角标 ViewModel 提升到宿主组合作用域——原来在 NavigationBarItem 的 icon lambda
+    //（逐 tab 循环内）创建，owner 随 tab 切换变化会导致 VM 反复重建
+    val badgeVm: ReviewBadgeViewModel = hiltViewModel()
+    val badgeCount by badgeVm.count.collectAsStateWithLifecycle()
+    // FR-RV-05：回到主界面/前台时刷新角标，避免完成复习后数字陈旧
+    LifecycleResumeEffect(Unit) {
+        badgeVm.refresh()
+        onPauseOrDispose { }
+    }
 
     Scaffold(
         bottomBar = {
@@ -89,18 +101,10 @@ fun MainScaffold(rootNavController: NavHostController) {
                                 launchSingleTop = true
                                 restoreState = true
                             }
-                            if (selectedTabIndex != index) selectedTabIndex = index
                         },
                         icon = {
                             if (tab == MainTab.REVIEW) {
-                                val badgeVm: ReviewBadgeViewModel = hiltViewModel()
-                                val count by badgeVm.count.collectAsStateWithLifecycle()
-                                // FR-RV-05：回到主界面/前台时刷新角标，避免完成复习后数字陈旧
-                                LifecycleResumeEffect(Unit) {
-                                    badgeVm.refresh()
-                                    onPauseOrDispose { }
-                                }
-                                IconWithBadge(icon = tab.icon, badgeCount = count)
+                                IconWithBadge(icon = tab.icon, badgeCount = badgeCount)
                             } else {
                                 Icon(tab.icon, contentDescription = tab.label)
                             }

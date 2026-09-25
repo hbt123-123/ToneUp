@@ -58,7 +58,11 @@ object ImageCompressor {
         var quality = INITIAL_QUALITY
         do {
             output.outputStream().use { stream ->
-                scaled.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+                // H-40：编码失败（返回 false）意味着输出文件无效，
+                // 必须抛错终止，不得把损坏文件交给上传链路
+                check(scaled.compress(Bitmap.CompressFormat.JPEG, quality, stream)) {
+                    "JPEG encode failed (quality=$quality)"
+                }
             }
             quality -= 10
         } while (output.length() > MAX_BYTES && quality >= 30)

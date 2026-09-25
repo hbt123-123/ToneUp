@@ -59,6 +59,14 @@ fun SessionHistoryScreen(
         }
     }
 
+    // H-72：删除失败走独立通道展示，不再混入 resumeError
+    LaunchedEffect(state.deleteError) {
+        state.deleteError?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearDeleteError()
+        }
+    }
+
     val listState = rememberLazyListState()
     val shouldLoadMore by remember {
         derivedStateOf {
@@ -94,13 +102,16 @@ fun SessionHistoryScreen(
                 }
             }
             state.error != null && state.items.isEmpty() -> {
+                // H-70：局部快照替代 `!!`——guard 与读取是两次独立的属性访问（无智能转换），
+                // 中间被刷新重置为 null 时会抛 NPE
+                val errorText = state.error
                 Column(
                     modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
                     Text(
-                        state.error!!,
+                        errorText ?: "",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.error
                     )

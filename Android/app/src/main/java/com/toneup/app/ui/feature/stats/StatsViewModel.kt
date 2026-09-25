@@ -2,6 +2,7 @@ package com.toneup.app.ui.feature.stats
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.toneup.app.data.remote.dto.DailyTrendDataDto
 import com.toneup.app.data.remote.dto.StatsOverviewDto
 import com.toneup.app.data.remote.dto.WeaknessItemDto
 import com.toneup.app.data.repository.CatalogRepository
@@ -18,6 +19,8 @@ import javax.inject.Inject
 data class StatsUiState(
     val overview: Load<StatsOverviewDto> = Load.Loading,
     val weaknesses: Load<List<WeaknessItemDto>> = Load.Loading,
+    // H-73：FR-ST-05 刷题趋势接入真实 daily-trend 数据
+    val dailyTrend: Load<DailyTrendDataDto> = Load.Loading,
     val rangeDays: Int? = 7,
     val subjectId: String? = null,
     val subjects: List<Pair<String, String>> = emptyList()
@@ -51,7 +54,11 @@ class StatsViewModel @Inject constructor(
         // 取消上一次加载，避免快速切换筛选时旧响应后到覆盖新数据
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
-            _state.value = _state.value.copy(overview = Load.Loading, weaknesses = Load.Loading)
+            _state.value = _state.value.copy(
+                overview = Load.Loading,
+                weaknesses = Load.Loading,
+                dailyTrend = Load.Loading
+            )
             try {
                 val overview = statsRepository.overview(rangeDays, subjectId?.takeIf { it.isNotBlank() })
                 _state.value = _state.value.copy(overview = Load.Ready(overview))
@@ -69,6 +76,15 @@ class StatsViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(weaknesses = Load.Failed(e.toMsg()))
+            }
+            try {
+                // H-73：拉取每日趋势（后端 §6.11 daily-trend 契约）
+                val trend = statsRepository.dailyTrend()
+                _state.value = _state.value.copy(dailyTrend = Load.Ready(trend))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(dailyTrend = Load.Failed(e.toMsg()))
             }
         }
     }

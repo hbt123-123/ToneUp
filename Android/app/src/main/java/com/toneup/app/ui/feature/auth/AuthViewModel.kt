@@ -6,7 +6,10 @@ import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.AuthRepository
 import com.toneup.app.data.local.SessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -34,6 +37,15 @@ class AuthViewModel @Inject constructor(
     private val _registeredUsername = MutableStateFlow<String?>(null)
     val registeredUsername: StateFlow<String?> = _registeredUsername
 
+    // H-46：成功态是持久 StateFlow 状态，不是一次性事件——用它驱动导航会在
+    // 组合重建后重放导航。改用零重放事件流承载“导航信号”。
+    private val _loginSuccessEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val loginSuccess: SharedFlow<Unit> = _loginSuccessEvent
+
+    // H-47：注册成功同样一次性消费，避免 Success 状态未消费导致重复导航
+    private val _registerSuccessEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val registerSuccess: SharedFlow<Unit> = _registerSuccessEvent
+
     fun login(username: String, password: String) {
         if (_loginState.value is UiState.Loading) return // 防重复提交
         _loginState.value = UiState.Loading
@@ -41,6 +53,9 @@ class AuthViewModel @Inject constructor(
             try {
                 val user = authRepository.login(username, password)
                 _loginState.value = UiState.Success(user.username)
+                _loginSuccessEvent.tryEmit(Unit)
+            } catch (e: CancellationException) {
+                throw e // H-43：scope 取消不得转为用户可见失败
             } catch (e: AppException) {
                 _loginState.value = UiState.Failure(e.userMessage)
             } catch (e: Exception) {
@@ -57,8 +72,11 @@ class AuthViewModel @Inject constructor(
                 authRepository.register(username, password)
                 _registerState.value = UiState.Success(username)
                 _registeredUsername.value = username
+                _registerSuccessEvent.tryEmit(Unit)
                 // 注册成功引导直接登录
                 login(username, password)
+            } catch (e: CancellationException) {
+                throw e // H-44：同 login，取消必须传播
             } catch (e: AppException) {
                 _registerState.value = UiState.Failure(e.userMessage)
             } catch (e: Exception) {

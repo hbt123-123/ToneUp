@@ -65,20 +65,6 @@ fun FormulaText(
                 val pool = FormulaWebViewPoolHolder.require()
                 val pooled = pool.acquire()
                 pooledRef = pooled
-                pooled.heightListener = { h ->
-                    if (h > 0) {
-                        consecutiveFailures.set(0)
-                        heightPx = h
-                    }
-                }
-                pooled.successListener = {
-                    onRenderEvent?.invoke(FormulaRenderEvent.Success)
-                }
-                pooled.failureListener = {
-                    consecutiveFailures.incrementAndGet()
-                    failed = true
-                    onRenderEvent?.invoke(FormulaRenderEvent.Failure)
-                }
                 (pooled.webView.parent as? ViewGroup)?.removeView(pooled.webView)
                 pooled.webView.layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -89,6 +75,23 @@ fun FormulaText(
             update = { webView ->
                 val pooled = pooledRef ?: return@AndroidView
                 if (pooled.webView === webView) {
+                    // H-31：listeners 必须在每次重组刷新——heightPx/failed 是 remember(text)
+                    // 的状态，text 变化即产生新实例；factory 只执行一次会把回调绑到旧 state，
+                    // 导致 text 变更后高度/失败更新丢失
+                    pooled.heightListener = { h ->
+                        if (h > 0) {
+                            consecutiveFailures.set(0)
+                            heightPx = h
+                        }
+                    }
+                    pooled.successListener = {
+                        onRenderEvent?.invoke(FormulaRenderEvent.Success)
+                    }
+                    pooled.failureListener = {
+                        consecutiveFailures.incrementAndGet()
+                        failed = true
+                        onRenderEvent?.invoke(FormulaRenderEvent.Failure)
+                    }
                     // 高度回调/父级重组反复触发 update：未变则跳过，避免 render→onHeight→重组→render 循环
                     if (lastRendered?.first == preparedHtml && lastRendered?.second == darkTheme) {
                         return@AndroidView
@@ -100,6 +103,10 @@ fun FormulaText(
             },
             onRelease = {
                 pooledRef?.let { pooled ->
+                    // H-32：归还前主动清空回调，避免池内实例持有已销毁组合的 state 引用
+                    pooled.heightListener = null
+                    pooled.successListener = null
+                    pooled.failureListener = null
                     FormulaWebViewPoolHolder.getOrNull()?.release(pooled)
                 }
                 pooledRef = null

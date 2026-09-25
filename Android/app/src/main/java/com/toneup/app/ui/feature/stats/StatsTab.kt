@@ -83,7 +83,7 @@ fun StatsTab(viewModel: StatsViewModel = hiltViewModel()) {
             is Load.Failed -> item { ErrorRetryCard(overview.message, onRetry = { viewModel.load() }) }
             is Load.Ready -> item {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OverviewCard("正确率", "${(overview.value.accuracyRate * 100).toInt()}%", Modifier.weight(1f))
+                    OverviewCard("正确率", "${(overview.value.accuracy * 100).toInt()}%", Modifier.weight(1f))
                     OverviewCard("刷题量", "${overview.value.totalAttempts}", Modifier.weight(1f))
                     OverviewCard("连续天数", "${overview.value.streakDays}", Modifier.weight(1f))
                 }
@@ -102,18 +102,17 @@ fun StatsTab(viewModel: StatsViewModel = hiltViewModel()) {
                     item {
                         AccuracyBarChart(
                             entries = weak.value.take(5).map { w ->
-                                val label = w.tagName ?: w.typeCode ?: w.subjectName ?: "未知"
-                                label to w.accuracyRate
+                                // H-16：key 即后端给出的展示名（题型码或知识点名）
+                                w.key to w.accuracy
                             }
                         )
                     }
                     items(weak.value) { w ->
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp)) {
-                                val label = w.tagName ?: w.typeCode ?: w.subjectName ?: "未知"
-                                Text(label, style = MaterialTheme.typography.titleSmall)
+                                Text(w.key, style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    text = "作答 ${w.attemptCount} 次 · 正确率 ${(w.accuracyRate * 100).toInt()}%",
+                                    text = "作答 ${w.attempts} 次 · 正确率 ${(w.accuracy * 100).toInt()}%",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -126,12 +125,16 @@ fun StatsTab(viewModel: StatsViewModel = hiltViewModel()) {
 
         // FR-ST-05 刷题趋势
         item { Text("刷题趋势", style = MaterialTheme.typography.titleMedium) }
-        item {
-            // TODO: StatsUiState 暂未提供 dailyCounts，接入真实数据后替换 emptyList()
-            SevenDayTrendChart(
-                dailyCounts = emptyList(),
-                modifier = Modifier.fillMaxWidth()
-            )
+        // H-73：接入真实 daily-trend 数据，替代原来的空实现（FR-ST-05 死代码）
+        when (val trend = state.dailyTrend) {
+            is Load.Loading -> item { SkeletonBlock() }
+            is Load.Failed -> item { ErrorRetryCard(trend.message, onRetry = { viewModel.load() }) }
+            is Load.Ready -> item {
+                SevenDayTrendChart(
+                    dailyCounts = trend.value.points.map { it.date to it.attempts },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
     }
 }

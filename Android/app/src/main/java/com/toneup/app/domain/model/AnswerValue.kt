@@ -22,15 +22,17 @@ sealed class AnswerValue {
             is Choice -> label.isBlank()
             is MultiChoice -> labels.isEmpty()
             is Text -> text.isBlank()
+            // H-29：BlankLabels 与 Blanks 语义对齐——全空值视为未作答
             is Blanks -> values.values.all { it.isBlank() }
-            is BlankLabels -> values.isEmpty()
+            is BlankLabels -> values.values.all { it.isBlank() }
             is Order -> ids.isEmpty()
         }
 
     /** 是否存在部分填写（部分留空需二次确认） */
     fun hasPartialBlanks(totalBlanks: Int): Boolean = when (this) {
+        // H-30：两种填空类型统一按“非空条目数”计数，空白标签不算已填
         is Blanks -> values.count { it.value.isNotBlank() } in 1 until totalBlanks
-        is BlankLabels -> values.isNotEmpty() && values.size < totalBlanks
+        is BlankLabels -> values.count { it.value.isNotBlank() } in 1 until totalBlanks
         else -> false
     }
 }

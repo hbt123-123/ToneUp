@@ -41,8 +41,9 @@ fun MineTab(
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showLogoutDialog by remember { mutableStateOf(false) }
 
-    androidx.compose.runtime.LaunchedEffect(state.loggedOut) {
-        if (state.loggedOut) onLoggedOut()
+    // H-50：登出导航信号走一次性事件流，loggedOut 是 sticky 标志会重复触发导航
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        viewModel.logoutEvent.collect { onLoggedOut() }
     }
 
     LazyColumn(

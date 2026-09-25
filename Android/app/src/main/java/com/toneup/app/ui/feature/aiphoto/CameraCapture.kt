@@ -151,7 +151,10 @@ fun CameraCaptureView(
     val previewView = remember { mutableStateOf<PreviewView?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    DisposableEffect(lifecycleOwner) {
+    // H-39：以 previewView 是否就绪为 key——future 回调可能在 AndroidView factory
+    // 之前执行，此时 PreviewView 尚未创建，直接绑定会导致预览黑屏；factory 就绪后
+    // 本 effect 重启再行绑定
+    DisposableEffect(lifecycleOwner, previewView.value) {
         var disposed = false
         var boundProvider: ProcessCameraProvider? = null
         val providerFuture = ProcessCameraProvider.getInstance(context)
@@ -159,11 +162,12 @@ fun CameraCaptureView(
             // listener 与 onDispose 同在主线程执行：disposed 标志保证离开组合后
             // 迟到的 future 回调不会再绑定相机（否则预览将持续供帧至 activity 销毁）
             if (disposed) return@addListener
+            val surfaceProvider = previewView.value?.surfaceProvider ?: return@addListener
             try {
                 val provider = providerFuture.get()
                 boundProvider = provider
                 val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.value?.surfaceProvider)
+                    it.setSurfaceProvider(surfaceProvider)
                 }
                 provider.unbindAll()
                 provider.bindToLifecycle(

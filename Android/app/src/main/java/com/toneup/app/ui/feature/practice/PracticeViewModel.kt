@@ -36,6 +36,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -287,6 +288,12 @@ class PracticeViewModel @Inject constructor(
         viewModelScope.launch { pushServerDraftIfServerSession(s) }
     }
 
+    /** H-57：退出刷题前持久化当前草稿（本地 DataStore + 服务端会话 draft） */
+    fun persistDraftsForExit() {
+        if (session == null) return
+        flushAndPushServerDraft(_state.value.currentIndex)
+    }
+
     private suspend fun pushServerDraftIfServerSession(s: PracticeSession) {
         val sid = s.serverSessionId ?: return
         val userId = sessionManager.currentUserId() ?: return
@@ -315,7 +322,7 @@ class PracticeViewModel @Inject constructor(
 
         // EC-01 服务端会话：题目序列创建时已返回并预填，直接取用
         if (s.serverSessionId != null) {
-            val q = synchronized(s) { s.questions.getOrNull(index) } ?: run {
+            val q = s.questions.getOrNull(index) ?: run {
                 setStatus(index, PracticeStatus.Error("没有更多题目", isNetwork = false))
                 return
             }
@@ -333,7 +340,7 @@ class PracticeViewModel @Inject constructor(
                         typeCode = s.typeCodeFilter,
                         page = s.nextPage
                     )
-                    synchronized(s) { s.append(page) }
+                    s.append(page)
                 } catch (_: Exception) {
                     setStatus(index, PracticeStatus.Error("题目加载失败", isNetwork = true))
                     return
@@ -351,7 +358,7 @@ class PracticeViewModel @Inject constructor(
             val ref: QuestionRef = s.fixedRefs.getOrNull(index) ?: return
             try {
                 val q = questionRepository.questionDetail(ref.bankId, ref.questionId)
-                synchronized(s) { s.appendOne(q) }
+                s.appendOne(q)
                 hydrateSlot(slotIndexFor(q.questionId, index), q)
             } catch (e: Exception) {
                 setStatus(index, PracticeStatus.Error(e.toLoadMessage(), isNetwork = e is AppException.Network))
@@ -407,10 +414,14 @@ class PracticeViewModel @Inject constructor(
     }
 
     private fun updateSlot(index: Int, transform: (QuestionSlot) -> QuestionSlot) {
-        val slots = _state.value.slots.toMutableList()
-        val current = slots.getOrNull(index) ?: return
-        slots[index] = transform(current)
-        _state.value = _state.value.copy(slots = slots)
+        // H-60：改用 StateFlow.update（CAS 循环），避免「读旧值→算新值→写回」期间
+        // 其他协程的更新被旧快照整体覆盖（slots 丢失更新 / currentIndex 等字段回退）
+        _state.update { st ->
+            val slots = st.slots.toMutableList()
+            val current = slots.getOrNull(index) ?: return@update st
+            slots[index] = transform(current)
+            st.copy(slots = slots)
+        }
     }
 
     fun retryLoad(index: Int) {
@@ -614,8 +625,10 @@ class PracticeViewModel @Inject constructor(
                         errorHint = null
                     )
                 }
-                // 先取消已排期的 ESSAY 兜底落盘，避免 clearDraft 后又被重新写入
+                // 先取消已排期的 ESSAY 兜底落盘与草稿 debounce 写入，避免 clearDraft 后又被重新写入
                 essayFlushJobs.remove(question.questionId)?.cancel()
+                // H-61：draftFlushJobs 的 500ms debounce 任务若仍存活，会在 clearDraft 后用旧答案重写草稿
+                draftFlushJobs.remove(question.questionId)?.cancel()
                 clearDraft(question.bankId, question.questionId)
             } catch (e: AppException.Network) {
                 dispatch(index, PracticeEvent.SubmitNetworkFailed("网络不可用，答案已保存待同步"))

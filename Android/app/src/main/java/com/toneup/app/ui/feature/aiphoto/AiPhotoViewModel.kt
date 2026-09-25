@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.io.File
+import java.io.IOException
 import javax.inject.Inject
 
 sealed interface AiFlowStep {
@@ -142,8 +143,19 @@ class AiPhotoViewModel @Inject constructor(
                     }
                 } catch (e: CancellationException) {
                     throw e
-                } catch (e: Exception) {
+                } catch (e: AppException.Network) {
                     // 网络抖动继续重试直至超时
+                } catch (e: AppException.Server) {
+                    // 5xx 瞬态：同样保留重试
+                } catch (e: AppException.RateLimited) {
+                    // 限流瞬态：保留重试
+                } catch (e: IOException) {
+                    // IO 抖动：保留重试
+                } catch (e: Exception) {
+                    // H-38：非瞬态失败（401/403、4xx 校验、反序列化）立即如实上报，
+                    // 不得伪装成“等待超时（60 秒）”
+                    fail((e as? AppException)?.userMessage ?: "AI 诊断请求失败", canRetryUpload = true)
+                    return@launch
                 }
             }
         }

@@ -18,7 +18,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CheckBox
@@ -168,6 +170,9 @@ fun PassageCollapsiblePanel(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 360.dp)
+                        // H-65：KDoc 承诺“展开内部滚动不撑爆页面”，必须真正可滚动，
+                        // 否则长文章在 360dp 高度内被截断、用户无法读到末尾
+                        .verticalScroll(rememberScrollState())
                 ) {
                     FormulaText(text = passage, modifier = Modifier.padding(top = 8.dp))
                 }

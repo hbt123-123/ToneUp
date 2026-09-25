@@ -65,7 +65,16 @@ class RootViewModel @Inject constructor(
     /** FR-AU-05：存在有效令牌则静默校验，有效直接进主框架 */
     fun refresh() {
         viewModelScope.launch {
-            val user = runCatching { authRepository.restoreSession() }.getOrNull()
+            // H-82：runCatching 会连 CancellationException 一起吞掉（restoreSession 内部已
+            // 显式 rethrow CE），scope 取消时仍会继续写 state，破坏结构化并发；
+            // 显式放行取消，其余异常按"恢复失败→进登录页"处理
+            val user = try {
+                authRepository.restoreSession()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
             if (user != null) {
                 sessionManager.restoreCachedUser(
                     com.toneup.app.data.local.SessionUser(user.id, user.username, user.role)

@@ -27,7 +27,13 @@ class PracticeSession(
     /** EC-01 跨进程恢复时由 GET detail 带回的服务端草稿（{questionId: answerJson}），恢复装载时服务端优先 */
     val restoredDraft: kotlinx.serialization.json.JsonObject? = null
 ) {
-    val questions = mutableListOf<QuestionDto>()
+    // H-23：题目列表私有化，所有读写经同步访问器，杜绝外部无锁修改
+    private val _questions = mutableListOf<QuestionDto>()
+
+    /** 只读快照（每次返回拷贝，避免暴露内部可变状态） */
+    val questions: List<QuestionDto>
+        get() = synchronized(this) { _questions.toList() }
+
     var total: Int = if (fixedRefs != null) fixedRefs.size else Int.MAX_VALUE
         private set
     var hasMore: Boolean = true
@@ -35,16 +41,24 @@ class PracticeSession(
     var nextPage: Int = 1
         private set
 
+    @Synchronized
     fun append(page: PageData<QuestionDto>) {
-        questions.addAll(page.items)
+        _questions.addAll(page.items)
         hasMore = page.hasMore
         total = page.total
         nextPage++
     }
 
+    /** EC-01 服务端会话预填题目序列 */
+    @Synchronized
+    fun appendAll(items: List<QuestionDto>) {
+        _questions.addAll(items)
+    }
+
+    @Synchronized
     fun appendOne(question: QuestionDto) {
-        if (questions.none { it.questionId == question.questionId }) {
-            questions.add(question)
+        if (_questions.none { it.questionId == question.questionId }) {
+            _questions.add(question)
         }
     }
 

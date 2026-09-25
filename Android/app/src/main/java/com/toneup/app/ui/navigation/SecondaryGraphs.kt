@@ -1,6 +1,7 @@
 package com.toneup.app.ui.navigation
 
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -110,7 +111,7 @@ class SectionListSessionHelper @Inject constructor(
                     fixedRefs = resp.questions.map { QuestionRef(bankId, it.questionId) },
                     serverSessionId = sid
                 )
-                synchronized(session) { session.questions.addAll(resp.questions) }
+                session.appendAll(resp.questions)
                 registry.register(session)
                 onReady(session.sessionId, true)
             } catch (_: Exception) {
@@ -164,7 +165,13 @@ fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
         )
     }
     composable(Routes.SUMMARY) { entry ->
-        val practiceEntry = checkNotNull(navController.previousBackStackEntry)
+        // H-79：SUMMARY 可能无前序条目（deep link / 进程恢复后直接落到此路由），
+        // checkNotNull 会直接崩溃；此时回退到上一页而不是抛 IllegalStateException
+        val practiceEntry = navController.previousBackStackEntry
+        if (practiceEntry == null) {
+            LaunchedEffect(Unit) { navController.popBackStack() }
+            return@composable
+        }
         val viewModel: com.toneup.app.ui.feature.practice.PracticeViewModel = hiltViewModel(practiceEntry)
         val stats = viewModel.submitPaperStats()
         val totalTime = viewModel.elapsedSeconds.collectAsStateWithLifecycle().value

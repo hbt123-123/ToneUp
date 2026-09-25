@@ -9,6 +9,7 @@ import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.SectionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -67,13 +68,16 @@ class SectionListViewModel @Inject constructor(
     val state: StateFlow<SectionListUiState> = _state
 
     private var cachedResponse: SectionsResponse? = null
+    private var loadJob: Job? = null
 
     init {
         loadSections()
     }
 
     private fun loadSections() {
-        viewModelScope.launch {
+        // H-69：快速重试时先取消在途请求，避免旧协程晚到的响应覆盖新一次加载的状态
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _state.value = _state.value.copy(isLoading = true, error = null)
             try {
                 val response = sectionRepository.sections(bankId)

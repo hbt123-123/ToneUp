@@ -70,10 +70,7 @@ fun BankTab(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
-                    StreakCard(
-                        streakDays = home.streakDays,
-                        checkedToday = home.checkedToday
-                    )
+                    StreakCard(streakDays = home.streakDays)
                 }
 
                 // 错题本入口（WB 二级页）
@@ -262,7 +259,7 @@ fun BankTab(
 }
 
 @Composable
-private fun StreakCard(streakDays: Int, checkedToday: Boolean) {
+private fun StreakCard(streakDays: Int) {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -286,7 +283,8 @@ private fun StreakCard(streakDays: Int, checkedToday: Boolean) {
                     style = MaterialTheme.typography.titleLarge
                 )
                 Text(
-                    text = if (checkedToday) "今日已打卡，继续保持！" else "今日尚未打卡，做一题就算打卡",
+                    // H-15：后端不提供 checked_today，无法判定今日打卡状态，文案不再硬编码该状态
+                    text = "坚持每天做题，保持连续记录",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

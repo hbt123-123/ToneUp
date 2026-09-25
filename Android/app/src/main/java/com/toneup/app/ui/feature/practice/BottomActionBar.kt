@@ -61,11 +61,22 @@ fun BottomActionBar(
 
         Column(Modifier.weight(1f)) {
             when {
-                attemptId != null -> Button(
-                    onClick = { onOpenAnalysis(attemptId) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text("查看解析")
+                attemptId != null -> {
+                    Button(
+                        onClick = { onOpenAnalysis(attemptId) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text("查看解析")
+                    }
+                    // H-53：提交后提供“下一题”入口（此前 hasNext/onNext 未消费，
+                    // 提交完成后用户没有前进路径）
+                    OutlinedButton(
+                        onClick = onNext,
+                        enabled = hasNext && !submitting,
+                        modifier = Modifier.fillMaxWidth().height(48.dp)
+                    ) {
+                        Text("下一题")
+                    }
                 }
 
                 isNetworkError -> Button(

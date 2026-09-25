@@ -37,7 +37,12 @@ class FormulaWebViewPool @Inject constructor(
 
     fun prewarm() {
         mainHandler.post {
-            if (_prewarmed.value) return@post
+            // H-33：以池内实际规模为准决定是否继续创建——_prewarmed 标志滞后于
+            // all.size，重复 prewarm 会在标志置位前各建一实例导致超限
+            if (synchronized(lock) { all.size >= POOL_SIZE }) {
+                _prewarmed.value = true
+                return@post
+            }
             // 分帧逐个创建：每帧仅构造一个 WebView，避免单帧持锁连续构造阻塞主线程（§7.2 冷启动）
             val created = create()
             synchronized(lock) {
@@ -148,7 +153,12 @@ class FormulaWebViewPool @Inject constructor(
         internal const val TEMPLATE_URL = "file:///android_asset/katex/index.html"
         private val json = Json
 
-        fun jsString(raw: String): String = json.encodeToString(raw)
+        fun jsString(raw: String): String {
+            val encoded = json.encodeToString(raw)
+            // H-34：U+2028/U+2029 是 JSON 合法字符但属 JS 行终止符，
+            // 直接内插进 evaluateJavascript 会截断语句，必须显式转义
+            return encoded.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+        }
     }
 }
 
@@ -206,6 +216,9 @@ class PooledWebView internal constructor(val webView: WebView) {
         if (!failed) {
             renderTimeoutPending = false
             failed = true
+            // H-35：失败后丢弃挂起渲染，避免模板 onPageFinished 就绪后重新渲染
+            // 与已上报的失败态错位
+            pending = null
             failureListener?.invoke()
         }
     }
