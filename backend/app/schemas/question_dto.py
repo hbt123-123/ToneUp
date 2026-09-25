@@ -74,7 +74,8 @@ def normalize_options(raw: str | None) -> list | None:
         out = []
         for item in parsed:
             if isinstance(item, dict) and "label" in item and "text" in item:
-                out.append({"label": str(item["label"]), "text": item["text"]})
+                # M-320：与 dict 分支对齐，label 统一去空白并大写
+                out.append({"label": str(item["label"]).strip().upper(), "text": item["text"]})
         return out or None
 
     logger.warning("options_unexpected_shape", type=type(parsed).__name__)

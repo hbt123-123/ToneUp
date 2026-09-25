@@ -29,7 +29,8 @@ def _entry_or_404(bank_id: str):
     return entry
 
 
-def _build_dto(entry, row, include_answer: bool) -> dict:
+def _build_dto(entry, row, include_answer: bool, passage_map=None) -> dict:
+    """构造题目 DTO。passage_map 非空时直接取预载结果（M-284：列表路径免逐题查库）。"""
     settings = get_settings()
     enabled = settings.clean_markdown
     mapping = QUESTION_TYPE_MAPPING.get(entry.subject_id, {})
@@ -39,7 +40,10 @@ def _build_dto(entry, row, include_answer: bool) -> dict:
     try:
         pid = row["passage_id"]
         if pid is not None:
-            prow = bank_repo.get_passage(str(entry.path), pid)
+            if passage_map is not None:
+                prow = passage_map.get(pid)
+            else:
+                prow = bank_repo.get_passage(str(entry.path), pid)
             if prow is not None:
                 passage = clean_markdown_text(prow["content"], enabled)
     except (IndexError, KeyError):
@@ -113,7 +117,13 @@ def list_questions(
     rows, total = bank_repo.list_questions(
         str(entry.path), question_type_id=type_id, year=year, page=page_num, page_size=page_size
     )
-    items = [_build_dto(entry, r, include_answer=False) for r in rows]
+    # M-284：本页涉及的全部 passage_id 一次批量预载，替代每题一次 get_passage 的 N+1
+    passage_ids = list({r["passage_id"] for r in rows if r["passage_id"] is not None})
+    passage_map = bank_repo.get_passages(str(entry.path), passage_ids) if passage_ids else {}
+    items = [
+        _build_dto(entry, r, include_answer=False, passage_map=passage_map)
+        for r in rows
+    ]
     has_more = page_num * page_size < total
     return envelope(page(items, total, has_more))
 

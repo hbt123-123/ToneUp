@@ -10,6 +10,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+import structlog
 from fastapi import APIRouter, Body, Depends, Request
 
 from app.api.deps import get_current_user
@@ -81,7 +82,13 @@ def _attempt_payload(user_db: str, attempt_id: int, include_answer: bool) -> dic
             data["solution"] = clean_markdown_text(qrow["solution"], enabled)
             data["type_code"] = type_code
         except NotFoundError:
-            pass
+            # M-274：吞掉异常前留痕——题库重载/下架后历史作答查详情属可观测事件
+            structlog.get_logger().warning(
+                "attempt_answer_source_missing",
+                attempt_id=attempt_id,
+                bank_id=a["bank_id"],
+                question_id=a["question_id"],
+            )
     return data
 
 

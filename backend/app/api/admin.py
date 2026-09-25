@@ -128,7 +128,8 @@ def health(request: Request, bank_id: str | None = Query(None), user=Depends(req
         target=_run_health_check, args=(task_id, settings.data_root, bank_id), daemon=True
     )
     t.start()
-    t.join(timeout=5)
+    # M-270：不等待后台线程完成（大库检查可超 5s，join 会占住线程池线程）；
+    # 立即返回 running 状态 + task_id，客户端轮询 GET /api/admin/health/{task_id}
     with _health_lock:
         snapshot = dict(_health_tasks[task_id])
     _audit(request, user, "health_check", f"bank_id={bank_id}")
@@ -140,6 +141,9 @@ def health_result(task_id: str, user=Depends(require_admin)):
     """异步检查结果；进程内存活，重启后旧 task_id 404 属预期。"""
     with _health_lock:
         task = _health_tasks.get(task_id)
-    if task is None:
+        # M-271：锁内做浅拷贝快照——后台线程持有同一 dict 引用并在锁外更新，
+        # 直接展开原 dict 可能撞上 "dictionary changed size during iteration"
+        snapshot = dict(task) if task is not None else None
+    if snapshot is None:
         raise NotFoundError("health task not found (may have been cleared by restart)")
-    return envelope({"task_id": task_id, **task})
+    return envelope({"task_id": task_id, **snapshot})

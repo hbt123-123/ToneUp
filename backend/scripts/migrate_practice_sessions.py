@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import sqlite3
+from pathlib import Path
 
 
 PRACTICE_SESSION_DDL = """
@@ -43,7 +44,12 @@ CREATE TABLE IF NOT EXISTS practice_session_item (
 """
 
 PRACTICE_SESSION_INDEXES = [
-    "CREATE UNIQUE INDEX IF NOT EXISTS uq_practice_session_request ON practice_session(user_id, client_request_id)",
+    # M-347：改部分索引——client_request_id 为 NULL 的行不参与唯一约束，
+    # 语义与「幂等键仅对显式请求生效」一致；先删旧的全量同名索引，
+    # 否则 IF NOT EXISTS 不会替换既有索引、部分索引不会生效
+    "DROP INDEX IF EXISTS uq_practice_session_request",
+    """CREATE UNIQUE INDEX IF NOT EXISTS uq_practice_session_request
+       ON practice_session(user_id, client_request_id) WHERE client_request_id IS NOT NULL""",
     "CREATE INDEX IF NOT EXISTS idx_practice_session_user ON practice_session(user_id, created_at DESC)",
 ]
 
@@ -55,6 +61,8 @@ def migrate_practice_sessions(db_path: str) -> None:
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=5000")
+        # M-348：ON DELETE CASCADE 依赖连接层外键开关，迁移期一并开启保持一致
+        cursor.execute("PRAGMA foreign_keys=ON")
 
         cursor.execute(PRACTICE_SESSION_DDL)
         cursor.execute(PRACTICE_SESSION_ITEM_DDL)
@@ -72,8 +80,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--db",
-        default="../data/user_data.db",
-        help="Path to SQLite database (default: ../data/user_data.db)",
+        # M-349：默认路径基于脚本位置解析，不依赖 CWD
+        default=str(Path(__file__).resolve().parents[1] / "data" / "user_data.db"),
+        help="Path to SQLite database (default: <backend>/data/user_data.db)",
     )
     return parser.parse_args()
 

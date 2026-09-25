@@ -15,9 +15,12 @@ logger = structlog.get_logger()
 
 _IMG_TAG_RE = re.compile(r"<img[^>]*src=[\"']([^\"']*)[\"'][^>]*>", re.IGNORECASE)
 _MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-_BRACKET_CN_RE = re.compile(r"\[图\s*(\d+)\]")
+# M-334：(?!\() 跳过已是 markdown 链接的 "[图3](...)"，防止二次改写
+_BRACKET_CN_RE = re.compile(r"\[图\s*(\d+)\](?!\()")
 _PLACEHOLDER_RE = re.compile(r"__(?:IMAGE|IMG)_?(\d+)__", re.IGNORECASE)
-_BARE_ID_RE = re.compile(r"(?<![\w/])(\d{1,6})(?![\w/.]|\d)(?:\.(?:png|jpg|jpeg|webp|gif))?", re.IGNORECASE)
+# M-333：拆分「数字.扩展名」与纯裸数字两个分支——原版 lookahead 顺序
+# 导致 "3.png" 这类带扩展名引用永远匹配不到（"." 被 [\w/.] 断言挡下）
+_BARE_ID_RE = re.compile(r"(?<![\w/])(\d{1,6})(?:\.(?:png|jpg|jpeg|webp|gif)\b|(?![\w/.]))", re.IGNORECASE)
 
 
 def _endpoint(image_id: str, bank_id: str) -> str:

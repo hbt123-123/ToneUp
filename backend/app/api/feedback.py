@@ -35,7 +35,9 @@ def create_feedback(body: dict = Body(...), user=Depends(get_current_user)):
     content = body.get("content")
     image_id = body.get("image_id")
 
-    if not bank_id:
+    # M-280：bank_id 必须是非空字符串——原 `not bank_id` 会放过数字/列表等
+    # 非串真值类型，落库成畸形 bank_id 后该反馈无法按题库维度检索
+    if not isinstance(bank_id, str) or not bank_id.strip():
         raise BadRequestError("bank_id is required")
     if question_id is None or not isinstance(question_id, int):
         raise BadRequestError("question_id must be an integer")

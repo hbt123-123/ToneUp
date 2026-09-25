@@ -30,6 +30,9 @@ def setup_logging() -> None:
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.add_log_level,
             inject_request_id,
+            # M-300：JSONRenderer 不解析 exc_info，缺此处理器时 logger.exception()
+            # 输出的 JSON 里 traceback 会被丢成 "exc_info": true
+            structlog.processors.format_exc_info,
             structlog.processors.JSONRenderer(),
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),

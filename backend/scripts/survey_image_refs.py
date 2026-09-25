@@ -26,22 +26,34 @@ PATTERNS = ["<img", "![](", "[图", "见图", "__IMAGE", "__IMG", "{img", "image
 
 def main() -> None:
     for name, path in BANKS.items():
-        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         print(f"\n===== {name} =====")
-        for pat in PATTERNS:
-            n = conn.execute(
-                "SELECT COUNT(*) FROM questions WHERE instr(content, ?) > 0", (pat,)
-            ).fetchone()[0]
-            if n:
-                print(f"  {pat!r}: {n} hits")
-                sample = conn.execute(
-                    "SELECT id, substr(content, MAX(1, instr(content, ?) - 30), 100) "
-                    "FROM questions WHERE instr(content, ?) > 0 LIMIT 2",
-                    (pat, pat),
-                ).fetchall()
-                for qid, ctx in sample:
-                    print(f"    qid={qid}: ...{ctx!r}...")
-        conn.close()
+        if not path.exists():
+            # M-353：缺库跳过，不让单个库缺失中断整体勘察
+            print("  跳过：库文件不存在")
+            continue
+        conn = None
+        try:
+            conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+            for pat in PATTERNS:
+                # M-352：统一小写匹配，覆盖 "<IMG"、".PNG" 等大写变体
+                n = conn.execute(
+                    "SELECT COUNT(*) FROM questions WHERE instr(lower(content), ?) > 0",
+                    (pat.lower(),),
+                ).fetchone()[0]
+                if n:
+                    print(f"  {pat!r}: {n} hits")
+                    sample = conn.execute(
+                        "SELECT id, substr(content, MAX(1, instr(lower(content), ?) - 30), 100) "
+                        "FROM questions WHERE instr(lower(content), ?) > 0 LIMIT 2",
+                        (pat.lower(), pat.lower()),
+                    ).fetchall()
+                    for qid, ctx in sample:
+                        print(f"    qid={qid}: ...{ctx!r}...")
+        except sqlite3.Error as exc:
+            print(f"  查询失败: {exc}")
+        finally:
+            if conn is not None:
+                conn.close()
     print("\nDONE")
 
 

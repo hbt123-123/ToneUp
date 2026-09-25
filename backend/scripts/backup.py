@@ -15,10 +15,11 @@ is 7.
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import shutil
+import sqlite3
 import sys
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -72,13 +73,18 @@ def _snapshot_sqlite(src: Path, dst: Path) -> None:
         src_conn.close()
 
 
-def _zip_backup(data_root: Path, sources: List[Tuple[str, Path]]) -> Path:
+def _zip_backup(data_root: Path, sources: List[Tuple[str, Path]], partial: bool = False) -> Path:
     """Create a zip backup under data_root/backups/ and return its path."""
     backups_dir = data_root / "backups"
     backups_dir.mkdir(parents=True, exist_ok=True)
 
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    zip_path = backups_dir / f"backup-{ts}.zip"
+    # M-337：时间戳精确到毫秒；同毫秒内重复运行导致重名时等待下一毫秒重试
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+    zip_path = backups_dir / f"backup-{ts}{'-partial' if partial else ''}.zip"
+    while zip_path.exists():
+        time.sleep(0.001)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")[:-3]
+        zip_path = backups_dir / f"backup-{ts}{'-partial' if partial else ''}.zip"
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -102,15 +108,15 @@ def _zip_backup(data_root: Path, sources: List[Tuple[str, Path]]) -> Path:
 def _prune_old_backups(backups_dir: Path, keep: int) -> None:
     """Keep only the ``keep`` newest zip files in *backups_dir*.
 
-    Files are sorted by modification time (newest first); everything
-    beyond the ``keep`` limit is removed.
+    M-338：文件名内嵌毫秒时间戳，按名字典序排序即时间序；
+    mtime 在文件被复制/同步后不可靠，不再作为排序依据。
     """
     if not backups_dir.is_dir():
         return
 
     zips = sorted(
         backups_dir.glob("backup-*.zip"),
-        key=lambda p: p.stat().st_mtime,
+        key=lambda p: p.name,
         reverse=True,
     )
 
@@ -130,7 +136,13 @@ def backup(data_root: Path, keep: int = 7) -> int:
         print("错误: 没有找到任何备份源文件 (user_data.db, knowledge_tags.db, manifest.json)")
         return 1
 
-    zip_path = _zip_backup(data_root, sources)
+    # M-339：部分源文件缺失时，备份文件名加 -partial 后缀标记不完整包
+    partial = len(sources) < len(DATA_FILES)
+    if partial:
+        missing = sorted(set(DATA_FILES) - {name for name, _ in sources})
+        print(f"警告: 部分源文件缺失，本备份标记为不完整: {', '.join(missing)}")
+
+    zip_path = _zip_backup(data_root, sources, partial=partial)
     print(f"已创建备份: {zip_path}")
 
     # Prune old backups *after* the new one has been written.

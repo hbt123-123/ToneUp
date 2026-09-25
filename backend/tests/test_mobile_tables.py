@@ -154,7 +154,7 @@ def test_list_feedback_pagination(db):
 
 def test_note_is_liked_by(db):
     uid = _create_user(db)
-    user_repo.notes_upsert(db, uid, "bank-math", 7, "hello", NOW)
+    user_repo.notes_upsert(db, uid, "bank-math", 7, "hello", "public", NOW)
     row = user_repo.notes_get(db, uid, "bank-math", 7)
     note_id = row["id"] if row else None
     assert note_id is not None
@@ -177,7 +177,7 @@ def test_note_is_liked_by(db):
 
 def test_note_increment_decrement_likes(db):
     uid = _create_user(db)
-    user_repo.notes_upsert(db, uid, "bank-math", 7, "hello", NOW)
+    user_repo.notes_upsert(db, uid, "bank-math", 7, "hello", "public", NOW)
     row = user_repo.notes_get(db, uid, "bank-math", 7)
     note_id = row["id"]
 
@@ -210,7 +210,7 @@ def test_note_increment_decrement_likes(db):
 
 def test_notes_list_public(db):
     uid = _create_user(db)
-    user_repo.notes_upsert(db, uid, "bank-math", 7, "public note", NOW)
+    user_repo.notes_upsert(db, uid, "bank-math", 7, "public note", "public", NOW)
 
     items, total = user_repo.notes_list_public(db, "bank-math", 7, page=1, page_size=20)
     assert total == 1
@@ -220,7 +220,7 @@ def test_notes_list_public(db):
 
 def test_notes_list_mine(db):
     uid = _create_user(db)
-    user_repo.notes_upsert(db, uid, "bank-math", 7, "my note", NOW)
+    user_repo.notes_upsert(db, uid, "bank-math", 7, "my note", "public", NOW)
 
     row = user_repo.notes_list_mine(db, uid, "bank-math", 7)
     assert row is not None

@@ -51,20 +51,15 @@ def create_app() -> FastAPI:
         except Exception as exc:
             logger.error("grading_recovery_failed", error=str(exc))
 
-        yield
-
-        stop_worker()
+        # M-308：shutdown 路径必须 try/finally——yield 处被注入异常（如
+        # shutdown 事件抛错）时 stop_worker 不执行，判分线程会随进程残留
+        try:
+            yield
+        finally:
+            stop_worker()
 
     # lifespan 必须在构造时传入，事后赋值不生效
     app = FastAPI(title="ToneUp API", lifespan=lifespan)
-
-    # --- CORS 中间件 ---
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=get_settings().cors_allow_origins,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     # --- 兜底限流（240/min/IP）：必须先于 request_id 注册（更内层），
     # 使其 429 响应向外穿过 request_id 中间件时被注入 request_id ---
@@ -80,6 +75,17 @@ def create_app() -> FastAPI:
 
     # --- request_id 中间件（后注册=外层，负责透传/生成/回显）---
     add_request_id_middleware(app)
+
+    # --- CORS 中间件 ---
+    # M-309：CORS 必须最外层（最后注册）。原顺序下 CORS 位于最内层，
+    # 限流 429 / 草稿 400 等短路响应不经过 CORS 处理器、缺少
+    # Access-Control-Allow-* 头，浏览器跨域场景会把真实状态码吞成 CORS 报错
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().cors_allow_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # --- 全局异常处理器注册 ---
     register_exception_handlers(app)

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -55,6 +56,8 @@ class BankEntry:
     path: Path
     schema_version: int
     enabled: bool
+    # M-354：manifest 显式声明的禁用原因（enabled=false 时用于校验输出）
+    disabled_reason: str | None = None
 
 
 def _is_within(child: Path, parent: Path) -> bool:
@@ -142,6 +145,10 @@ class BankRegistry:
             # 否则 admin reload 会把空目录当作"成功"替换掉旧索引（H-84）
             raise RuntimeError(f"无法读取 manifest.json: {exc}") from exc
 
+        # M-296：manifest 根必须是 JSON 对象——数组/标量会让下方 .get 抛 AttributeError
+        if not isinstance(manifest, dict):
+            raise RuntimeError(f"manifest.json 根必须是 JSON 对象: {manifest_path}")
+
         self.subjects_raw = manifest.get("subjects", [])
         subject_types = self._index_subject_types(self.subjects_raw)
         for raw in manifest.get("banks", []):
@@ -167,15 +174,21 @@ class BankRegistry:
     # ------------------------------------------------------------------
     @staticmethod
     def _index_subject_types(subjects: list[dict]) -> dict[str, set[str]]:
+        # M-296：subjects 元素非对象时跳过（JSON 边界数据不保证结构）
         return {
-            str(s.get("id")): {str(t.get("id")) for t in s.get("types", [])}
+            str(s.get("id")): {str(t.get("id")) for t in s.get("types", []) if isinstance(t, dict)}
             for s in subjects
+            if isinstance(s, dict)
         }
 
     def _load_entry(
         self, raw: dict, subject_types: dict[str, set[str]], data_root: Path
     ) -> None:
         """边界解析单条 bank 并执行规则①②③④⑤。raw 为 json 边界数据。"""
+        # M-296：banks 元素非对象（数组/字符串/数字）时按单条目告警禁用
+        if not isinstance(raw, dict):
+            self.warnings.append("<missing>: bank 条目必须是 JSON 对象")
+            return
         bank_id = str(raw.get("id", "<missing>"))
         try:
             entry = BankEntry(
@@ -186,6 +199,12 @@ class BankRegistry:
                 path=(data_root / str(raw["path"])).resolve(),
                 schema_version=int(raw["schema_version"]),
                 enabled=bool(raw["enabled"]),
+                # M-354：透传 manifest 声明的禁用原因
+                disabled_reason=(
+                    str(raw["disabled_reason"])
+                    if raw.get("disabled_reason") is not None
+                    else None
+                ),
             )
         except (KeyError, TypeError, ValueError) as exc:
             self.warnings.append(f"{bank_id}: 条目字段缺失或非法: {exc}")
@@ -226,18 +245,23 @@ class BankRegistry:
 # 模块级单例访问器
 # ----------------------------------------------------------------------
 _registry: BankRegistry | None = None
+_registry_lock = threading.Lock()
 
 
 def get_registry() -> BankRegistry:
     """返回全局注册表单例；首次调用时按 Settings.data_root 加载。
 
     加载失败（manifest 级异常）时单例保持 None，下次调用重试加载。
+    M-297：双重检查加锁——check-then-act 非原子时，并发首调会各自构建
+    并 load() 一份注册表，后写入者覆盖前者，warning 也随之丢失。
     """
     global _registry
     if _registry is None:
-        registry = BankRegistry()
-        registry.load(get_settings().data_root)
-        _registry = registry
+        with _registry_lock:
+            if _registry is None:
+                registry = BankRegistry()
+                registry.load(get_settings().data_root)
+                _registry = registry
     return _registry
 
 

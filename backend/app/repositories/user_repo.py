@@ -22,6 +22,7 @@ __all__ = [
     "update_attempt_result",
     "mastery_submit",
     "mastery_apply_terminal",
+    "apply_attempt_terminal",
     "notes_get",
     "notes_upsert",
     "ai_feedback_create",
@@ -32,6 +33,7 @@ __all__ = [
     "note_increment_likes",
     "note_decrement_likes",
     "note_is_liked_by",
+    "note_likes_for_notes",
     "notes_get_by_id",
     "notes_update",
     "notes_delete",
@@ -50,6 +52,9 @@ def user_connection(db_path: str) -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(db_path, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")
+    # M-301：SQLite 默认关闭外键约束，需连接层显式开启，
+    # practice_session 级联删除（ON DELETE CASCADE）依赖此开关
+    conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
     finally:
@@ -220,6 +225,52 @@ def get_mastery(db_path: str, user_id: int, bank_id: str, question_id: int) -> O
         ).fetchone()
 
 
+def apply_attempt_terminal(
+    db_path: str,
+    attempt_id: int,
+    user_id: int,
+    bank_id: str,
+    question_id: int,
+    is_correct: bool,
+    score: Optional[float],
+    next_review_at: Optional[str],
+    confidence_level: int,
+    now_iso: str,
+) -> bool:
+    """M-329：判定结果写入与掌握度终态回填合并为单事务。
+
+    先以 is_correct IS NULL 守卫写 practice_records（防自评/复判踩踏），
+    rowcount==1 才继续回填 user_mastery；任一步失败整体回滚，
+    消除「records 已判、mastery 丢失」的中间态。
+    返回是否成功应用（False 表示 attempt 已被判定，迟到结果丢弃）。
+    """
+    with user_connection(db_path) as conn:
+        with conn:
+            cur = conn.execute(
+                """
+                UPDATE practice_records
+                SET is_correct = ?, score = ?
+                WHERE id = ? AND is_correct IS NULL
+                """,
+                (int(bool(is_correct)), score, attempt_id),
+            )
+            if cur.rowcount != 1:
+                return False
+            conn.execute(
+                """
+                UPDATE user_mastery
+                SET correct_attempts = correct_attempts + ?,
+                    confidence_level = ?,
+                    next_review_at = ?,
+                    last_practice_at = ?
+                WHERE user_id = ? AND bank_id = ? AND question_id = ?
+                """,
+                (int(bool(is_correct)), confidence_level, next_review_at,
+                 now_iso, user_id, bank_id, question_id),
+            )
+            return True
+
+
 def latest_pending_attempt(
     db_path: str, user_id: int, bank_id: str, question_id: int
 ) -> Optional[sqlite3.Row]:
@@ -266,10 +317,14 @@ def notes_upsert(
     visibility: str,
     now_iso: str,
 ) -> int:
-    """保存（upsert）笔记；返回生成的 note_id。"""
+    """保存（upsert）笔记；回查返回 note_id。
+
+    M-318：ON CONFLICT 走 UPDATE 分支时 cur.lastrowid 不可靠，
+    事务内按唯一键回查真实 id。
+    """
     with user_connection(db_path) as conn:
         with conn:
-            cur = conn.execute(
+            conn.execute(
                 """
                 INSERT INTO user_notes (user_id, bank_id, question_id, note_text, visibility, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -280,7 +335,11 @@ def notes_upsert(
                 """,
                 (user_id, bank_id, question_id, note_text, visibility, now_iso),
             )
-            return int(cur.lastrowid)
+            row = conn.execute(
+                "SELECT id FROM user_notes WHERE user_id = ? AND bank_id = ? AND question_id = ?",
+                (user_id, bank_id, question_id),
+            ).fetchone()
+            return int(row["id"])
 
 
 # ── ai_feedback ──────────────────────────────────────────────────────────────
@@ -436,6 +495,23 @@ def note_is_liked_by(db_path: str, note_id: int, user_id: int) -> bool:
             (note_id, user_id),
         ).fetchone()
     return row is not None
+
+
+def note_likes_for_notes(db_path: str, user_id: int, note_ids: list[int]) -> set[int]:
+    """批量查询用户对一组笔记的点赞 id 集合（M-282 N+1 批量化支撑）。"""
+    if not note_ids:
+        return set()
+    with user_connection(db_path) as conn:
+        result: set[int] = set()
+        for i in range(0, len(note_ids), 500):
+            chunk = note_ids[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT note_id FROM note_likes WHERE user_id = ? AND note_id IN ({placeholders})",
+                (user_id, *chunk),
+            ).fetchall()
+            result.update(int(r["note_id"]) for r in rows)
+    return result
 
 
 def notes_get_by_id(db_path: str, note_id: int) -> Optional[sqlite3.Row]:

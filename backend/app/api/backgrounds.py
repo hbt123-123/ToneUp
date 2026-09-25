@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user
 from app.core.config import get_settings
@@ -50,6 +51,23 @@ def _backgrounds_dir() -> Path:
     d = Path(settings.data_root) / "backgrounds"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _persist_background(bg_dir: Path, user_id: int, contents: bytes, ext: str) -> str:
+    """同步持久化背景图（M-276/277/278）。
+
+    - M-277：先写新文件再清理旧背景（排除新文件名）——写盘失败时旧图仍在，
+      不会出现"新图没写成、旧图已删"的空窗
+    - M-278：文件名指纹用全量 SHA-256 而非前 1KB——同毫秒内上传不同图片
+      （前 1KB 恰好相同，如同一模板导出）不会互相覆盖
+    """
+    content_hash = hashlib.sha256(contents).hexdigest()[:12]
+    filename = f"{user_id}_{int(time.time() * 1000)}_{content_hash}{ext}"
+    (bg_dir / filename).write_bytes(contents)
+    for old in bg_dir.glob(f"{user_id}_*"):
+        if old.name != filename:
+            old.unlink(missing_ok=True)
+    return filename
 
 
 @router.post("/upload")
@@ -96,18 +114,11 @@ async def upload_background(
     # 4. 确定扩展名
     ext = _EXT_MAP[file.content_type]
 
-    # 5. 删除该用户旧背景（配额1张）
+    # 5-7. 同步磁盘 IO 交给线程池执行（M-276：async 端点内直接读写文件会阻塞事件循环）
     bg_dir = _backgrounds_dir()
-    for old in bg_dir.glob(f"{user['id']}_*"):
-        old.unlink(missing_ok=True)
-
-    # 6. 生成安全文件名：{user_id}_{timestamp}_{sha256_prefix}.{ext}
-    content_hash = hashlib.sha256(contents[:1024]).hexdigest()[:12]
-    filename = f"{user['id']}_{int(time.time())}_{content_hash}{ext}"
-    filepath = bg_dir / filename
-
-    # 7. 写入文件
-    filepath.write_bytes(contents)
+    filename = await run_in_threadpool(
+        _persist_background, bg_dir, user["id"], contents, ext
+    )
 
     return {"url": f"/api/backgrounds/{filename}"}
 

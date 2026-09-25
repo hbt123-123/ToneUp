@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
 
 from app.core.bank_registry import get_registry
 from app.core.errors import BadRequestError, NotFoundError
@@ -22,8 +22,11 @@ CACHE_HEADERS = {
 
 
 @router.get("/{image_id}")
-def get_image(image_id: int, bank_id: str = Query(...)):
-    """流式返回 BLOB；Content-Type 取库内 mime。错配/不存在 404。"""
+def get_image(request: Request, image_id: int, bank_id: str = Query(...)):
+    """流式返回 BLOB；Content-Type 取库内 mime。错配/不存在 404。
+
+    M-281：支持 If-None-Match 协商缓存，命中即 304 短路，免重传整个 BLOB。
+    """
     entry = get_registry().get(bank_id)
     if entry is None:
         raise NotFoundError(f"question bank '{bank_id}' not found or disabled")
@@ -33,7 +36,19 @@ def get_image(image_id: int, bank_id: str = Query(...)):
 
     data = row["data"]
     etag = hashlib.md5(data).hexdigest()
+    strong_etag = f'"{etag}"'
     headers = dict(CACHE_HEADERS)
-    headers["ETag"] = f'"{etag}"'
+    headers["ETag"] = strong_etag
+
+    # M-281：If-None-Match 命中（含 W/ 弱校验器与 * 通配）→ 304 不带 body
+    inm = request.headers.get("if-none-match")
+    if inm:
+        for candidate in inm.split(","):
+            c = candidate.strip()
+            if c.startswith("W/"):
+                c = c[2:]
+            if c == strong_etag or c == "*":
+                return Response(status_code=304, headers=headers)
+
     mime = row["mime"] or "application/octet-stream"
     return Response(content=data, media_type=mime, headers=headers)

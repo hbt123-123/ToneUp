@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import base64
+import threading
 
 import httpx
 import structlog
@@ -17,6 +18,23 @@ logger = structlog.get_logger()
 
 CHAT_COMPLETIONS_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 TIMEOUT_SECONDS = 60.0
+
+# M-326：模块级共享 httpx.Client（连接池复用，避免每请求建连开销）
+_shared_client: httpx.Client | None = None
+_client_lock = threading.Lock()
+
+
+def _get_shared_client() -> httpx.Client:
+    """惰性创建共享 Client；双检锁保证线程安全。"""
+    global _shared_client
+    client = _shared_client
+    if client is None:
+        with _client_lock:
+            client = _shared_client
+            if client is None:
+                client = httpx.Client(timeout=TIMEOUT_SECONDS)
+                _shared_client = client
+    return client
 
 
 class GlmError(Exception):
@@ -75,8 +93,7 @@ def chat(payload: dict, client: httpx.Client | None = None) -> str:
         if client is not None:
             resp = client.post(CHAT_COMPLETIONS_URL, json=payload, headers=headers)
         else:
-            with httpx.Client(timeout=TIMEOUT_SECONDS) as own:
-                resp = own.post(CHAT_COMPLETIONS_URL, json=payload, headers=headers)
+            resp = _get_shared_client().post(CHAT_COMPLETIONS_URL, json=payload, headers=headers)
     except httpx.HTTPError as exc:
         logger.error("glm_request_failed", error=str(exc))
         raise GlmError(f"GLM request failed: {exc}") from exc

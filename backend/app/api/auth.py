@@ -32,8 +32,12 @@ def register(
     _: None = Depends(register_rate_limit),
 ):
     """注册：用户名 3-32 位 [A-Za-z0-9_]；密码 ≥8；重名 400（限流 5 次/小时/IP）。"""
-    username = (body.get("username") or "").strip()
-    password = body.get("password") or ""
+    # M-275：username 非字符串（数组/对象等）时 (x or "").strip() 会抛 AttributeError→500；
+    # 先做 isinstance 守卫，非字符串一律按空串走 400 校验失败
+    raw_username = body.get("username")
+    username = raw_username.strip() if isinstance(raw_username, str) else ""
+    raw_password = body.get("password")
+    password = raw_password if isinstance(raw_password, str) else ""
     if not _USERNAME_RE.match(username):
         raise BadRequestError("username must be 3-32 chars of letters/digits/underscore")
     if len(password) < 8:
@@ -50,8 +54,11 @@ def register(
 @router.post("/login")
 def login(request: Request, body: dict = Body(...)):
     """登录：失败统一 400 不区分原因（限流 10 次/分钟/IP+用户名）。"""
-    username = (body.get("username") or "").strip()
-    password = body.get("password") or ""
+    # M-275：同 register——非字符串 username/password 前置守卫，避免 AttributeError 500
+    raw_username = body.get("username")
+    username = raw_username.strip() if isinstance(raw_username, str) else ""
+    raw_password = body.get("password")
+    password = raw_password if isinstance(raw_password, str) else ""
     settings = get_settings()
     ip = client_ip(request, settings.trusted_proxy_count)
     check_login_limit("login", ip, username or "-", 10, 60)

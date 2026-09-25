@@ -9,6 +9,7 @@ Usage:
 
 import argparse
 import sqlite3
+from pathlib import Path
 
 
 def init_knowledge_tags(db_path: str) -> None:
@@ -23,6 +24,8 @@ def init_knowledge_tags(db_path: str) -> None:
     Args:
         db_path: Path to the SQLite database file.
     """
+    # M-340：目标目录不存在时先创建（默认 ../data 依赖 CWD 的旧路径下易失败）
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
         cursor = conn.cursor()
@@ -77,6 +80,16 @@ def init_knowledge_tags(db_path: str) -> None:
             "CREATE INDEX IF NOT EXISTS idx_question_tags_tag ON question_tags (tag_id)"
         )
 
+        # M-341：表级 UNIQUE(subject, parent_id, tag_name) 对 parent_id=NULL
+        # 不生效（SQL 中 NULL 互不相等），顶级标签可无限重复；
+        # 用表达式唯一索引把 NULL 归一为 0 后强制唯一
+        cursor.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_tags_subject_parent_tag
+            ON tags (subject, COALESCE(parent_id, 0), tag_name)
+            """
+        )
+
         conn.commit()
     finally:
         conn.close()
@@ -88,8 +101,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--db",
-        default="../data/knowledge_tags.db",
-        help="Path to SQLite database (default: ../data/knowledge_tags.db)",
+        # M-349：默认路径基于脚本位置解析，不依赖 CWD
+        default=str(Path(__file__).resolve().parents[1] / "data" / "knowledge_tags.db"),
+        help="Path to SQLite database (default: <backend>/data/knowledge_tags.db)",
     )
     return parser.parse_args()
 

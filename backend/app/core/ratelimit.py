@@ -22,6 +22,10 @@ import structlog
 logger = structlog.get_logger()
 
 _windows: dict[str, deque[float]] = defaultdict(deque)
+# M-302：键数超过上限即清扫最后活动超过 1 小时的键（各规则窗口均远小于
+# 1 小时，长期无访问的键下次到来时必然滑空重建，删除无副作用）
+_MAX_WINDOWS = 10_000
+_STALE_SECONDS = 3600.0
 
 
 def _normalize_ip(ip: str) -> str:
@@ -56,14 +60,28 @@ def allow(key: str, limit: int, window_seconds: int) -> int:
     now = time.monotonic()
     retry_after = 0
     with _allow_lock:
-        q = _windows[key]
+        # M-302：键数超阈值时清扫长期无访问的键——原实现只在键被再次查询
+        # 且窗口滑空时回收，被 spoofed/NAT IP 打过一次就永久驻留
+        if len(_windows) > _MAX_WINDOWS:
+            stale = [
+                k for k, q in _windows.items()
+                if not q or q[-1] <= now - _STALE_SECONDS
+            ]
+            for k in stale:
+                _windows.pop(k, None)
+        q = _windows.get(key)
+        if q is None:
+            q = deque()
         while q and q[0] <= now - window_seconds:
             q.popleft()
         if not q:
             # 窗口滑空即回收键，防止 _windows 随 ip/user 组合无界增长（内存泄漏）
             _windows.pop(key, None)
-            q = deque()
-        if len(q) >= limit:
+        # M-303：limit<=0 视为整窗全拒。原实现依赖 len(q)>=limit 分支，
+        # limit==0 时窗口滑空后取 q[0] 会 IndexError
+        if limit <= 0:
+            retry_after = max(1, window_seconds)
+        elif len(q) >= limit:
             retry_after = max(1, int(window_seconds - (now - q[0])) + 1)
         else:
             q.append(now)
@@ -86,14 +104,21 @@ def rate_limit_dep(rule_name: str, limit: int, window_seconds: int, dimension: s
     """
 
     def _dep(request: Request) -> None:
+        # M-304：user / ip_username 维度需请求上下文中的用户信息，由路由体内
+        # 显式调用 check_user_limit / check_login_limit；此处静默放行会让
+        # 误配的端点完全不限流，必须 fail-fast
+        if dimension != "ip":
+            raise RuntimeError(
+                f"rate_limit_dep: dimension={dimension!r} 不受支持；"
+                "请在路由体内调用 check_user_limit / check_login_limit"
+            )
         from app.core.config import get_settings
 
         settings = get_settings()
-        if dimension == "ip":
-            key = f"ip:{rule_name}:{client_ip(request, settings.trusted_proxy_count)}"
-            retry_after = allow(key, limit, window_seconds)
-            if retry_after:
-                raise RateLimitError(retry_after=retry_after)
+        key = f"ip:{rule_name}:{client_ip(request, settings.trusted_proxy_count)}"
+        retry_after = allow(key, limit, window_seconds)
+        if retry_after:
+            raise RateLimitError(retry_after=retry_after)
 
     return _dep
 

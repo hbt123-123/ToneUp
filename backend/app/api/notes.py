@@ -46,18 +46,20 @@ def get_notes(
     db = _db()
     if scope == "public":
         rows, total = user_repo.notes_list_public(db, bank_id, question_id, page, page_size)
-        items = []
-        for row in rows:
-            item = {
+        # M-282：整页笔记的点赞状态一次批量查出，替代循环内逐条 note_is_liked_by 的 N+1
+        liked_ids = user_repo.note_likes_for_notes(db, user["id"], [r["id"] for r in rows])
+        items = [
+            {
                 "note_id": row["id"],
                 "note_text": row["note_text"],
                 "visibility": row["visibility"],
                 "like_count": row["like_count"],
                 "user_id": row["user_id"],
                 "updated_at": row["updated_at"],
-                "is_liked_by_me": user_repo.note_is_liked_by(db, row["id"], user["id"]),
+                "is_liked_by_me": row["id"] in liked_ids,
             }
-            items.append(item)
+            for row in rows
+        ]
         return envelope({"items": items, "total": total})
     else:
         # scope == "mine"

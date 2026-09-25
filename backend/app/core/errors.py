@@ -108,7 +108,11 @@ def register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: StarletteHTTPException
     ) -> JSONResponse:
         """starlette HTTPException 映射为信封格式，detail 作为 message。"""
-        env = envelope(message=exc.detail, success=False)
+        # M-298：detail 类型为 Any，FastAPI/Starlette 常以 dict/list 传递；
+        # envelope 的 message 必须是字符串，否则 JSON 序列化信封结构错乱
+        detail = exc.detail
+        message = detail if isinstance(detail, str) else str(detail)
+        env = envelope(message=message, success=False)
         headers = dict(exc.headers) if exc.headers else {}
         return JSONResponse(content=env, status_code=exc.status_code, headers=headers)
 

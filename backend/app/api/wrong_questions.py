@@ -16,7 +16,8 @@ from fastapi import APIRouter, Body, Depends, Query
 from app.api.deps import get_current_user
 from app.core.bank_registry import get_registry
 from app.core.config import get_settings
-from app.core.errors import BadRequestError, ForbiddenError, NotFoundError
+from app.core.errors import BadRequestError, NotFoundError
+from app.repositories import bank_repo
 from app.schemas.common import envelope, page
 
 router = APIRouter(prefix="/api/wrong-questions", tags=["wrong-questions"])
@@ -110,6 +111,14 @@ def add_wrong_question(body: dict = Body(...), user=Depends(get_current_user)):
     if isinstance(question_id, bool) or not isinstance(question_id, int):
         raise BadRequestError("question_id must be an integer")
 
+    # M-293：校验 bank_id/question_id 真实存在，防止幽灵行入库后
+    # 永远占据 list 分页且无法在题库侧打开
+    entry = get_registry().get(str(bank_id))
+    if entry is None:
+        raise BadRequestError(f"unknown bank_id '{bank_id}'")
+    if bank_repo.get_question(str(entry.path), question_id) is None:
+        raise BadRequestError(f"question {question_id} not found in bank '{bank_id}'")
+
     db = _user_db()
     now_iso = _now_iso()
     conn = sqlite3.connect(db)
@@ -150,17 +159,9 @@ def delete_wrong_question(wrong_id: int, user=Depends(get_current_user)):
     finally:
         conn.close()
     if cur.rowcount == 0:
-        # 区分不存在与不属于本人：先查是否存在
-        conn = sqlite3.connect(db)
-        try:
-            exists = conn.execute(
-                "SELECT 1 FROM wrong_questions WHERE id = ?", (wrong_id,)
-            ).fetchone()
-        finally:
-            conn.close()
-        if exists is None:
-            raise NotFoundError("wrong question not found")
-        raise ForbiddenError("not your wrong question")
+        # M-294：统一返回 404——区分"存在但属于他人"（403）会向调用方
+        # 泄漏其他用户记录的存在性，可用于枚举探测
+        raise NotFoundError("wrong question not found")
     return envelope({"id": wrong_id, "deleted": True})
 
 
@@ -172,6 +173,28 @@ def sync_wrong_questions(body: dict = Body(...), user=Depends(get_current_user))
         raise BadRequestError("items must be a list")
     if len(items) > 1000:
         raise BadRequestError("items too large (max 1000)")
+
+    # M-293：先做结构校验 + 按库分组批量核对 (bank_id, question_id) 存在性，
+    # 任何无效项整单拒绝（原实现不校验存在性，幽灵行入库后无法清除）
+    by_bank: dict[str, list[int]] = {}
+    for it in items:
+        if not isinstance(it, dict):
+            raise BadRequestError("each item must be an object")
+        bank_id = it.get("bank_id")
+        question_id = it.get("question_id")
+        if not isinstance(bank_id, str) or not bank_id.strip() or question_id is None:
+            raise BadRequestError("each item requires bank_id and question_id")
+        if isinstance(question_id, bool) or not isinstance(question_id, int):
+            raise BadRequestError("question_id must be an integer")
+        if get_registry().get(bank_id) is None:
+            raise BadRequestError(f"unknown bank_id '{bank_id}'")
+        by_bank.setdefault(bank_id, []).append(question_id)
+    for bank_id, qids in by_bank.items():
+        entry = get_registry().get(bank_id)
+        found = bank_repo.get_questions(str(entry.path), qids)
+        for qid in qids:
+            if qid not in found:
+                raise BadRequestError(f"question {qid} not found in bank '{bank_id}'")
 
     db = _user_db()
     now_iso = _now_iso()
@@ -188,8 +211,14 @@ def sync_wrong_questions(body: dict = Body(...), user=Depends(get_current_user))
                 if isinstance(question_id, bool) or not isinstance(question_id, int):
                     raise BadRequestError("question_id must be an integer")
                 wrong_count = it.get("wrong_count")
-                if wrong_count is None or not isinstance(wrong_count, int) or wrong_count < 1:
+                # M-295：None 保持默认 1（向后兼容）；bool 是 int 子类必须显式排除；
+                # 其余畸形值显式 400 而非静默回退 1（计数被静默改写更难排查）
+                if wrong_count is None:
                     wrong_count = 1
+                if isinstance(wrong_count, bool) or not isinstance(wrong_count, int):
+                    raise BadRequestError("wrong_count must be an integer")
+                if wrong_count < 1:
+                    raise BadRequestError("wrong_count must be >= 1")
                 # 客户端时间统一规范化为 UTC ISO（H-93：SQL MAX 在 TEXT 列上
                 # 是字典序比较，混入 naive/非零偏移会导致"最近错误时间"错乱）
                 last_raw = it.get("last_practice_at")

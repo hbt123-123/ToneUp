@@ -12,6 +12,7 @@ Usage:
 import json
 import sys
 import os
+import traceback
 from datetime import datetime, timezone
 
 # Add backend directory to path
@@ -86,11 +87,12 @@ def migrate_wrongbook(dry_run=False):
                     if last_practice_at:
                         try:
                             # Try parsing ISO format
-                            dt = datetime.fromisoformat(last_practice_at.replace('Z', '+00:00'))
+                            dt = datetime.fromisoformat(str(last_practice_at).replace('Z', '+00:00'))
                             last_wrong_at = dt.isoformat()
                         except (ValueError, AttributeError):
-                            # Fallback to current time
-                            last_wrong_at = datetime.now(timezone.utc).isoformat()
+                            # M-350：解析失败保留原始字符串——回退当前时间会把
+                            # 坏数据伪装成新数据，时间线错乱
+                            last_wrong_at = str(last_practice_at)
                     else:
                         last_wrong_at = datetime.now(timezone.utc).isoformat()
 
@@ -123,7 +125,9 @@ def migrate_wrongbook(dry_run=False):
         print(f"Migration completed: {migrated} items migrated, {errors} errors")
         
     except Exception as e:
+        # M-351：输出完整堆栈，裸 e 只有消息行，定位困难
         print(f"Migration failed: {e}")
+        print(traceback.format_exc())
         conn.rollback()
         raise
     finally:

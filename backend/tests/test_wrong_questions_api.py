@@ -6,6 +6,7 @@ import pathlib
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.bank_registry import reset_registry
 from app.core.config import get_settings
 from app.core.security import create_access_token
 from app.main import create_app
@@ -38,12 +39,18 @@ def app_and_data(tmp_path, monkeypatch):
             shutil.copy2(str(item), str(dst))
     monkeypatch.setenv("DATA_ROOT", str(tmp_path))
     get_settings.cache_clear()
+    # M-293 校验依赖 registry 单例：conftest 的空 manifest 可能把单例污染成
+    # 空 entries，必须在加载真实数据根前重置，结束后再重置防止泄漏
+    reset_registry()
     app = create_app()
     client = TestClient(app)
     user_db_path = str(tmp_path / "user_data.db")
     init_user_db(user_db_path)
     migrate_mobile_tables(user_db_path)
-    return client, user_db_path, tmp_path
+    try:
+        yield client, user_db_path, tmp_path
+    finally:
+        reset_registry()
 
 
 def _auth_headers(user_db_path, username="alice"):
@@ -69,14 +76,14 @@ class TestDeleteWrongQuestion:
         assert resp.json()["data"]["deleted"] is True
 
     def test_delete_other_user_forbidden(self, app_and_data):
-        """删除他人错题返回 403。"""
+        """删除他人错题返回 404（M-294 防枚举：与不存在不可区分）。"""
         client, db, _ = app_and_data
         h1, _ = _auth_headers(db, "alice")
         h2, _ = _auth_headers(db, "bob")
         add = client.post("/api/wrong-questions", json={"bank_id": "math1", "question_id": 2}, headers=h1)
         wid = add.json()["data"]["id"]
         resp = client.delete(f"/api/wrong-questions/{wid}", headers=h2)
-        assert resp.status_code == 403
+        assert resp.status_code == 404
 
     def test_delete_nonexistent(self, app_and_data):
         """删除不存在的 id 返回 404。"""

@@ -10,7 +10,8 @@ import re
 
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
 _LIST_MARK_RE = re.compile(r"^\s{0,3}[-*+]\s+", re.MULTILINE)
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+# M-325：DOTALL 使加粗标记可跨行匹配（"**要点\n说明**"）
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 # 分隔符后必须跟空白或行尾（H-104：零空白匹配会把 "3.14" 截成 "14"）
 _NUM_PREFIX_RE = re.compile(r"^\s{0,3}(?:###\s*)?\d{1,3}[\.、．](?:\s+|$)", re.MULTILINE)
 

@@ -63,14 +63,20 @@ def _get_grouped_sections(
     type_name_map = QUESTION_TYPE_MAPPING.get(entry.subject_id, {})
     is_zhuanti = entry.type_id != "zhenti"
 
-    if is_zhuanti:
-        return _build_zhuanti(conn, user_db, user_id, bank_id, type_name_map)
-    return _build_zhenti(conn, user_db, user_id, bank_id, type_name_map)
+    # M-289：用户库连接只开一次贯穿传入，替代 _counts 每次调用新建连接
+    uconn = sqlite3.connect(user_db)
+    uconn.row_factory = sqlite3.Row
+    try:
+        if is_zhuanti:
+            return _build_zhuanti(conn, uconn, user_id, bank_id, type_name_map)
+        return _build_zhenti(conn, uconn, user_id, bank_id, type_name_map)
+    finally:
+        uconn.close()
 
 
 def _build_zhenti(
     conn: sqlite3.Connection,
-    user_db: str,
+    uconn: sqlite3.Connection,
     user_id: int,
     bank_id: str,
     type_name_map: dict[int, str],
@@ -96,27 +102,34 @@ def _build_zhenti(
     if not year_data:
         return []
 
+    # M-288：两个全量查询 + Python 分组，替代原先"每年 2 次查询"的 N+1 循环
+    q_all = conn.execute(
+        """
+        SELECT c.year AS year, q.id, q.question_type_id
+        FROM questions q
+        JOIN collections c ON c.id = q.collection_id
+        """
+    ).fetchall()
+    c_all = conn.execute("SELECT year, id FROM collections ORDER BY id").fetchall()
+
+    year_qids: dict[int, list[int]] = {}
+    year_qtype: dict[int, dict[int, int]] = {}
+    for r in q_all:
+        year_qids.setdefault(r["year"], []).append(r["id"])
+        year_qtype.setdefault(r["year"], {})[r["id"]] = r["question_type_id"]
+    year_cids: dict[int, list[int]] = {}
+    for r in c_all:
+        year_cids.setdefault(r["year"], []).append(r["id"])
+
     result: list[dict] = []
     for year in sorted(year_data.keys()):
-        qrows = conn.execute(
-            """
-            SELECT q.id, q.question_type_id FROM questions q
-            JOIN collections c ON c.id = q.collection_id WHERE c.year = ?
-            """,
-            (year,),
-        ).fetchall()
-        collection_ids = [
-            r["id"] for r in conn.execute(
-                "SELECT DISTINCT c.id FROM collections c WHERE c.year = ? ORDER BY c.id",
-                (year,),
-            ).fetchall()
-        ]
-        qids = [r["id"] for r in qrows]
-        qid_type = {r["id"]: r["question_type_id"] for r in qrows}
+        qids = year_qids.get(year, [])
+        qid_type = year_qtype.get(year, {})
+        collection_ids = year_cids.get(year, [])
 
-        done = _counts(user_db, user_id, bank_id, qids, "practice_records")
-        wrong = _counts(user_db, user_id, bank_id, qids, "wrong_questions")
-        favorited = _counts(user_db, user_id, bank_id, qids, "favorite_questions")
+        done = _counts(uconn, user_id, bank_id, qids, "practice_records")
+        wrong = _counts(uconn, user_id, bank_id, qids, "wrong_questions")
+        favorited = _counts(uconn, user_id, bank_id, qids, "favorite_questions")
 
         types_list: list[dict] = []
         for type_id in sorted(year_data[year].keys()):
@@ -139,7 +152,7 @@ def _build_zhenti(
 
 def _build_zhuanti(
     conn: sqlite3.Connection,
-    user_db: str,
+    uconn: sqlite3.Connection,
     user_id: int,
     bank_id: str,
     type_name_map: dict[int, str],
@@ -174,9 +187,9 @@ def _build_zhuanti(
                 (title,),
             ).fetchall()
         ]
-        done = _counts(user_db, user_id, bank_id, qids, "practice_records")
-        wrong = _counts(user_db, user_id, bank_id, qids, "wrong_questions")
-        favorited = _counts(user_db, user_id, bank_id, qids, "favorite_questions")
+        done = _counts(uconn, user_id, bank_id, qids, "practice_records")
+        wrong = _counts(uconn, user_id, bank_id, qids, "wrong_questions")
+        favorited = _counts(uconn, user_id, bank_id, qids, "favorite_questions")
         result.append({
             "title": title,
             "total": len(qids),
@@ -189,23 +202,22 @@ def _build_zhuanti(
 
 
 def _counts(
-    user_db: str, user_id: int, bank_id: str,
+    conn: sqlite3.Connection, user_id: int, bank_id: str,
     question_ids: list[int], table: str,
 ) -> dict[int, int]:
     """按题目去重计数（H-92：practice_records 一题可有多行作答流水，
-    COUNT(*) 会把"做过"统计成"做题次数"；DISTINCT 后三张表口径一致）。"""
+    COUNT(*) 会把"做过"统计成"做题次数"；DISTINCT 后三张表口径一致）。
+
+    M-289：连接由调用方开一次贯穿传入，本函数不再自建连接。
+    """
     if not question_ids:
         return {}
     ph = ",".join("?" * len(question_ids))
-    conn = sqlite3.connect(user_db)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute(
-            f"""SELECT DISTINCT question_id
-            FROM {table}
-            WHERE user_id = ? AND bank_id = ? AND question_id IN ({ph})""",
-            [user_id, bank_id] + question_ids,
-        ).fetchall()
-        return {r["question_id"]: 1 for r in rows}
-    finally:
-        conn.close()
+    rows = conn.execute(
+        f"""SELECT DISTINCT question_id
+        FROM {table}
+        WHERE user_id = ? AND bank_id = ? AND question_id IN ({ph})""",
+        [user_id, bank_id] + question_ids,
+    ).fetchall()
+    return {r["question_id"]: 1 for r in rows}
+

@@ -29,13 +29,27 @@ def list_tags_by_subject(tags_db_path: str, subject: str) -> list[dict]:
         conn.close()
 
 
+def list_all_tags(tags_db_path: str) -> list[dict]:
+    """查询全部标签（不按学科过滤，M-292 支撑）。
+
+    返回: [{"id": ..., "tag_name": ...}, ...]
+    """
+    conn = sqlite3.connect(tags_db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT id, tag_name FROM tags ORDER BY id").fetchall()
+        return [{"id": row["id"], "tag_name": row["tag_name"]} for row in rows]
+    finally:
+        conn.close()
+
+
 def filter_valid_tag_ids(tags_db_path: str, subject: str, tag_ids: list[int]) -> list[int]:
     """从给定 ID 列表中筛选出属于指定学科的有效标签 ID。
 
     规则：
     - ID 必须存在于 tags 表中
     - 且 tags 表的 subject 必须等于传入 subject
-    - 返回排序后去重后的合法子集
+    - 返回保序去重后的合法子集（M-316：实现本为保序，修正文档描述）
     - D5 空标签容忍：当 tags 表为空时返回空列表，不抛出异常
 
     参数:
@@ -44,32 +58,33 @@ def filter_valid_tag_ids(tags_db_path: str, subject: str, tag_ids: list[int]) ->
         tag_ids: 待校验的标签 ID 列表
 
     返回:
-        合法的、属于该学科的 tag_id 列表（已排序去重）
+        合法的、属于该学科的 tag_id 列表（按原顺序去重）
     """
     if not tag_ids:
         return []
 
+    # M-317：输入先去重，再分块 IN 查询，规避超长 IN 列表触顶 SQLite 变量上限
+    deduped: list[int] = []
+    seen_input: set[int] = set()
+    for tid in tag_ids:
+        if tid not in seen_input:
+            seen_input.add(tid)
+            deduped.append(tid)
+
     conn = sqlite3.connect(tags_db_path)
     try:
         conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        valid_ids: set[int] = set()
+        for i in range(0, len(deduped), 500):
+            chunk = deduped[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT id FROM tags WHERE subject=? AND id IN ({placeholders})",
+                (subject, *chunk),
+            ).fetchall()
+            valid_ids.update(row["id"] for row in rows)
 
-        # 使用 IN 子查询一次性校验：SELECT id FROM tags WHERE subject=? AND id IN (?,?,...)
-        # 动态生成占位符
-        placeholders = ",".join("?" * len(tag_ids))
-        cursor.execute(
-            f"SELECT id FROM tags WHERE subject=? AND id IN ({placeholders})",
-            (subject,) + tuple(tag_ids),
-        )
-        valid_ids = {row["id"] for row in cursor.fetchall()}
-
-        # 保序去重：按原始 tag_ids 顺序保留，仅保留合法的，并去重
-        seen: set[int] = set()
-        result: list[int] = []
-        for tid in tag_ids:
-            if tid in valid_ids and tid not in seen:
-                seen.add(tid)
-                result.append(tid)
-        return result
+        # 保序：按去重后的输入顺序保留合法子集
+        return [tid for tid in deduped if tid in valid_ids]
     finally:
         conn.close()

@@ -21,6 +21,7 @@ import random
 from datetime import date
 from typing import List, Optional
 
+import structlog
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -111,11 +112,23 @@ def _entry_or_404(bank_id: str) -> BankEntry:
 
 
 def _questions_dto(entry: BankEntry, question_ids: List[int]) -> list[dict]:
-    """按给定顺序组装统一题目 DTO（不含答案，作答经 attempts/result 获取）。"""
-    return [
-        _build_dto(entry, bank_repo.get_question(str(entry.path), qid), include_answer=False)
-        for qid in question_ids
-    ]
+    """按给定顺序组装统一题目 DTO（不含答案，作答经 attempts/result 获取）。
+
+    M-283：get_question 返回 None（题库重载后题目被删/下架）时跳过并告警，
+    而非把 None 传进 _build_dto 触发 TypeError 500。
+    """
+    items: list[dict] = []
+    for qid in question_ids:
+        row = bank_repo.get_question(str(entry.path), qid)
+        if row is None:
+            structlog.get_logger().warning(
+                "practice_session_question_missing",
+                bank_id=entry.id,
+                question_id=qid,
+            )
+            continue
+        items.append(_build_dto(entry, row, include_answer=False))
+    return items
 
 
 def _pick_question_ids(

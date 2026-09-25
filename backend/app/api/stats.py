@@ -13,6 +13,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import structlog
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_current_user
@@ -104,11 +105,21 @@ def overview(
                 # 学科无注册题库：空 IN () 是非法 SQL，直接短路为空结果
                 where.append("1 = 0")
         if d_from:
-            where.append("substr(created_at, 1, 10) >= ?")
-            args.append(d_from.isoformat())
+            # M-290：created_at 存的是 UTC ISO 串，而 from/to 是 stats_tz 语义的日期。
+            # 原 substr(created_at,1,10) 与本地日期直接比较会把时区偏移算错
+            # （如 UTC+8 的"今天 07:00 前作答"落在 UTC 昨天）。转为 UTC 时间戳边界比较
+            tz = ZoneInfo(settings.stats_tz)
+            where.append("created_at >= ?")
+            args.append(
+                datetime.combine(d_from, datetime.min.time(), tzinfo=tz)
+                .astimezone(timezone.utc).isoformat()
+            )
         if d_to:
-            where.append("substr(created_at, 1, 10) <= ?")
-            args.append(d_to.isoformat())
+            where.append("created_at < ?")
+            args.append(
+                datetime.combine(d_to + timedelta(days=1), datetime.min.time(), tzinfo=tz)
+                .astimezone(timezone.utc).isoformat()
+            )
         row = conn.execute(
             f"SELECT COUNT(*) AS total, SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) AS correct "
             f"FROM practice_records WHERE {' AND '.join(where)}",
@@ -184,7 +195,10 @@ def weaknesses(
             for qr in qrows:
                 qtype_by_key[(bank_id, qr["id"])] = mapping.get(qr["question_type_id"])
         except sqlite3.Error:
-            pass
+            # M-291：吞异常前留痕——题库打开/查询失败会让该库题型维度静默缺失
+            structlog.get_logger().warning(
+                "stats_weaknesses_bank_query_failed", bank_id=bank_id
+            )
 
     # tags 库与用户库各复用一条连接贯穿循环，try/finally 确保关闭
     tags_conn = None
@@ -219,7 +233,11 @@ def weaknesses(
                     ).fetchall()
                     tag_ids = [t[0] for t in trows]
                 except sqlite3.Error:
-                    pass
+                    # M-291：tags 库查询失败会让该题丢失标签维度聚合
+                    structlog.get_logger().warning(
+                        "stats_weaknesses_tags_query_failed",
+                        bank_id=r["bank_id"], question_id=r["question_id"],
+                    )
             if uconn is not None:
                 try:
                     fb = uconn.execute(
@@ -230,7 +248,11 @@ def weaknesses(
                     if fb and fb["tag_ids_json"]:
                         tag_ids.extend(int(t) for t in json.loads(fb["tag_ids_json"]))
                 except (sqlite3.Error, ValueError, TypeError):
-                    pass
+                    # M-291：同上，AI 反馈标签读取失败留痕而非静默
+                    structlog.get_logger().warning(
+                        "stats_weaknesses_feedback_tags_failed",
+                        bank_id=r["bank_id"], question_id=r["question_id"],
+                    )
             for tid in set(tag_ids):
                 by_tag.setdefault(tid, []).append(r["is_correct"])
     finally:
@@ -251,7 +273,12 @@ def weaknesses(
                 })
     # 标签名整表查一次，循环内查字典
     tags_db = str(settings.data_root / "knowledge_tags.db")
-    name_rows = tags_repo.list_tags_by_subject(tags_db, subject_id or "")
+    # M-292：subject_id 为 None 时原实现查 subject_id='' 得空表，tag 维度
+    # 全部退化为纯数字 key；按有无 subject 分流，None 时取全量标签
+    if subject_id is not None:
+        name_rows = tags_repo.list_tags_by_subject(tags_db, subject_id)
+    else:
+        name_rows = tags_repo.list_all_tags(tags_db)
     tag_names = {t["id"]: t["tag_name"] for t in name_rows}
     for tid, results in by_tag.items():
         n = len(results)

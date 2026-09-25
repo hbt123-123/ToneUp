@@ -73,7 +73,11 @@ def main() -> int:
         time.sleep(3)
         stop.set()
         sampler.join()
-        idle_mb = max(idle_samples) if idle_samples else 0.0
+        # M-342：空采样不得静默按 0.0 处理（会把假象当达标），直接报错退出
+        if not idle_samples:
+            print("错误: 空载 RSS 采样为空（可能进程提前退出），无法判定")
+            return 1
+        idle_mb = max(idle_samples)
 
         usernames = [f"loaduser_{i}" for i in range(args.workers)]
         tokens: list[str] = []
@@ -134,7 +138,12 @@ def main() -> int:
                     }
                     tokens.append(pyjwt.encode(payload, secret, algorithm="HS256"))
 
-        catalog = httpx.get(f"{base_url}/api/catalog", timeout=10).json()
+        # M-343：catalog 拉取失败不得裸崩（未捕获异常绕过统计与结论输出）
+        try:
+            catalog = httpx.get(f"{base_url}/api/catalog", timeout=10).json()
+        except (httpx.HTTPError, ValueError) as exc:
+            print(f"错误: 拉取 catalog 失败: {exc}")
+            return 1
         banks = [b["id"] for b in catalog.get("data", {}).get("banks", []) if b.get("enabled")]
         if not banks:
             print("no enabled banks; run validate_banks first")
@@ -146,13 +155,16 @@ def main() -> int:
         sampler = threading.Thread(target=_sample_rss, args=(proc, stop, peak_samples))
         sampler.start()
         deadline = time.time() + args.duration
+        # M-344：多线程并发更新统计计数，复合 += 非原子，需锁保护
+        _stats_lock = threading.Lock()
         errors = {"count": 0}
         total_requests = {"count": 0}
 
         def _check(resp: httpx.Response) -> None:
-            total_requests["count"] += 1
-            if resp.status_code != 200:
-                errors["count"] += 1
+            with _stats_lock:
+                total_requests["count"] += 1
+                if resp.status_code != 200:
+                    errors["count"] += 1
 
         def worker_loop(token: str | None, idx: int) -> None:
             headers = {"Authorization": f"Bearer {token}"} if token else {}
@@ -171,7 +183,11 @@ def main() -> int:
                         else:
                             _check(c.get(f"/api/question-banks/{bank}"))
                     except httpx.HTTPError:
-                        errors["count"] += 1
+                        # M-345：请求已实际发出，total_requests 与 errors 同时累加，
+                        # 否则错误率分母偏小、误差被低估
+                        with _stats_lock:
+                            total_requests["count"] += 1
+                            errors["count"] += 1
 
         threads = [
             threading.Thread(target=worker_loop, args=(tokens[i % len(tokens)] if tokens else None, i))
@@ -184,7 +200,11 @@ def main() -> int:
         stop.set()
         sampler.join()
 
-        peak_mb = max(peak_samples) if peak_samples else 0.0
+        if not peak_samples:
+            # M-342：压测阶段采样为空同样不能按达标处理
+            print("错误: 压测 RSS 采样为空（可能进程提前退出），无法判定")
+            return 1
+        peak_mb = max(peak_samples)
         total = total_requests["count"]
         error_rate = errors["count"] / total if total else 1.0
         print(f"idle_rss_mb={idle_mb:.1f} (limit {IDLE_LIMIT_MB})")

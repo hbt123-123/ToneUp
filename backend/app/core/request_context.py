@@ -62,18 +62,22 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         # --- 阶段3：如果是 JSON 响应，注入 request_id 到 body ---
         if "application/json" in response.headers.get("content-type", ""):
             # 读取原 body（body_iterator 将被耗尽，任何分支都必须重建 Response）
-            original_body = b""
+            # M-305：bytearray 累加，避免 bytes += bytes 对大响应的 O(n²) 反复拷贝
+            body_buf = bytearray()
             async for chunk in response.body_iterator:
-                original_body += chunk
+                body_buf += chunk
 
             headers = dict(response.headers)
-            # 重建 Response；必须剔除旧 content-length（body 长度可能已变）
+            # 重建 Response；必须剔除描述旧 body 的头（body 长度/编码可能已变）
+            # M-306：content-encoding 同样描述旧 body——若透传，客户端会按
+            # 压缩体解码重建后的明文 JSON 而失败
             headers.pop("content-length", None)
+            headers.pop("content-encoding", None)
 
             body_json: Any = None
-            if original_body:
+            if body_buf:
                 try:
-                    body_json = json.loads(original_body)
+                    body_json = json.loads(bytes(body_buf))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     # 解析失败：内容原样透传（H-99：返回已耗尽 iterator 的
                     # 原 response 会让客户端收到空响应体）
@@ -93,7 +97,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
                 # 非 dict JSON（list/scalar）、解析失败或空 body：
                 # 内容原样透传，request_id 保留在响应头（H-98：不得丢弃真实响应数据）
                 response = Response(
-                    content=original_body,
+                    content=bytes(body_buf),
                     status_code=response.status_code,
                     headers=headers,
                 )

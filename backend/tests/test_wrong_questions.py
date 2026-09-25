@@ -1,10 +1,13 @@
 """Tests for backend/app/api/wrong_questions.py — CRUD + sync endpoints."""
 
 import importlib.util
+import json
 import pathlib
+import sqlite3
 
 import pytest
 
+from app.core.bank_registry import reset_registry
 from app.core.config import get_settings
 from app.core.security import create_access_token
 from app.repositories import user_repo
@@ -37,6 +40,57 @@ def _auth_headers(user_db_path: str, username: str = "alice") -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+# M-293 校验生效后 add/sync 要求 (bank_id, question_id) 真实存在，
+# 故注入一个最小合法题库（collections/questions/images 齐全 + 必需列），
+# 并把本文件用到的三个虚构 bank_id 登记进 manifest、重置 registry 单例
+_BANK_DDL = """
+CREATE TABLE collections (id INTEGER PRIMARY KEY, year TEXT);
+CREATE TABLE questions (
+    id INTEGER PRIMARY KEY,
+    collection_id INTEGER NOT NULL,
+    question_type_id INTEGER,
+    number TEXT,
+    content TEXT,
+    options TEXT,
+    sub_questions TEXT,
+    answer_text TEXT,
+    solution TEXT,
+    score REAL,
+    display_order INTEGER NOT NULL
+);
+CREATE TABLE images (id INTEGER PRIMARY KEY, mime TEXT);
+INSERT INTO collections (id, year) VALUES (1, '2026');
+"""
+
+
+@pytest.fixture
+def bank_env(client, tmp_path):
+    """提供含 bank-math/bank-a/bank-b 的合法 manifest 与最小题库。"""
+    con = sqlite3.connect(tmp_path / "bank-test.db")
+    try:
+        con.executescript(_BANK_DDL)
+        for qid in range(8):  # 覆盖测试用到的 question_id 0..7
+            con.execute(
+                "INSERT INTO questions (id, collection_id, display_order) VALUES (?, 1, ?)",
+                (qid, qid),
+            )
+        con.commit()
+    finally:
+        con.close()
+    banks = [
+        {"id": bid, "subject_id": "math", "type_id": "zhenti", "name": bid,
+         "path": "bank-test.db", "schema_version": 1, "enabled": True}
+        for bid in ("bank-math", "bank-a", "bank-b")
+    ]
+    manifest = {"subjects": [{"id": "math", "types": [{"id": "zhenti"}]}], "banks": banks}
+    tmp_path.joinpath("manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+    reset_registry()
+    yield
+    reset_registry()  # 防止单例指向已删 tmp_path 污染后续测试
+
+
 # ── GET /api/wrong-questions ────────────────────────────────────────────────
 
 def test_list_empty(client, user_db_path):
@@ -56,7 +110,7 @@ def test_list_requires_auth(client, user_db_path):
     assert resp.status_code == 401
 
 
-def test_list_after_add(client, user_db_path):
+def test_list_after_add(client, user_db_path, bank_env):
     """添加后列表能查到该题，字段完整。"""
     headers = _auth_headers(user_db_path)
     client.post(
@@ -77,7 +131,7 @@ def test_list_after_add(client, user_db_path):
     assert item["created_at"] is not None
 
 
-def test_list_filter_by_bank(client, user_db_path):
+def test_list_filter_by_bank(client, user_db_path, bank_env):
     """按 bank_id 过滤只返回该库错题。"""
     headers = _auth_headers(user_db_path)
     client.post("/api/wrong-questions", json={"bank_id": "bank-a", "question_id": 1}, headers=headers)
@@ -88,7 +142,7 @@ def test_list_filter_by_bank(client, user_db_path):
     assert data["items"][0]["bank_id"] == "bank-a"
 
 
-def test_list_pagination(client, user_db_path):
+def test_list_pagination(client, user_db_path, bank_env):
     """分页：page_size=1 时 has_more=True，第二页取到剩余。"""
     headers = _auth_headers(user_db_path)
     for i in range(3):
@@ -106,7 +160,7 @@ def test_list_pagination(client, user_db_path):
 
 # ── POST /api/wrong-questions ───────────────────────────────────────────────
 
-def test_add_new_question(client, user_db_path):
+def test_add_new_question(client, user_db_path, bank_env):
     """新增错题 attempt_count=1。"""
     headers = _auth_headers(user_db_path)
     resp = client.post(
@@ -119,7 +173,7 @@ def test_add_new_question(client, user_db_path):
     assert item["attempt_count"] == 1
 
 
-def test_add_existing_increments(client, user_db_path):
+def test_add_existing_increments(client, user_db_path, bank_env):
     """重复添加同一题 attempt_count 递增且 last_wrong_at 刷新。"""
     headers = _auth_headers(user_db_path)
     client.post("/api/wrong-questions", json={"bank_id": "bank-math", "question_id": 7}, headers=headers)
@@ -139,7 +193,7 @@ def test_add_requires_fields(client, user_db_path):
 
 # ── DELETE /api/wrong-questions/{id} ────────────────────────────────────────
 
-def test_delete_own_question(client, user_db_path):
+def test_delete_own_question(client, user_db_path, bank_env):
     """删除本人错题成功。"""
     headers = _auth_headers(user_db_path)
     add = client.post("/api/wrong-questions", json={"bank_id": "bank-math", "question_id": 7}, headers=headers)
@@ -152,14 +206,14 @@ def test_delete_own_question(client, user_db_path):
     assert lst["total"] == 0
 
 
-def test_delete_other_users_question_forbidden(client, user_db_path):
-    """删除他人错题返回 403。"""
+def test_delete_other_users_question_forbidden(client, user_db_path, bank_env):
+    """删除他人错题返回 404（M-294 防枚举：与不存在不可区分）。"""
     headers_a = _auth_headers(user_db_path, "alice")
     add = client.post("/api/wrong-questions", json={"bank_id": "bank-math", "question_id": 7}, headers=headers_a)
     wid = add.json()["data"]["id"]
     headers_b = _auth_headers(user_db_path, "bob")
     resp = client.delete(f"/api/wrong-questions/{wid}", headers=headers_b)
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
 
 def test_delete_nonexistent_not_found(client, user_db_path):
@@ -171,7 +225,7 @@ def test_delete_nonexistent_not_found(client, user_db_path):
 
 # ── POST /api/wrong-questions/sync ──────────────────────────────────────────
 
-def test_sync_inserts_new(client, user_db_path):
+def test_sync_inserts_new(client, user_db_path, bank_env):
     """sync 批量插入新错题。"""
     headers = _auth_headers(user_db_path)
     resp = client.post(
@@ -188,7 +242,7 @@ def test_sync_inserts_new(client, user_db_path):
     assert lst["total"] == 2
 
 
-def test_sync_conflict_takes_max(client, user_db_path):
+def test_sync_conflict_takes_max(client, user_db_path, bank_env):
     """冲突时 attempt_count 取 MAX，last_wrong_at 取 MAX。"""
     headers = _auth_headers(user_db_path)
     client.post("/api/wrong-questions", json={"bank_id": "bank-a", "question_id": 1}, headers=headers)

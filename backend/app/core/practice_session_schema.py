@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS practice_session_item (
 );
 """
 
+# M-301：上方的 REFERENCES ... ON DELETE CASCADE 仅在连接开启
+# PRAGMA foreign_keys=ON 时生效（SQLite 默认 OFF）。统一在
+# user_repo.user_connection 建连时开启；其它直接 sqlite3.connect
+# 的只读/旁路连接不享受级联，属已知约束。
+
 PRACTICE_SESSION_INDEXES = [
     # SQLite 中 NULL 互异：活跃会话 client_request_id=NULL 不受唯一约束影响；
     # 同一 user 的同一 client_request_id 只能绑定一个会话（幂等交卷依据）。

@@ -50,7 +50,8 @@ def main() -> None:
             print(f"OK {bank_id}")
             continue
         all_enabled = False
-        reason = next(
+        # M-354：优先展示 manifest 显式声明的禁用原因，warnings 仅作回退
+        reason = entry.disabled_reason or next(
             (w.split(": ", 1)[1] for w in registry.warnings
              if w.startswith(f"{bank_id}: ")),
             "manifest 中 enabled=false",

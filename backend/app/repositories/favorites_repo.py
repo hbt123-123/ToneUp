@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import List
 
+from app.core.bank_registry import get_registry
 from app.repositories.user_repo import user_connection
 
 __all__ = [
@@ -51,28 +52,36 @@ def toggle_favorite(
     bank_id: str,
     question_id: int,
 ) -> bool:
-    """切换收藏状态：已收藏则取消返回 False，未收藏则收藏返回 True。"""
+    """切换收藏状态：已收藏则取消返回 False，未收藏则收藏返回 True。
+
+    M-314：单事务原子化——先 DELETE 并以 rowcount 判定原状态，
+    未命中再 INSERT；INSERT 撞唯一约束说明并发请求刚收藏，转为删除返回 False，
+    消除原「先查后写」竞态窗口。
+    """
     with user_connection(db_path) as conn:
-        cur = conn.execute(
-            "SELECT 1 FROM favorite_questions WHERE user_id = ? AND bank_id = ? AND question_id = ?",
-            (user_id, bank_id, question_id),
-        ).fetchone()
-        if cur is not None:
-            with conn:
+        with conn:
+            cur = conn.execute(
+                "DELETE FROM favorite_questions WHERE user_id = ? AND bank_id = ? AND question_id = ?",
+                (user_id, bank_id, question_id),
+            )
+            if cur.rowcount == 1:
+                return False
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO favorite_questions (user_id, bank_id, question_id, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (user_id, bank_id, question_id, datetime.now(timezone.utc).isoformat()),
+                )
+            except sqlite3.IntegrityError:
+                # 并发竞争：另一请求刚插入成功（SQLite 默认 ABORT 仅回滚本语句）
                 conn.execute(
                     "DELETE FROM favorite_questions WHERE user_id = ? AND bank_id = ? AND question_id = ?",
                     (user_id, bank_id, question_id),
                 )
-            return False
-        with conn:
-            conn.execute(
-                """
-                INSERT INTO favorite_questions (user_id, bank_id, question_id, created_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (user_id, bank_id, question_id, datetime.now(timezone.utc).isoformat()),
-            )
-        return True
+                return False
+            return True
 
 
 def is_favorited(
@@ -105,9 +114,11 @@ def list_favorite_banks(
         ).fetchall()
     result: List[dict] = []
     for row in rows:
+        entry = get_registry().get(row["bank_id"])
         result.append({
             "bank_id": row["bank_id"],
-            "name": row["bank_id"],
+            # M-315：展示名取注册表 entry.name，注册表未收录时回退 bank_id
+            "name": entry.name if entry is not None else row["bank_id"],
             "favorite_count": row["favorite_count"],
         })
     return result

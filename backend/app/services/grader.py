@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 REVIEW_INTERVAL_DAYS = {1: 1, 2: 3, 3: 7, 4: 14, 5: 30}
@@ -43,7 +44,13 @@ def grade_objective(
 
     if type_code == "CLOZE":
         if isinstance(user_answer, str):
-            user_list = [ch for ch in user_answer.strip() if ch.strip()]
+            s = user_answer.strip()
+            # M-327：先按空白/逗号切分做形状校验——多段且存在非单字符 token
+            # 说明不是 "BD" 这类紧凑标签串，拒绝逐字符拆解（防止错位比对放水）
+            tokens = [t for t in re.split(r"[\s,，]+", s) if t]
+            if len(tokens) > 1 and any(len(t) > 1 for t in tokens):
+                return False, 0.0
+            user_list = [ch for ch in s if ch.strip()]
         elif isinstance(user_answer, list):
             user_list = [str(x).strip().upper() for x in user_answer]
         else:
@@ -61,7 +68,10 @@ def grade_objective(
 
     if type_code == "ORDERING":
         if isinstance(user_answer, str):
-            user_list = [ch for ch in user_answer.strip() if ch.strip()]
+            s = user_answer.strip()
+            # M-327：多段时按段取（"12 3" → ["12","3"]），单段保持逐字符（"312" → ["3","1","2"]）
+            tokens = [t for t in re.split(r"[\s,，]+", s) if t]
+            user_list = tokens if len(tokens) > 1 else [ch for ch in s if ch.strip()]
         elif isinstance(user_answer, list):
             user_list = [str(x).strip() for x in user_answer]
         else:

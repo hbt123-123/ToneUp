@@ -65,10 +65,12 @@ def build_prompt(
 
 def validate_model_output(raw: str) -> dict:
     """从模型输出提取并校验 JSON；不合法抛 ValueError。"""
-    m = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not m:
+    # M-321：raw_decode 从首个 '{' 解析出首个完整 JSON 对象，
+    # 避免贪婪正则把对象后的杂散 '}' 或文本一并吞入导致解析歧义
+    start = raw.find("{")
+    if start < 0:
         raise ValueError("no JSON object in model output")
-    data = json.loads(m.group(0))
+    data, _ = json.JSONDecoder().raw_decode(raw[start:])
     if not isinstance(data, dict) or not isinstance(data.get("is_correct"), bool):
         raise ValueError("is_correct boolean missing")
     if "score" in data and (
@@ -76,8 +78,12 @@ def validate_model_output(raw: str) -> dict:
         or not isinstance(data["score"], RESULT_SCHEMA_KEYS["score"])
     ):
         raise ValueError("score must be number")
-    if "tag_ids" in data and not isinstance(data["tag_ids"], list):
-        raise ValueError("tag_ids must be array")
+    if "tag_ids" in data:
+        if not isinstance(data["tag_ids"], list):
+            raise ValueError("tag_ids must be array")
+        # M-322：元素必须为真整数（bool 是 int 子类需显式排除）
+        if any(isinstance(t, bool) or not isinstance(t, int) for t in data["tag_ids"]):
+            raise ValueError("tag_ids elements must be integers")
     return data
 
 
@@ -120,7 +126,8 @@ def filter_tag_ids(tags_db_path: str, subject: str, tag_ids) -> list[int]:
     """tag_ids 存在性与学科归属过滤；非法输入返回 []。"""
     if not isinstance(tag_ids, list):
         return []
-    ints = [t for t in tag_ids if isinstance(t, int)]
+    # M-323：bool 是 int 子类，True/False 不能混入标签 id
+    ints = [t for t in tag_ids if isinstance(t, int) and not isinstance(t, bool)]
     return tags_repo.filter_valid_tag_ids(tags_db_path, subject, ints)
 
 
@@ -148,4 +155,4 @@ def grade_with_retry(
         except (glm_client.GlmError, ValueError, json.JSONDecodeError) as exc:
             last_error = exc
             logger.warning("glm_output_retry", attempt=attempt, error=str(exc))
-    raise glm_client.GlmError(f"grading failed after retries: {last_error}")
+    raise glm_client.GlmError(f"grading failed after retries: {last_error}") from last_error

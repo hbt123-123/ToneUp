@@ -24,6 +24,8 @@ logger = structlog.get_logger()
 
 _queue: "queue.Queue[str | None]" = queue.Queue()
 _worker_started = False
+# M-328：start/stop 状态由锁保护，防止并发调用竞态
+_worker_lock = threading.Lock()
 _SENTINEL = None
 
 
@@ -35,19 +37,29 @@ def enqueue_grading(feedback_id: str) -> None:
 def start_worker() -> None:
     """启动守护线程（幂等）。"""
     global _worker_started
-    if _worker_started:
-        return
-    concurrency = max(1, get_settings().grading_concurrency)
-    for i in range(concurrency):
-        t = threading.Thread(target=_loop, name=f"grading-worker-{i}", daemon=True)
-        t.start()
-    _worker_started = True
+    with _worker_lock:
+        if _worker_started:
+            return
+        concurrency = max(1, get_settings().grading_concurrency)
+        for i in range(concurrency):
+            t = threading.Thread(target=_loop, name=f"grading-worker-{i}", daemon=True)
+            t.start()
+        _worker_started = True
     logger.info("grading_workers_started", count=concurrency)
 
 
 def stop_worker() -> None:
-    """优雅停机：投递哨兵取消消费循环；in-flight 行保持 processing 由下次启动恢复。"""
-    concurrency = max(1, get_settings().grading_concurrency)
+    """优雅停机：投递哨兵取消消费循环；in-flight 行保持 processing 由下次启动恢复。
+
+    M-328：未启动时直接返回不投哨兵——否则哨兵滞留队列，
+    下次 start_worker 启动的线程会立即消费哨兵退出，导致 worker 永远无法工作。
+    """
+    global _worker_started
+    with _worker_lock:
+        if not _worker_started:
+            return
+        concurrency = max(1, get_settings().grading_concurrency)
+        _worker_started = False
     for _ in range(concurrency):
         _queue.put(_SENTINEL)
 
@@ -105,11 +117,14 @@ def _load_question_context(bank_id: str, question_id: int):
 def _process_one(feedback_id: str, user_db_path: str, tags_db_path: str) -> None:
     settings = get_settings()
     fb = user_repo.ai_feedback_get(user_db_path, feedback_id)
-    if fb is None or fb["status"] != "queued":
+    # M-331：接受 queued/processing 两种旧状态——崩溃复位后重复入队的行
+    # 可能已处于 processing，严格只认 queued 会导致该任务永远无法处理
+    if fb is None or fb["status"] not in ("queued", "processing"):
         return
 
+    # M-331：以读到的状态为期望值做 CAS 翻转，避免与其它消费者竞态双跑
     if not user_repo.ai_feedback_set_status(
-        user_db_path, feedback_id, "processing", expected_old_status="queued"
+        user_db_path, feedback_id, "processing", expected_old_status=fb["status"]
     ):
         return
 
@@ -154,18 +169,22 @@ def _process_one(feedback_id: str, user_db_path: str, tags_db_path: str) -> None
         if isinstance(raw_score, (int, float)) and cap is not None:
             score = max(0.0, min(float(raw_score), cap))
 
-        applied = user_repo.update_attempt_result(
-            user_db_path, fb["attempt_id"], int(is_correct), score
+        # M-329：判定写入与掌握度回填合并为单事务，消除「records 已判、
+        # mastery 丢失」的中间态；applied=False 表示 attempt 已被自评兜底判定
+        level, next_at = _advance_review(user_db_path, fb, is_correct)
+        applied = user_repo.apply_attempt_terminal(
+            user_db_path,
+            attempt_id=fb["attempt_id"],
+            user_id=fb["user_id"],
+            bank_id=fb["bank_id"],
+            question_id=fb["question_id"],
+            is_correct=is_correct,
+            score=score,
+            next_review_at=next_at,
+            confidence_level=level,
+            now_iso=datetime.now(timezone.utc).isoformat(),
         )
-        if applied:
-            level, next_at = _advance_review(user_db_path, fb, is_correct)
-            user_repo.mastery_apply_terminal(
-                user_db_path,
-                fb["user_id"], fb["bank_id"], fb["question_id"],
-                int(is_correct), next_at, level,
-                datetime.now(timezone.utc).isoformat(),
-            )
-        else:
+        if not applied:
             logger.info("ai_result_discarded_attempt_judged", feedback_id=feedback_id)
 
         now = datetime.now(timezone.utc).isoformat()
@@ -175,7 +194,8 @@ def _process_one(feedback_id: str, user_db_path: str, tags_db_path: str) -> None
             error_reason=result.get("error_reason"),
             tag_ids_json=json.dumps(valid_tag_ids),
             raw_response=json.dumps(result, ensure_ascii=False),
-            is_correct=int(is_correct),
+            # M-330：结果未真正应用时不回写 is_correct，保持 NULL 以免误导
+            is_correct=int(is_correct) if applied else None,
         )
     except glm_client.GlmUnavailable as exc:
         logger.warning("glm_unavailable_feedback_failed", feedback_id=feedback_id)
@@ -203,6 +223,8 @@ def _advance_review(user_db_path: str, fb, is_correct: bool) -> tuple[int, str |
 
 _MAX_TASK_RETRIES = 3
 _retry_counts: dict[str, int] = {}
+# M-332：多个 worker 线程并发更新重试计数，需锁保护
+_retry_lock = threading.Lock()
 
 
 def _mark_failed_best_effort(feedback_id: str, exc: Exception) -> None:
@@ -240,10 +262,12 @@ def _loop() -> None:
                 str(settings.data_root / "user_data.db"),
                 str(settings.data_root / "knowledge_tags.db"),
             )
-            _retry_counts.pop(item, None)
+            with _retry_lock:
+                _retry_counts.pop(item, None)
         except Exception as exc:
-            attempts = _retry_counts.get(item, 0) + 1
-            _retry_counts[item] = attempts
+            with _retry_lock:
+                attempts = _retry_counts.get(item, 0) + 1
+                _retry_counts[item] = attempts
             logger.error(
                 "worker_loop_error", feedback_id=item, attempt=attempts, error=str(exc)
             )
@@ -251,7 +275,8 @@ def _loop() -> None:
                 # 出队后、状态翻转前失败：重新入队，避免任务静默滞留
                 _queue.put(item)
             else:
-                _retry_counts.pop(item, None)
+                with _retry_lock:
+                    _retry_counts.pop(item, None)
                 _mark_failed_best_effort(item, exc)
         finally:
             _queue.task_done()

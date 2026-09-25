@@ -6,12 +6,12 @@
 """
 from __future__ import annotations
 
-import io
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from app.api.deps import get_current_user
 from app.core.config import get_settings
@@ -67,7 +67,6 @@ def _image_size(data: bytes) -> tuple[int, int] | None:
 
 @router.post("/feedback")
 def create_feedback(
-    request: Request,
     file: UploadFile = File(...),
     bank_id: str = Form(...),
     question_id: int = Form(...),
@@ -128,14 +127,13 @@ def create_feedback(
         fb = user_repo.ai_feedback_get(user_db, feedback_id)
         # 有界短等待：快速路径尽量同步返回完整结果，超时即 202 交由客户端轮询，
         # 避免长时间占住线程池线程拖垮其他同步端点
-        deadline = datetime.now(timezone.utc).timestamp() + 2
-        while datetime.now(timezone.utc).timestamp() < deadline:
+        # M-273：用单调时钟计 deadline，系统墙钟回拨不会延长/缩短等待
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
             fb = user_repo.ai_feedback_get(user_db, feedback_id)
             if fb and fb["status"] in ("succeeded", "failed"):
                 break
-            import time as _t
-
-            _t.sleep(0.1)
+            time.sleep(0.1)
         if fb and fb["status"] in ("succeeded", "failed"):
             return envelope(_feedback_payload(fb))
         return envelope({"feedback_id": feedback_id, "status": "queued"}, message="processing"), 202

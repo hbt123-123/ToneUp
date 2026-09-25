@@ -2,35 +2,64 @@
 
 架构裁决 B1：
 - 连接以 URI 只读方式打开（file:...?mode=ro）+ PRAGMA query_only 双保险
-- functools.lru_cache(maxsize=5) 管理连接，check_same_thread=False 允许线程池复用
+- 连接线程本地缓存复用（M-310/311）：不跨线程共享；代际计数支持 admin reload 整体失效
 - 本层不做业务判断，不做 markdown 清洗（清洗在 services/cleaner）
 - answer_text 解析失败：error 日志并返回 None，绝不静默放水
 """
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
-from functools import lru_cache
+import threading
 from pathlib import Path
 
 import structlog
 
 logger = structlog.get_logger()
 
+_thread_local = threading.local()
+_open_connections: set[sqlite3.Connection] = set()
+_connections_lock = threading.Lock()
+_generation = 0
 
-@lru_cache(maxsize=5)
-def get_connection(db_path: str) -> sqlite3.Connection:
-    """按绝对路径取只读连接（缓存复用，上限 5 对应四库+余量）。"""
+
+def _open_ro_connection(db_path: str) -> sqlite3.Connection:
+    """新开只读连接并登记到全局集合，供 close_all_connections 统一关闭。"""
     posix = Path(db_path).resolve().as_posix()
-    conn = sqlite3.connect(f"file:{posix}?mode=ro", uri=True, check_same_thread=False)
+    conn = sqlite3.connect(f"file:{posix}?mode=ro", uri=True)
     conn.execute("PRAGMA query_only = ON")
     conn.row_factory = sqlite3.Row
+    with _connections_lock:
+        _open_connections.add(conn)
+    return conn
+
+
+def get_connection(db_path: str) -> sqlite3.Connection:
+    """按绝对路径取只读连接（线程本地缓存，代际失效，上限即线程数×库数）。"""
+    if getattr(_thread_local, "gen", None) != _generation:
+        _thread_local.gen = _generation
+        _thread_local.conns = {}
+    conns: dict[str, sqlite3.Connection] = _thread_local.conns
+    conn = conns.get(db_path)
+    if conn is None:
+        conn = _open_ro_connection(db_path)
+        conns[db_path] = conn
     return conn
 
 
 def close_all_connections() -> None:
-    """清空连接缓存（admin reload 时对失效题库调用；连接对象由 GC 关闭）。"""
-    get_connection.cache_clear()
+    """关闭全部只读连接并推进代际（admin reload 时对失效题库调用）。"""
+    global _generation
+    with _connections_lock:
+        _generation += 1
+        stale = list(_open_connections)
+        _open_connections.clear()
+    for conn in stale:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            pass
 
 
 def list_questions(
@@ -73,13 +102,56 @@ def get_question(db_path: str, question_id: int) -> sqlite3.Row | None:
     ).fetchone()
 
 
+def _chunked(ids: list[int], size: int = 500) -> list[list[int]]:
+    return [ids[i:i + size] for i in range(0, len(ids), size)]
+
+
+def get_questions(db_path: str, question_ids: list[int]) -> dict[int, sqlite3.Row]:
+    """批量按主键取题（含 year），返回 {id: row}（M-285/M-293 N+1 批量化支撑）。"""
+    conn = get_connection(db_path)
+    result: dict[int, sqlite3.Row] = {}
+    for chunk in _chunked(question_ids):
+        placeholders = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            "SELECT q.*, c.year AS year FROM questions q JOIN collections c ON c.id = q.collection_id"
+            f" WHERE q.id IN ({placeholders})",
+            chunk,
+        ).fetchall()
+        for row in rows:
+            result[int(row["id"])] = row
+    return result
+
+
 def get_passage(db_path: str, passage_id: int) -> sqlite3.Row | None:
     """取文章正文（仅英语库有 passages 表）。"""
     conn = get_connection(db_path)
     try:
         return conn.execute("SELECT * FROM passages WHERE id = ?", (passage_id,)).fetchone()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as exc:
+        # M-312：仅吞 "no such table"（库不含 passages 表），其余 OperationalError 上抛
+        if "no such table" not in str(exc):
+            raise
         return None
+
+
+def get_passages(db_path: str, passage_ids: list[int]) -> dict[int, sqlite3.Row]:
+    """批量取文章正文，返回 {id: row}；无 passages 表的库返回空 dict（M-284 支撑）。"""
+    conn = get_connection(db_path)
+    result: dict[int, sqlite3.Row] = {}
+    for chunk in _chunked(passage_ids):
+        placeholders = ",".join("?" * len(chunk))
+        try:
+            rows = conn.execute(
+                f"SELECT * FROM passages WHERE id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+            return {}
+        for row in rows:
+            result[int(row["id"])] = row
+    return result
 
 
 def has_passages_table(db_path: str) -> bool:
@@ -157,9 +229,12 @@ def parse_answer(answer_text: str | None, type_code: str):
         compact = [p.strip() for p in s.replace("，", ",").replace(" ", "").split(",") if p.strip()]
         if len(compact) > 1:
             return compact
-        digits = [ch for ch in s if ch.isdigit()]
-        if digits:
-            return digits
+        # M-313：按连续数字段切分，避免 "12 3" 被逐字符拆成 1/2/3
+        tokens = re.findall(r"\d+", s)
+        if len(tokens) > 1:
+            return tokens
+        if tokens:
+            return list(tokens[0])
         logger.error("answer_parse_failed", type_code=type_code, answer=text[:50])
         return None
 

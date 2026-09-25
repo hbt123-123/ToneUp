@@ -162,8 +162,8 @@ def test_mastery_apply_terminal_increments_by_is_correct(db):
 def test_notes_upsert_twice_keeps_single_row_with_latest_text(db):
     """同键 upsert 两次：仍单行，note_text 为最新值。"""
     uid = _create_user(db)
-    user_repo.notes_upsert(db, uid, "bank-math", 7, "v1", NOW)
-    user_repo.notes_upsert(db, uid, "bank-math", 7, "v2", NOW)
+    user_repo.notes_upsert(db, uid, "bank-math", 7, "v1", "public", NOW)
+    user_repo.notes_upsert(db, uid, "bank-math", 7, "v2", "public", NOW)
 
     row = user_repo.notes_get(db, uid, "bank-math", 7)
     assert row is not None

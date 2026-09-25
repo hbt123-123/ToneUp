@@ -49,7 +49,13 @@ def client(monkeypatch, tmp_path) -> Any:
 
     # 创建 FastAPI 应用
     from app.main import create_app
-    app = create_app()
+    try:
+        app = create_app()
+    except Exception:
+        # M-355：创建失败（如 Settings 校验异常）时清除可能已写入的
+        # settings 缓存再抛出，防止污染同进程后续测试
+        get_settings.cache_clear()
+        raise
 
     # 返回 TestClient；teardown 再清缓存，防止指向已删 tmp_path 的 Settings 泄漏
     try:
