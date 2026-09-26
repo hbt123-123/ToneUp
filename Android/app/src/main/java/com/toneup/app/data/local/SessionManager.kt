@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,8 +45,10 @@ class SessionManager @Inject constructor(
     // M-20：路由的写入与一次性取走共用此锁，消除读-改-写与 401 写入的交错竞态
     private val restoreRouteLock = Any()
 
-    // H-10：update 原子完成 miss 时落盘镜像回填，消除"读后写"与 clearSession 的交错竞态
-    fun cachedToken(): String? = _token.update { current -> current ?: tokenStore.token() }
+    // H-10：updateAndGet 原子完成 miss 时落盘镜像回填，消除"读后写"与 clearSession 的交错竞态
+    // （update{} 返回 Unit，updateAndGet 返回 CAS 后的新值）
+    fun cachedToken(): String? =
+        _token.updateAndGet { current -> current ?: tokenStore.token() }
 
     fun onLogin(token: String, user: SessionUser) {
         stageToken(token)

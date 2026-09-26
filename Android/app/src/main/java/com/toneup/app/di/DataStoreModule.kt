@@ -1,6 +1,8 @@
 package com.toneup.app.di
 
 import android.content.Context
+import com.toneup.app.data.local.CatalogCacheStore
+import com.toneup.app.data.local.CatalogDataStoreManager
 import com.toneup.app.data.local.CipherAdapter
 import com.toneup.app.data.local.KeystoreCipherAdapter
 import com.toneup.app.data.local.SecureTokenStore
@@ -28,4 +30,9 @@ object DataStoreModule {
     @Provides
     @Singleton
     fun userPreferencesStore(@ApplicationContext context: Context) = UserPreferencesStore(context)
+
+    // eded765 引入接口注入点时即缺此绑定（assembleDebug 从未跑通），修复报告静态核查未覆盖 Hilt 图
+    @Provides
+    @Singleton
+    fun catalogCacheStore(impl: CatalogDataStoreManager): CatalogCacheStore = impl
 }

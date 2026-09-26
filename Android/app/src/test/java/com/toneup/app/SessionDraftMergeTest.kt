@@ -85,7 +85,7 @@ class SessionDraftMergeTest {
         val draft = SessionDraftMerge.toServerDraft(
             listOf(101L to obj("choice" to "A"), 101L to obj("choice" to "C"))
         )
-        assertEquals("C", (draft["101"]!!["choice"] as kotlinx.serialization.json.JsonPrimitive).content)
+        assertEquals("C", ((draft["101"] as kotlinx.serialization.json.JsonObject)["choice"] as kotlinx.serialization.json.JsonPrimitive).content)
     }
 
     @Test

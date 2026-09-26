@@ -86,7 +86,7 @@ class SectionListSessionHelperTest {
     /** 七端点全部抛错的最小 Api 实现（Fake 只 override createSession，其余不触达） */
     private class ThrowingSessionApi : SessionApi {
         override suspend fun create(
-            bankId: String, collectionIds: List<Long>?, typeCodes: List<String>?, count: Int
+            body: com.toneup.app.data.remote.dto.CreateSessionRequest
         ): ApiEnvelope<CreateSessionResponseDto> = throw UnsupportedOperationException()
 
         override suspend fun list(page: Int, pageSize: Int): ApiEnvelope<PageData<SessionListItemDto>> =

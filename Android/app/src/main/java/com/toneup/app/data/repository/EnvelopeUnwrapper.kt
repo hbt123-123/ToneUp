@@ -39,10 +39,14 @@ object EnvelopeUnwrapper {
         throw AppException.Server(e.message ?: "服务端返回格式异常")
     }
 
-    /** 无返回体端点（ApiEnvelope<Unit>）：success=true 即成功，不要求 data 非空 */
-    suspend fun unwrapUnit(
+    /**
+     * 无返回体/不消费返回体的端点：success=true 即成功，不要求 data 非空。
+     * 泛型化原因：DELETE /wrong-questions/{id} 的 data 为 {"id","deleted"} 对象
+     * （H-13 的 WrongQuestionDeleteDto），固定 ApiEnvelope<Unit> 会编译不匹配。
+     */
+    suspend fun <T> unwrapUnit(
         json: Json,
-        call: suspend () -> ApiEnvelope<Unit>
+        call: suspend () -> ApiEnvelope<T>
     ) {
         val envelope = try {
             call()

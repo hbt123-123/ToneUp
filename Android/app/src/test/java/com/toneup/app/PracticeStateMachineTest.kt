@@ -24,7 +24,7 @@ class PracticeStateMachineTest {
     fun `loading plus load failed goes error network`() {
         val next = PracticeStateMachine.reduce(
             PracticeStatus.Loading,
-            PracticeEvent.LoadFailed
+            PracticeEvent.LoadFailed()
         )
         assertTrue(next is PracticeStatus.Error && next.isNetwork)
     }

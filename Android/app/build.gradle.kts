@@ -7,6 +7,11 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// H-1：release 签名读取 keystore.properties。Kotlin DSL 脚本里 android{} 块内
+// `java.util.Properties()` 的 `java` 会被解析为 Android DSL 的 java 属性而报
+// Unresolved reference: util，故改为顶部 import 后直接用 Properties()。
+import java.util.Properties
+
 android {
     namespace = "com.toneup.app"
     compileSdk = 35
@@ -51,7 +56,7 @@ android {
             // 保证 assembleRelease 产物可直接安装/分发（正式签名由发布环境提供）。
             val keystorePropsFile = rootProject.file("keystore.properties")
             if (keystorePropsFile.exists()) {
-                val keystoreProps = java.util.Properties().apply {
+                val keystoreProps = Properties().apply {
                     keystorePropsFile.inputStream().use { load(it) }
                 }
                 signingConfig = signingConfigs.create("release") {
