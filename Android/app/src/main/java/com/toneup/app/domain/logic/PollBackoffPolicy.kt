@@ -21,4 +21,14 @@ object PollBackoffPolicy {
     }
 
     fun isDeadlineExceeded(elapsedMs: Long): Boolean = elapsedMs >= TOTAL_DEADLINE_MS
+
+    /**
+     * M-88：带截止感知的延迟——按已耗时长截断本次 sleep，
+     * 确保睡醒后不越过总 deadline（原 isDeadlineExceeded 在 sleep 前评估，
+     * 最后一轮仍会整睡最多 5s 导致超时）。
+     * 调用方（AiPhotoViewModel/AnalysisViewModel）迁移建议：
+     * `delay(PollBackoffPolicy.delayForAttempt(index, System.currentTimeMillis() - startedAt))`
+     */
+    fun delayForAttempt(attemptIndex: Int, elapsedMs: Long): Long =
+        delayForAttempt(attemptIndex).coerceAtMost((TOTAL_DEADLINE_MS - elapsedMs).coerceAtLeast(0L))
 }

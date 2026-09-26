@@ -19,6 +19,6 @@ val DarkSurfaceVariant = Color(0xFF2A3046)
 val DarkOnSurface = Color(0xFFE4E6EF)
 
 val CorrectGreen = Color(0xFF2E7D32)
-val CorrectGreenDark = Color(0xFF81C995)
 val WrongRed = Color(0xFFC62828)
-val WrongRedDark = Color(0xFFEF9A9A)
+
+// M-256：删除死代码 CorrectGreenDark / WrongRedDark（全库 grep 确认零引用，仅 CorrectGreen/WrongRed 在用）

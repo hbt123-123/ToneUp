@@ -18,7 +18,8 @@ sealed class PracticeStatus {
 
 sealed class PracticeEvent {
     data object QuestionReady : PracticeEvent()
-    data object LoadFailed : PracticeEvent()
+    /** 题目加载失败：isNetwork 区分可重试的网络错误与不可重试的解析/业务失败 */
+    data class LoadFailed(val isNetwork: Boolean = true) : PracticeEvent()
     data class AnswerChanged(val changed: Boolean = true) : PracticeEvent()
     data object SubmitClicked : PracticeEvent()
     data class SubmitSucceeded(val attemptId: Long) : PracticeEvent()
@@ -39,18 +40,25 @@ object PracticeStateMachine {
     fun reduce(current: PracticeStatus, event: PracticeEvent): PracticeStatus = when (current) {
         is PracticeStatus.Loading -> when (event) {
             is PracticeEvent.QuestionReady -> PracticeStatus.Idle
-            is PracticeEvent.LoadFailed -> PracticeStatus.Error("题目加载失败", isNetwork = true)
+            // M-89：非网络原因（解析失败/4xx 业务拒绝）不再被误标为可重试的网络错误
+            is PracticeEvent.LoadFailed -> PracticeStatus.Error("题目加载失败", isNetwork = event.isNetwork)
             else -> current
         }
         is PracticeStatus.Idle -> when (event) {
             is PracticeEvent.AnswerChanged ->
                 if (event.changed) PracticeStatus.Editing else current
+            // M-90：预填/恢复草稿的题直接停在 Idle，必须允许提交入口走标准 Submitting 流转
+            is PracticeEvent.SubmitClicked -> PracticeStatus.Submitting
+            // M-90：越态兜底——SubmitSucceeded 在 Idle 态到达时不丢失 attemptId
+            is PracticeEvent.SubmitSucceeded -> PracticeStatus.Submitted(event.attemptId)
             else -> current
         }
         is PracticeStatus.Editing -> when (event) {
             is PracticeEvent.AnswerChanged ->
                 if (event.changed) current else PracticeStatus.Idle
             is PracticeEvent.SubmitClicked -> PracticeStatus.Submitting
+            // TODO(M-91)：此处及 Error/Submitted 态接受 SubmitSucceeded 属越态兜底分支，
+            // 与「提交必经 Submitting」的纪律相悖；是否删减需结合并发时序统一评估，暂保留
             is PracticeEvent.SubmitSucceeded -> PracticeStatus.Submitted(event.attemptId)
             else -> current
         }

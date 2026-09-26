@@ -42,16 +42,20 @@ data class SectionListUiState(
     /** 按 tab + filter 过滤后的分组 */
     val filteredSections: List<SectionItem>
         get() {
-            val byTab = when (selectedTab) {
-                SectionTab.REAL_EXAM -> sections.filter { it.year != null }
-                SectionTab.TOPIC -> sections.filter { it.year == null }
-                SectionTab.ALL -> sections
-            }
-            return when (filterTab) {
-                FilterTab.ALL -> byTab
-                FilterTab.UNDONE -> byTab.filter { it.done == 0 }
-                FilterTab.WRONG -> byTab.filter { it.wrong > 0 }
-                FilterTab.FAVORITE -> byTab.filter { it.favorited > 0 }
+            // M-230：单次遍历同时应用 tab 与 filter 两个维度，替代原先最多三遍全量 filter 及中间列表分配
+            return sections.filter { s ->
+                val tabMatch = when (selectedTab) {
+                    SectionTab.REAL_EXAM -> s.year != null
+                    SectionTab.TOPIC -> s.year == null
+                    SectionTab.ALL -> true
+                }
+                val filterMatch = when (filterTab) {
+                    FilterTab.ALL -> true
+                    FilterTab.UNDONE -> s.done == 0
+                    FilterTab.WRONG -> s.wrong > 0
+                    FilterTab.FAVORITE -> s.favorited > 0
+                }
+                tabMatch && filterMatch
             }
         }
 }
@@ -75,6 +79,11 @@ class SectionListViewModel @Inject constructor(
     }
 
     private fun loadSections() {
+        // M-231：bankId 缺失/为空时直接进入错误态，不携带空串发起注定无效的请求（init 与 retry 均经此拦截）
+        if (bankId.isBlank()) {
+            _state.value = _state.value.copy(isLoading = false, error = "题库参数缺失，请返回重进")
+            return
+        }
         // H-69：快速重试时先取消在途请求，避免旧协程晚到的响应覆盖新一次加载的状态
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
@@ -89,19 +98,20 @@ class SectionListViewModel @Inject constructor(
                     error = null
                 )
             } catch (e: AppException.Network) {
-                // 离线时展示缓存
+                // M-232：cachedResponse 仅进程内、成功拉取后才有值，冷启动断网必未命中——
+                // 未命中时明确提示「加载失败」；命中时说明数据为上次加载的旧数据，均避免「有离线缓存」的误导
                 val cached = cachedResponse
                 if (cached != null) {
                     _state.value = _state.value.copy(
                         sections = cached.sections,
                         category = cached.category,
                         isLoading = false,
-                        error = "当前无网络，显示缓存数据"
+                        error = "网络不可用，显示的是上次加载的数据"
                     )
                 } else {
                     _state.value = _state.value.copy(
                         isLoading = false,
-                        error = "网络不可用，请检查网络后重试"
+                        error = "加载失败，请检查网络后重试"
                     )
                 }
             } catch (e: AppException) {

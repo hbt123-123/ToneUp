@@ -115,7 +115,10 @@ data class SessionResultItemDto(
     @SerialName("question_id") val questionId: Long,
     val position: Int,
     val answered: Boolean,
-    @SerialName("is_correct") val isCorrect: Boolean? = null,
+    // M-49：is_correct=null 的双语义由 answered 区分：answered=false 为未作答，
+    // answered=true 且 null 为主观题未判分。后端 result 端点恒显式输出该键，
+    // 去掉 =null 默认值，字段缺失时暴露契约漂移（explicitNulls=false 下缺失仍安全解码为 null）
+    @SerialName("is_correct") val isCorrect: Boolean?,
     @SerialName("time_spent") val timeSpent: Int = 0
 )
 

@@ -8,6 +8,7 @@ import com.toneup.app.data.remote.api.AttemptApi
 import com.toneup.app.data.remote.dto.AttemptResultDto
 import com.toneup.app.data.remote.dto.SubmitAttemptRequest
 import com.toneup.app.domain.logic.IdempotencyKeyStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -118,8 +119,15 @@ class PracticeRepository @Inject constructor(
         _pendingCount.value = data.pendingSubmissions.size
     }
 
-    fun resetLocalState() {
+    // M-68：登录/启动恢复时同时清空持久化 pendingSubmissions 的本地状态复位，
+    // 防止只清内存幂等键后，后续 restorePendingState(userId) 恢复出幽灵待同步队列
+    suspend fun resetLocalState() {
         idempotencyKeyStore.clearAll()
+        sessionManager.currentUserId()?.let { uid ->
+            sessionDataStoreManager.storeFor(uid).updateData { data ->
+                data.copy(pendingSubmissions = emptyList())
+            }
+        }
         _pendingCount.value = 0
     }
 
@@ -134,9 +142,10 @@ class PracticeRepository @Inject constructor(
         try {
             val userId = sessionManager.currentUserId() ?: return 0
             val store = sessionDataStoreManager.storeFor(userId)
-            while (true) {
-                val pending = store.data.first().pendingSubmissions.firstOrNull()
-                    ?: break
+            // M-69：以启动时快照做有限遍历，取代依赖 removePending 必然删掉头部的 while(true)，
+            // 消除删除失配时静默死循环的风险；本轮快照之外的新入队条目由下一轮重放承接
+            val pendingList = store.data.first().pendingSubmissions
+            for (pending in pendingList) {
                 try {
                     val (_, result) = EnvelopeUnwrapper.unwrapWithStatus(jsonProvider.json) {
                         attemptApi.submit(
@@ -167,6 +176,8 @@ class PracticeRepository @Inject constructor(
                     // 明确业务拒绝（400/401/403/404/success=false）：移除条目
                     Log.w(TAG, "replay rejected for q=${pending.questionId}: ${e.userMessage}")
                     removePending(userId, pending)
+                } catch (e: CancellationException) {
+                    throw e // M-69：取消必须透传，避免重放协程无法被结构化取消
                 } catch (e: Exception) {
                     Log.e(TAG, "replay failed for q=${pending.questionId}", e)
                     break // 未知异常：保留条目等待下一轮重放，避免误删未确认作答

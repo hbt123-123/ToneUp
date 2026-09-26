@@ -60,11 +60,12 @@ fun ReviewTab(
     // 展示完即消费，避免重进 Tab 时重放旧提示
     LaunchedEffect(state.lastSkipped) {
         state.lastSkipped?.let {
+            // M-220：先消费事件再挂起展示 Snackbar，避免展示期间协程被取消导致重进 Tab 重放旧提示
+            viewModel.consumeSkipNotice()
             snackbarHostState.showSnackbar(
                 message = "已暂缓 1 题（暂缓后不可撤销）",
                 duration = SnackbarDuration.Short
             )
-            viewModel.consumeSkipNotice()
         }
     }
 
@@ -117,7 +118,8 @@ fun ReviewTab(
                                 modifier = Modifier.fillMaxWidth()
                             ) { Text("开始复习（${items.size} 题）") }
                         }
-                        items(items, key = { it.questionId }) { item ->
+                        // M-221：key 改为 bankId:questionId 复合键——复习列表可跨题库，单 questionId 不唯一
+                        items(items, key = { "${it.bankId}:${it.questionId}" }) { item ->
                             ReviewItemCard(
                                 item = item,
                                 busy = item.questionId in state.skippingIds,

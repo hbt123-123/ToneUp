@@ -15,10 +15,14 @@
     <application
         android:name=".ToneUpApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.ToneUp">
+        <!-- M-425：API 31+ 上 allowBackup="false" 只禁云备份、不禁设备迁移（D2D），
+             需配套 dataExtractionRules 显式排除（规则见 res/xml/data_extraction_rules.xml）；
+             API <31 的备份行为仍由 allowBackup="false" 完全覆盖，无需另配 fullBackupContent -->
 
         <activity
             android:name=".MainActivity"

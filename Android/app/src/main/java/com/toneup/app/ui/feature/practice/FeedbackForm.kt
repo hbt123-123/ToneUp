@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.toneup.app.data.remote.api.FeedbackApi
 import com.toneup.app.data.remote.api.FeedbackRequest
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 private val FEEDBACK_CATEGORIES = listOf(
@@ -61,15 +63,23 @@ fun FeedbackForm(
     onSubmit: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    var showForm by remember { mutableStateOf(false) }
-    var selectedCategory by remember { mutableStateOf(FEEDBACK_CATEGORIES.first()) }
-    var categoryExpanded by remember { mutableStateOf(false) }
-    var content by remember { mutableStateOf("") }
-    var submitting by remember { mutableStateOf(false) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
+    // M-176：全部瞬态状态加 questionId key，同一组合槽复用于不同题时随题重置
+    var expanded by remember(questionId) { mutableStateOf(false) }
+    var showForm by remember(questionId) { mutableStateOf(false) }
+    var selectedCategory by remember(questionId) { mutableStateOf(FEEDBACK_CATEGORIES.first()) }
+    var categoryExpanded by remember(questionId) { mutableStateOf(false) }
+    var content by remember(questionId) { mutableStateOf("") }
+    var submitting by remember(questionId) { mutableStateOf(false) }
+    var errorMsg by remember(questionId) { mutableStateOf<String?>(null) }
+    // M-177：在途提交协程引用，用于收起/切题时取消，避免旧协程回写新表单状态
+    var submitJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    // M-177：切题（key 变化）或离开组合时取消在途提交协程
+    DisposableEffect(questionId) {
+        onDispose { submitJob?.cancel() }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // 触发行
@@ -81,8 +91,16 @@ fun FeedbackForm(
                 .clickable {
                     expanded = !expanded
                     if (!expanded) {
+                        // M-175：收起时兑现 onDismiss 回调（调用方传入的 handler 此前被吞）
+                        onDismiss()
+                        // M-177：收起时统一重置全部瞬态，并取消在途提交协程
+                        submitJob?.cancel()
                         showForm = false
                         errorMsg = null
+                        submitting = false
+                        content = ""
+                        selectedCategory = FEEDBACK_CATEGORIES.first()
+                        categoryExpanded = false
                     }
                 }
                 .padding(vertical = 4.dp)
@@ -182,10 +200,12 @@ fun FeedbackForm(
                         // 内容输入
                         OutlinedTextField(
                             value = content,
-                            onValueChange = {
-                                if (it.length <= MAX_CONTENT_LENGTH) content = it
+                            onValueChange = { input ->
+                                // M-178：超限截断而非静默丢弃，配合下方计数提示
+                                content = if (input.length > MAX_CONTENT_LENGTH) input.take(MAX_CONTENT_LENGTH) else input
                             },
-                            label = { Text("详细描述（选填）") },
+                            // M-179：后端 content 为必填（feedback.py 校验非空），文案去掉"选填"对齐约束
+                            label = { Text("详细描述") },
                             placeholder = { Text("请描述您发现的问题...") },
                             modifier = Modifier.fillMaxWidth(),
                             minLines = 3,
@@ -196,7 +216,10 @@ fun FeedbackForm(
                             ),
                             supportingText = {
                                 Text(
-                                    "${content.length}/$MAX_CONTENT_LENGTH",
+                                    // M-178：达到上限时给出明确文字提示
+                                    text = if (content.length >= MAX_CONTENT_LENGTH)
+                                        "${content.length}/$MAX_CONTENT_LENGTH 已达上限"
+                                    else "${content.length}/$MAX_CONTENT_LENGTH",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (content.length > MAX_CONTENT_LENGTH - 50)
                                         MaterialTheme.colorScheme.error
@@ -238,7 +261,8 @@ fun FeedbackForm(
                                     }
                                     submitting = true
                                     errorMsg = null
-                                    scope.launch {
+                                    // M-177：记录协程引用，收起/切题时可取消
+                                    submitJob = scope.launch {
                                         try {
                                             val envelope = feedbackApi.submitFeedback(
                                                 FeedbackRequest(

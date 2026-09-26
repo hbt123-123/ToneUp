@@ -1,6 +1,5 @@
 package com.toneup.app.di
 
-import android.content.Context
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import com.toneup.app.BuildConfig
 import com.toneup.app.data.remote.api.AttemptApi
@@ -23,7 +22,6 @@ import com.toneup.app.data.remote.interceptor.SanitizedLoggingInterceptor
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -116,7 +114,6 @@ object NetworkModule {
     fun aiFeedbackApi(@UploadClient retrofit: Retrofit): AiFeedbackApi =
         retrofit.create(AiFeedbackApi::class.java)
 
-    @Provides
-    @Singleton
-    fun appContext(@ApplicationContext context: Context): Context = context
+    // M-75：删除冗余的 appContext provider——Hilt 已内置 @ApplicationContext Context 绑定，
+    // 原无限定 Context 绑定仅被 SessionDataStoreManager 依赖，该处已改为显式 @ApplicationContext 注入
 }

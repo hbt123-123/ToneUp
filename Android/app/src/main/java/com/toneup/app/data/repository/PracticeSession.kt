@@ -1,5 +1,6 @@
 package com.toneup.app.data.repository
 
+import android.util.Log
 import com.toneup.app.data.remote.dto.PageData
 import com.toneup.app.data.remote.dto.QuestionDto
 import java.util.concurrent.ConcurrentHashMap
@@ -30,11 +31,16 @@ class PracticeSession(
     // H-23：题目列表私有化，所有读写经同步访问器，杜绝外部无锁修改
     private val _questions = mutableListOf<QuestionDto>()
 
+    // M-71：已装载题目 id 集合，appendOne 去重由 O(n) 扫描降为 O(1)，逐题补取整体 O(n²)→O(n)
+    private val loadedIds = HashSet<Long>()
+
     /** 只读快照（每次返回拷贝，避免暴露内部可变状态） */
     val questions: List<QuestionDto>
         get() = synchronized(this) { _questions.toList() }
 
-    var total: Int = if (fixedRefs != null) fixedRefs.size else Int.MAX_VALUE
+    // M-70：未知总数哨兵由 Int.MAX_VALUE 改为 -1（与 ViewModel knownTotal=-1 的"未知"语义对齐），
+    // 避免 MAX_VALUE 被 UI 直接当数值展示或参与进度计算
+    var total: Int = if (fixedRefs != null) fixedRefs.size else -1
         private set
     var hasMore: Boolean = true
         private set
@@ -43,6 +49,7 @@ class PracticeSession(
 
     @Synchronized
     fun append(page: PageData<QuestionDto>) {
+        page.items.forEach { loadedIds.add(it.questionId) }
         _questions.addAll(page.items)
         hasMore = page.hasMore
         total = page.total
@@ -52,12 +59,14 @@ class PracticeSession(
     /** EC-01 服务端会话预填题目序列 */
     @Synchronized
     fun appendAll(items: List<QuestionDto>) {
+        items.forEach { loadedIds.add(it.questionId) }
         _questions.addAll(items)
     }
 
     @Synchronized
     fun appendOne(question: QuestionDto) {
-        if (_questions.none { it.questionId == question.questionId }) {
+        // M-71：HashSet 去重，装载过则跳过
+        if (loadedIds.add(question.questionId)) {
             _questions.add(question)
         }
     }
@@ -77,12 +86,21 @@ class PracticeSessionRegistry @Inject constructor() {
     private val sessions = ConcurrentHashMap<String, PracticeSession>()
 
     fun register(session: PracticeSession) {
-        sessions[session.sessionId] = session
+        // M-72：同 sessionId 重复注册会静默顶掉旧会话（旧题目列表不可达）。
+        // TODO(M-72)：会话生命周期与覆盖语义（显式 close/overwrite）需统一设计，暂以日志暴露风险
+        val previous = sessions.put(session.sessionId, session)
+        if (previous != null) {
+            Log.w(TAG, "practice session overwritten: ${session.sessionId}")
+        }
     }
 
     fun get(sessionId: String): PracticeSession? = sessions[sessionId]
 
     fun remove(sessionId: String) {
         sessions.remove(sessionId)
+    }
+
+    private companion object {
+        const val TAG = "PracticeSessionRegistry"
     }
 }

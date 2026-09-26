@@ -9,8 +9,10 @@ import com.toneup.app.data.repository.ReviewRepository
 import com.toneup.app.data.remote.dto.ReviewItemDto
 import com.toneup.app.ui.common.Load
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -42,6 +44,9 @@ class ReviewViewModel @Inject constructor(
             try {
                 val page = reviewRepository.today(limit = 50)
                 _state.value = _state.value.copy(items = Load.Ready(page.items))
+            } catch (e: CancellationException) {
+                // M-222：取消必须显式重抛，避免吞掉 ViewModel 清理/刷新被顶替时的结构化取消
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     items = Load.Failed((e as? com.toneup.app.data.repository.AppException)?.userMessage ?: "加载失败")
@@ -53,34 +58,43 @@ class ReviewViewModel @Inject constructor(
     /** FR-RV-03 暂缓单题：服务端顺延 1 天；无撤销端点，暂缓后不可撤销 */
     fun skip(item: ReviewItemDto) {
         viewModelScope.launch {
-            _state.value = _state.value.copy(
-                skippingIds = _state.value.skippingIds + item.questionId,
-                errorHint = null
-            )
-            runCatching { reviewRepository.skip(item.questionId, item.bankId) }
-                .onSuccess {
+            // M-223：改用 update 原子读改写，避免快速连续暂缓或与刷新交错时状态互相覆盖
+            _state.update {
+                it.copy(
+                    skippingIds = it.skippingIds + item.questionId,
+                    errorHint = null
+                )
+            }
+            try {
+                reviewRepository.skip(item.questionId, item.bankId)
+                _state.update { prev ->
                     // H-67：refresh 进行中（items 为 Loading/Failed）时不得用空列表覆盖现有状态，
                     // 仅在 Ready 分支摘除本题；lastSkipped/skippingIds 无论如何都要更新
-                    val current = _state.value.items
-                    _state.value = if (current is Load.Ready) {
-                        _state.value.copy(
+                    val current = prev.items
+                    if (current is Load.Ready) {
+                        prev.copy(
                             items = Load.Ready(current.value.filterNot { it.questionId == item.questionId }),
-                            skippingIds = _state.value.skippingIds - item.questionId,
+                            skippingIds = prev.skippingIds - item.questionId,
                             lastSkipped = item
                         )
                     } else {
-                        _state.value.copy(
-                            skippingIds = _state.value.skippingIds - item.questionId,
+                        prev.copy(
+                            skippingIds = prev.skippingIds - item.questionId,
                             lastSkipped = item
                         )
                     }
                 }
-                .onFailure {
-                    _state.value = _state.value.copy(
-                        skippingIds = _state.value.skippingIds - item.questionId,
+            } catch (e: CancellationException) {
+                // M-224：runCatching 会捕获 CancellationException，改为显式重抛保证取消传播
+                throw e
+            } catch (_: Exception) {
+                _state.update {
+                    it.copy(
+                        skippingIds = it.skippingIds - item.questionId,
                         errorHint = "暂缓失败，请检查网络后重试"
                     )
                 }
+            }
         }
     }
 
@@ -93,6 +107,8 @@ class ReviewViewModel @Inject constructor(
     fun startReview(onReady: (String) -> Unit) {
         val items = (_state.value.items as? Load.Ready)?.value ?: return
         val refs = items.map { QuestionRef(it.bankId, it.questionId) }
+        // M-225：refs 为空时不注册会话也不导航，避免产生空 bankId、零题目的无效练习会话
+        if (refs.isEmpty()) return
         val sessionId = "rv_" + UUID.randomUUID().toString().take(8)
         sessionRegistry.register(
             PracticeSession(

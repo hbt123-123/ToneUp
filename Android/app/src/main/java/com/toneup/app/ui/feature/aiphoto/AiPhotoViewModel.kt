@@ -60,22 +60,34 @@ class AiPhotoViewModel @Inject constructor(
     private var lastCapturedFile: File? = null
 
     fun onCaptured(file: File) {
+        // M-129：覆盖引用前删除上一张临时拍摄文件，避免 cacheDir 泄漏
+        lastCapturedFile?.let { old ->
+            if (old.exists() && old.absolutePath != file.absolutePath) old.delete()
+        }
         lastCapturedFile = file
         _state.value = _state.value.copy(step = AiFlowStep.ConfirmPreview(file))
     }
 
     fun retake() {
         pollJob?.cancel()
+        // M-129：重拍即丢弃当前拍摄文件，同步删除对应临时文件
+        lastCapturedFile?.let { if (it.exists()) it.delete() }
+        lastCapturedFile = null
         _state.value = _state.value.copy(step = AiFlowStep.Camera, errorHint = null)
     }
 
     /** FR-AI-02 压缩后 multipart 上传；小图可能同步返回结果 */
     fun confirmAndUpload(compressedFileProvider: suspend (File) -> File) {
         val raw = (_state.value.step as? AiFlowStep.ConfirmPreview)?.file ?: return
+        // M-130：与 submitSelfJudge 一致，上传前校验路由参数合法性，避免脏参进入上传链路
+        if (bankIdArg.isBlank() || questionIdArg <= 0) return
         if (_state.value.busy) return
         _state.value = _state.value.copy(busy = true, step = AiFlowStep.Uploading)
         viewModelScope.launch {
             try {
+                // M-127：压缩新文件前清理 cacheDir 中本功能（toneup_ai_ 前缀）的历史临时文件，
+                // 并同步失效旧重试引用，避免会话内多轮确认造成累积泄漏
+                cleanupStaleAiTempFiles(except = raw)
                 val compressed = compressedFileProvider(raw)
                 lastUploadFile = compressed
                 when (val outcome = aiRepository.upload(
@@ -112,11 +124,16 @@ class AiPhotoViewModel @Inject constructor(
             val startedAt = System.currentTimeMillis()
             var index = 0
             while (true) {
-                if (PollBackoffPolicy.isDeadlineExceeded(System.currentTimeMillis() - startedAt)) {
+                val elapsedMs = System.currentTimeMillis() - startedAt
+                if (PollBackoffPolicy.isDeadlineExceeded(elapsedMs)) {
                     fail("等待超时（60 秒）", canRetryUpload = true)
                     return@launch
                 }
-                delay(PollBackoffPolicy.delayForAttempt(index))
+                // M-128：轮询中经 StateFlow 真实更新已耗时秒数，供 UI 展示进度
+                _state.value = _state.value.copy(pollElapsedSeconds = (elapsedMs / 1000L).toInt())
+                // M-131：delay 按已耗时长截断本次 sleep，确保睡醒后不越过 60s 总上限
+                //（原先 deadline 仅在循环顶部检查，最后一轮仍会整睡最多 5s）
+                delay(PollBackoffPolicy.delayForAttempt(index, elapsedMs))
                 index++
                 try {
                     val detail = aiRepository.feedback(feedbackId)
@@ -163,7 +180,15 @@ class AiPhotoViewModel @Inject constructor(
 
     /** FR-AI-06 失败或超时：重试上传生成新诊断任务 */
     fun retryUpload() {
-        val file = lastUploadFile ?: return
+        val file = lastUploadFile
+        if (file == null) {
+            // M-132：无可重试文件（如压缩失败时 lastUploadFile 尚未赋值）不得静默返回，
+            // 回到确认预览步骤让用户重走压缩上传流程
+            lastCapturedFile?.let { raw ->
+                _state.value = _state.value.copy(step = AiFlowStep.ConfirmPreview(raw), errorHint = null)
+            }
+            return
+        }
         if (_state.value.busy) return
         _state.value = _state.value.copy(busy = true, step = AiFlowStep.Uploading, errorHint = null)
         viewModelScope.launch {
@@ -206,7 +231,21 @@ class AiPhotoViewModel @Inject constructor(
     }
 
     private fun fail(message: String, canRetryUpload: Boolean) {
-        _state.value = _state.value.copy(busy = false, step = AiFlowStep.Failure(message, canRetryUpload))
+        // M-132：仅当确有可重试的上传文件时才展示重试入口，
+        // 避免"压缩失败等 lastUploadFile 尚未赋值"的失败路径出现点击无效的重试按钮
+        _state.value = _state.value.copy(
+            busy = false,
+            step = AiFlowStep.Failure(message, canRetryUpload && lastUploadFile != null)
+        )
+    }
+
+    /** M-127：清理 cacheDir 中本功能（toneup_ai_ 前缀）的历史临时文件，保留 [except] 指向的当前源图 */
+    private fun cleanupStaleAiTempFiles(except: File) {
+        lastUploadFile?.let { if (it.exists() && it.absolutePath != except.absolutePath) it.delete() }
+        lastUploadFile = null
+        except.parentFile
+            ?.listFiles { f -> f.name.startsWith("toneup_ai_") && f.absolutePath != except.absolutePath }
+            ?.forEach { it.delete() }
     }
 
     override fun onCleared() {

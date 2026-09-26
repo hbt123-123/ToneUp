@@ -12,10 +12,14 @@ data class OptionDto(
 
 @Serializable
 data class QuestionDto(
+    // M-44：bank_id/question_id/type_code 是后端 _build_dto 固定输出的核心键，有意不加默认值，
+    // 字段缺失时抛 MissingFieldException 快速失败，防止契约漂移被静默吞掉
     @SerialName("bank_id") val bankId: String,
     @SerialName("question_id") val questionId: Long,
     @SerialName("collection_id") val collectionId: Long = 0,
     val year: Int = 0,
+    // M-45：type_code 可能为 "" 或未登记码（后端 mapping.get 回退 UNKNOWN），
+    // 消费方依赖 RendererRegistry/FallbackRenderer 兜底，新增题型时须同步 TYPE_* 常量
     @SerialName("type_code") val typeCode: String,
     val number: Int = 0,
     val content: String = "",
@@ -79,8 +83,10 @@ data class AttemptResultDto(
         const val GRADING_FAILED = "failed"
     }
 
+    // M-46：判分状态比较忽略大小写，避免后端状态码大小写变化（如 QUEUED）导致主观题等待态误判
     val isSubjectivePending: Boolean
-        get() = gradingStatus == GRADING_QUEUED || gradingStatus == GRADING_PROCESSING
+        get() = gradingStatus.equals(GRADING_QUEUED, ignoreCase = true) ||
+            gradingStatus.equals(GRADING_PROCESSING, ignoreCase = true)
 }
 
 @Serializable

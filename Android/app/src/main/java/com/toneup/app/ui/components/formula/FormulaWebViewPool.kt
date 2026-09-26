@@ -68,8 +68,11 @@ class FormulaWebViewPool @Inject constructor(
     }
 
     fun release(pooled: PooledWebView) {
-        pooled.reset()
+        // M-122：reset 原在调用线程同步执行，会与主线程上的 onJsRendered/fail/超时回调
+        // 竞争 pending/failed/renderTimeoutPending 同一组字段；统一投递到主线程串行执行，
+        // 使 PooledWebView 全部可变状态收敛为主线程约束
         mainHandler.post {
+            pooled.reset()
             synchronized(lock) {
                 if (all.size > POOL_SIZE) {
                     all.remove(pooled)
@@ -208,11 +211,15 @@ class PooledWebView internal constructor(val webView: WebView) {
     }
 
     fun onJsRendered() {
+        // M-122：与 fail/reset 共享可变状态，统一约束主线程（调用点均经 mainHandler 投递）
+        check(Looper.myLooper() == Looper.getMainLooper()) { "onJsRendered must be on main thread" }
         renderTimeoutPending = false
         if (!failed) successListener?.invoke()
     }
 
     fun fail() {
+        // M-122：主线程约束断言，防止与 reset 跨线程竞争
+        check(Looper.myLooper() == Looper.getMainLooper()) { "fail must be on main thread" }
         if (!failed) {
             renderTimeoutPending = false
             failed = true
@@ -224,6 +231,8 @@ class PooledWebView internal constructor(val webView: WebView) {
     }
 
     fun reset() {
+        // M-122：主线程约束断言（release 已改为投递主线程后调用）
+        check(Looper.myLooper() == Looper.getMainLooper()) { "reset must be on main thread" }
         heightListener = null
         successListener = null
         failureListener = null

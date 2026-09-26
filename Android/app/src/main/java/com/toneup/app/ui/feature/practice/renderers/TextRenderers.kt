@@ -25,24 +25,37 @@ import com.toneup.app.ui.components.question.QuestionContext
 import kotlinx.coroutines.delay
 
 /**
- * §6.3.4 填空：逐空独立输入，行内 LaTeX 预览（300ms 节流）位于输入框正下方。
+ * §6.3.4 填空：逐空独立输入，行内 LaTeX 预览（300ms 防抖）位于输入框正下方。
  * 多空草稿按空序保存；留空由宿主二次确认。
  */
 @Composable
 fun FillBlankRenderer(context: QuestionContext) {
     val blankCount = SubQuestionParser.blankCount(context.question)
-    val blanks = (context.answer as? AnswerValue.Blanks)?.values ?: emptyMap()
+    val hostBlanks = (context.answer as? AnswerValue.Blanks)?.values ?: emptyMap()
+    // M-208：原先 blanks 是组合期快照，编辑回调从快照重建 map，同一帧内连续两次输入会
+    // 互相覆盖丢字。改为本地实时副本：编辑先写本地（State 读写同步，无帧间隙）再上报宿主；
+    // 宿主权威变化（恢复草稿/重做清空）经 lastReported 对账识别后回写本地
+    var localBlanks by remember(context.question.questionId) { mutableStateOf(hostBlanks) }
+    var lastReported by remember(context.question.questionId) { mutableStateOf(hostBlanks) }
+    LaunchedEffect(hostBlanks) {
+        if (hostBlanks != lastReported) {
+            localBlanks = hostBlanks
+            lastReported = hostBlanks
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         repeat(blankCount) { index ->
-            val value = blanks[index] ?: ""
             FillBlankItem(
                 index = index,
-                value = value,
+                value = localBlanks[index] ?: "",
                 enabled = !context.readonly && !context.disabled,
                 showPreview = true,
-                onValueChange = {
-                    context.onAnswerChange(AnswerValue.Blanks(blanks + (index to it)))
+                onValueChange = { text ->
+                    val next = localBlanks + (index to text)
+                    localBlanks = next
+                    lastReported = next
+                    context.onAnswerChange(AnswerValue.Blanks(next))
                 }
             )
         }
@@ -57,12 +70,14 @@ private fun FillBlankItem(
     showPreview: Boolean,
     onValueChange: (String) -> Unit
 ) {
-    // previewText 不以 value 为 key：否则每次输入都会同步重置，300ms 节流失效
+    // previewText 不以 value 为 key：否则每次输入都会同步重置，300ms 防抖失效
     var previewText by remember { mutableStateOf("") }
 
+    // M-209：LaunchedEffect(value) 每次击键重启 effect——这是防抖（停顿 300ms 后才刷新预览），
+    // 并非 KDoc 原称的"节流"；常量与注释已同步改名以免误导
     LaunchedEffect(value) {
         if (value != previewText) {
-            delay(LATEX_PREVIEW_THROTTLE_MS)
+            delay(LATEX_PREVIEW_DEBOUNCE_MS)
             previewText = value
         }
     }
@@ -87,8 +102,11 @@ private fun FillBlankItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp)
             )
+            // M-210：用户输入是不可信 LaTeX 源，原样插值进 $$...$$ 会因 $/花括号/反斜杠失衡
+            // 导致渲染错乱；预览放弃数学渲染，走 FormulaText 纯文本通道，任何输入都稳定回显
             FormulaText(
-                text = "$$${previewText}$$",
+                text = previewText,
+                forceRawText = true,
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -100,8 +118,7 @@ private fun FillBlankItem(
 fun SolutionRenderer(context: QuestionContext) {
     LongAnswerSection(
         context = context,
-        placeholder = "写下你的解题过程",
-        suggestedRange = null
+        placeholder = "写下你的解题过程"
     )
 }
 
@@ -109,8 +126,7 @@ fun SolutionRenderer(context: QuestionContext) {
 fun TranslationRenderer(context: QuestionContext) {
     LongAnswerSection(
         context = context,
-        placeholder = "在此输入你的译文",
-        suggestedRange = null
+        placeholder = "在此输入你的译文"
     )
 }
 
@@ -121,7 +137,6 @@ fun EssayRenderer(context: QuestionContext) {
     LongAnswerSection(
         context = context,
         placeholder = "作答区（建议结构：开头—论证—结尾）",
-        suggestedRange = null,
         hint = minWords
     )
 }
@@ -130,7 +145,6 @@ fun EssayRenderer(context: QuestionContext) {
 private fun LongAnswerSection(
     context: QuestionContext,
     placeholder: String,
-    suggestedRange: IntRange?,
     hint: String? = null
 ) {
     val value = (context.answer as? AnswerValue.Text)?.text ?: ""
@@ -148,15 +162,7 @@ private fun LongAnswerSection(
             enabled = !context.readonly && !context.disabled,
             placeholder = placeholder
         )
-        if (suggestedRange != null) {
-            Text(
-                text = "建议字数：${suggestedRange.first} - ${suggestedRange.last}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = androidx.compose.ui.text.style.TextAlign.End
-            )
-        }
+        // M-211：suggestedRange 死参数已删——全部调用方均传 null，该分支不可达
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Text(
                 text = "${value.length} 字",
@@ -166,4 +172,4 @@ private fun LongAnswerSection(
     }
 }
 
-private const val LATEX_PREVIEW_THROTTLE_MS = 300L
+private const val LATEX_PREVIEW_DEBOUNCE_MS = 300L

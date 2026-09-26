@@ -82,7 +82,9 @@ fun RegisterScreen(
 
         OutlinedTextField(
             value = username,
-            onValueChange = { username = it.trim() },
+            // M-154：输入过程不做 trim（每键 trim 导致光标跳动），提交时再 trim；
+            // 含空格的输入会由正则校验就地报错
+            onValueChange = { username = it },
             label = { Text("用户名") },
             isError = usernameError != null,
             supportingText = {
@@ -135,7 +137,8 @@ fun RegisterScreen(
         Spacer(Modifier.height(24.dp))
 
         Button(
-            onClick = { viewModel.register(username, password) },
+            // M-154：提交时统一 trim
+            onClick = { viewModel.register(username.trim(), password) },
             enabled = username.isNotBlank() && password.isNotBlank() && confirm.isNotBlank() &&
                 usernameError == null && passwordError == null && confirmError == null &&
                 state !is AuthViewModel.UiState.Loading,
@@ -149,7 +152,8 @@ fun RegisterScreen(
                 com.toneup.app.ui.components.ErrorRetryCard(
                     message = s.message,
                     retryLabel = "重新提交",
-                    onRetry = { viewModel.register(username, password) }
+                    // M-154：重试与注册按钮同入口，提交时统一 trim
+                    onRetry = { viewModel.register(username.trim(), password) }
                 )
             else -> {}
         }

@@ -17,8 +17,12 @@ class StatsRepository @Inject constructor(
         rangeDays: Int? = null,
         subjectId: String? = null
     ): StatsOverviewDto {
-        val from = rangeDays?.let { LocalDate.now().minusDays(it.toLong() - 1).toString() }
-        val to = rangeDays?.let { LocalDate.now().toString() }
+        // M-73：now() 只取一次，避免两次求值跨午夜导致 from/to 区间撕裂；
+        // rangeDays 非正数视为未传，回退服务端默认全量区间
+        val today = LocalDate.now()
+        val validDays = rangeDays?.takeIf { it > 0 }
+        val from = validDays?.let { today.minusDays(it.toLong() - 1).toString() }
+        val to = validDays?.let { today.toString() }
         return EnvelopeUnwrapper.unwrap(jsonProvider.json) {
             statsApi.overview(from, to, subjectId)
         }

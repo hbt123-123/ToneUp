@@ -84,7 +84,8 @@ fun AnalysisScreen(
                 ResultHeader(result, state.gradingStatus)
 
                 // FR-AN-04 主观题判分状态卡
-                if (state.gradingStatus != null || result.isCorrect == null && state.question?.typeCode in SUBJECTIVE_TYPES) {
+                // M-139：补括号明确意图——有判分状态，或（主观题且尚未判分）时展示
+                if (state.gradingStatus != null || (result.isCorrect == null && state.question?.typeCode in SUBJECTIVE_TYPES)) {
                     GradingStatusCard(
                         status = state.gradingStatus,
                         timedOut = state.pollTimedOut,
@@ -135,17 +136,20 @@ fun AnalysisScreen(
                 )
 
                 // FR-AN-06 拍照纠错入口
-                if (result.bankId != null && result.questionId != null) {
+                // M-140/M-141：用局部 null-safe 绑定替代 !! 断言，守卫与使用在同一作用域
+                val bankId = result.bankId
+                val questionId = result.questionId
+                if (bankId != null && questionId != null) {
                     OutlinedButton(
                         onClick = {
-                            onOpenAiPhoto(result.bankId!!, result.questionId!!, result.attemptId)
+                            onOpenAiPhoto(bankId, questionId, result.attemptId)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("拍照纠错（AI 诊断手写过程）")
                     }
                     OutlinedButton(
-                        onClick = { onRetryQuestion(result.bankId!!, result.questionId!!) },
+                        onClick = { onRetryQuestion(bankId, questionId) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("重做此题")
@@ -169,7 +173,11 @@ fun AnalysisScreen(
             text = { Text("保存当前笔记再离开？") },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.saveNote { showNoteLeaveDialog = false }
+                    // M-142：按文案语义，保存成功后再离开；失败则留在本页展示错误提示
+                    viewModel.saveNote {
+                        showNoteLeaveDialog = false
+                        onExit()
+                    }
                 }) { Text("保存") }
             },
             dismissButton = {

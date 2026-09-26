@@ -1,6 +1,7 @@
 package com.toneup.app.data.local
 
 import android.content.Context
+import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import java.security.KeyStore
@@ -17,7 +18,9 @@ interface CipherAdapter {
 
 class KeystoreCipherAdapter(private val keyAlias: String = KEY_ALIAS) : CipherAdapter {
 
-    private fun obtainKey(): SecretKey {
+    // M-12：check-then-generate 必须互斥——两线程并发首次调用会各自 generateKey，
+    // 同 alias 后写覆盖先写，先写者持有的密钥随即失效、旧密文不可解
+    private fun obtainKey(): SecretKey = synchronized(KEY_LOCK) {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (keyStore.getEntry(keyAlias, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
         val generator = KeyGenerator.getInstance("AES").apply {
@@ -63,6 +66,8 @@ class KeystoreCipherAdapter(private val keyAlias: String = KEY_ALIAS) : CipherAd
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val KEY_ALIAS = "toneup_master_key"
+        // M-12：obtainKey 的互斥锁（类级，防多实例并发生成）
+        val KEY_LOCK = Any()
     }
 }
 
@@ -76,15 +81,28 @@ class SecureTokenStore(context: Context, private val cipher: CipherAdapter = Key
 
     fun save(token: String) {
         val payload = cipher.encrypt(token.toByteArray(Charsets.UTF_8))
-        prefs.edit().putString(KEY_TOKEN, Base64.encodeToString(payload, Base64.NO_WRAP)).apply()
+        val editor = prefs.edit().putString(KEY_TOKEN, Base64.encodeToString(payload, Base64.NO_WRAP))
+        // M-13：安全令牌不能完全 fire-and-forget——主线程保持 apply()（同步 commit
+        // 会阻塞磁盘 IO，登录流程运行在主线程协程有 ANR 风险）；后台线程改用 commit()
+        // 同步落盘并校验返回值，失败留痕日志
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            editor.apply()
+        } else if (!editor.commit()) {
+            Log.w(TAG, "token commit returned false; token may not be persisted")
+        }
     }
 
     fun token(): String? {
         val stored = prefs.getString(KEY_TOKEN, null) ?: return null
-        return runCatching {
+        return try {
+            // M-14：只捕获解密失败（Exception），不再吞 Error（runCatching 捕 Throwable）；
+            // 失败时清除残留密文（密钥轮换/密文损坏后永不可解）并视为无令牌
             String(cipher.decrypt(Base64.decode(stored, Base64.NO_WRAP)), Charsets.UTF_8)
-        }.onFailure { Log.w(TAG, "decrypt token failed, treating as no session", it) }
-            .getOrNull()
+        } catch (e: Exception) {
+            Log.w(TAG, "decrypt token failed, treating as no session", e)
+            prefs.edit().remove(KEY_TOKEN).apply()
+            null
+        }
     }
 
     fun clear() {

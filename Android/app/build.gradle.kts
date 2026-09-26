@@ -18,7 +18,8 @@ android {
         versionCode = 1
         versionName = "1.0.0"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // M-1：模块没有任何 androidTestImplementation 依赖，也无 androidTest 源码目录，
+        // testInstrumentationRunner 属无效死配置，移除（日后补充 UI 测试时随依赖一起恢复）
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -28,7 +29,19 @@ android {
             buildConfigField("boolean", "ENABLE_NETWORK_LOG", "true")
         }
         release {
-            buildConfigField("String", "BASE_URL", "\"https://api.toneup.example.com/\"")
+            // M-2：release BASE_URL 不允许悄悄打包占位域名——优先读 gradle 属性
+            // toneup.baseUrl（gradle.properties 或 -Ptoneup.baseUrl=...），其次环境变量
+            // TONEUP_BASE_URL；均缺省时回退占位域名，并在构建期打印 MUST-CONFIGURE 告警
+            val releaseBaseUrl = (project.findProperty("toneup.baseUrl") as String?)
+                ?: System.getenv("TONEUP_BASE_URL")
+                ?: "https://api.toneup.example.com/"
+            if (releaseBaseUrl.contains("example.com")) {
+                logger.warn(
+                    "M-2 MUST-CONFIGURE: release BASE_URL 仍为占位域名 api.toneup.example.com，" +
+                        "发布前请通过 -Ptoneup.baseUrl=<真实服务地址> 或环境变量 TONEUP_BASE_URL 注入"
+                )
+            }
+            buildConfigField("String", "BASE_URL", "\"$releaseBaseUrl\"")
             buildConfigField("boolean", "ENABLE_NETWORK_LOG", "false")
             isMinifyEnabled = true
             isShrinkResources = true
@@ -57,10 +70,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-        freeCompilerArgs += listOf("-opt-in=kotlin.RequiresOptIn")
-    }
     buildFeatures {
         compose = true
         buildConfig = true
@@ -78,6 +87,15 @@ android {
         // （历史遗留告警会在后续专项清理；关键项在 OCR 修复报告跟踪）
         abortOnError = false
         checkReleaseBuilds = true
+    }
+}
+
+// M-3：kotlinOptions DSL 已随 Kotlin 2.0 弃用（当前 KGP 2.0.21），迁移到等价的
+// compilerOptions DSL，消除弃用告警
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        freeCompilerArgs.add("-opt-in=kotlin.RequiresOptIn")
     }
 }
 

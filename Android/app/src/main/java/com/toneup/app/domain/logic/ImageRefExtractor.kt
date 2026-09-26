@@ -23,7 +23,8 @@ object ImageRefExtractor {
         // 避免按字面量 replace 误删正文中与 URL 相同但未被匹配的子串
         var working = text
         val mdMatches = mdImage.findAll(working).toList()
-        mdMatches.forEach { found.add(it.groupValues[2]) }
+        // M-85：markdown 分支与裸 URL 分支统一过 normalizeUrl（去尾标点/补 scheme），消除处理不一致
+        mdMatches.forEach { found.add(normalizeUrl(it.groupValues[2])) }
         for (m in mdMatches.sortedByDescending { it.range.first }) {
             working = working.removeRange(m.range.first, m.range.last + 1)
         }
@@ -38,5 +39,9 @@ object ImageRefExtractor {
     }
 
     /** 相对路径 /api/images/x 补全 host 由调用方处理；此处仅去尾标点 */
-    private fun normalizeUrl(url: String): String = url.trimEnd(',', '.', ')', ']')
+    private fun normalizeUrl(url: String): String {
+        val trimmed = url.trimEnd(',', '.', ')', ']')
+        // M-84：bareUrl 允许省略 scheme，协议相对地址（//host/...）补全后才能被宿主加载
+        return if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
+    }
 }

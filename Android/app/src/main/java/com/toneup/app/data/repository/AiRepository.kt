@@ -1,6 +1,7 @@
 package com.toneup.app.data.repository
 
 import com.toneup.app.BuildConfig
+import com.toneup.app.data.remote.dto.AttemptResultDto
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -67,7 +68,10 @@ class AiRepository @Inject constructor(
         val (code, created) = EnvelopeUnwrapper.unwrapWithStatus(jsonProvider.json) {
             aiFeedbackApi.upload(filePart, bankPart, questionPart, attemptPart)
         }
-        return if (code == 202 || created.status == "queued" || created.status == "processing") {
+        // M-53：状态值复用 AttemptResultDto 常量，消除魔法字符串重复
+        return if (code == 202 || created.status == AttemptResultDto.GRADING_QUEUED ||
+            created.status == AttemptResultDto.GRADING_PROCESSING
+        ) {
             AiUploadOutcome.Accepted(created.feedbackId, created.status)
         } else {
             AiUploadOutcome.Succeeded(

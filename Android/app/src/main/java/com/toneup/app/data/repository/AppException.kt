@@ -13,7 +13,8 @@ sealed class AppException(message: String, cause: Throwable? = null) : Exception
 
     /** 参数错误 400 */
     class BadRequest(serverMessage: String?) : AppException(serverMessage ?: "参数错误") {
-        override val userMessage: String = message ?: "请求参数有误"
+        // M-54：基类构造已兜底非空文案，userMessage 与之统一，删除恒不生效的 `?: "请求参数有误"` 死分支
+        override val userMessage: String = serverMessage ?: "参数错误"
     }
 
     /** 未认证 401 */
@@ -28,7 +29,8 @@ sealed class AppException(message: String, cause: Throwable? = null) : Exception
 
     /** 不存在 404 */
     class NotFound(serverMessage: String?) : AppException(serverMessage ?: "资源不存在") {
-        override val userMessage: String = message ?: "内容不存在或已被删除"
+        // M-55：基类构造已兜底非空文案，userMessage 与之统一，删除恒不生效的 `?: "内容不存在或已被删除"` 死分支
+        override val userMessage: String = serverMessage ?: "资源不存在"
     }
 
     /** 限流 429 */
@@ -57,6 +59,10 @@ sealed class AppException(message: String, cause: Throwable? = null) : Exception
                 401 -> Unauthorized()
                 403 -> Forbidden()
                 404 -> NotFound(serverMessage)
+                // M-56：补齐常见客户端错误映射，不再一律落入"操作失败"
+                408 -> Network(java.util.concurrent.TimeoutException("HTTP 408"))
+                409 -> Business(serverMessage ?: "请求冲突")
+                422 -> BadRequest(serverMessage)
                 429 -> RateLimited(retryAfter)
                 in 500..599 -> Server(serverMessage)
                 else -> Business(serverMessage)

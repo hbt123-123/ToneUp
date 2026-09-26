@@ -3,6 +3,10 @@ package com.toneup.app.ui.components
 import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalView
 
 /**
@@ -15,7 +19,8 @@ fun performHaptic(view: View?, haptic: Haptic) {
     view ?: return
     val constant = when (haptic) {
         Haptic.LIGHT_IMPACT ->
-            if (android.os.Build.VERSION.SDK_INT >= 30) {
+            // M-123：KEYBOARD_TAP 自 API 27（O_MR1）起可用，原 >=30 门槛使 27~29 设备无谓降级
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
                 HapticFeedbackConstants.KEYBOARD_TAP
             } else {
                 HapticFeedbackConstants.VIRTUAL_KEY
@@ -34,7 +39,13 @@ fun performHaptic(view: View?, haptic: Haptic) {
 @Composable
 fun rememberHapticPerformer(enabledProvider: () -> Boolean = { true }): (Haptic) -> Unit {
     val view = LocalView.current
-    return { haptic ->
-        if (enabledProvider()) performHaptic(view, haptic)
+    // M-124：performer 仅分配一次，经 rememberUpdatedState 读取最新依赖，lambda 身份稳定，
+    // 避免每次重组重分配导致下游以 lambda 为键的 composable 反复失效
+    val currentView by rememberUpdatedState(view)
+    val currentEnabled by rememberUpdatedState(enabledProvider)
+    return remember {
+        { haptic: Haptic ->
+            if (currentEnabled()) performHaptic(currentView, haptic)
+        }
     }
 }

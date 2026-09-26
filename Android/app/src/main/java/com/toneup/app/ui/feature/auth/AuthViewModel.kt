@@ -50,31 +50,42 @@ class AuthViewModel @Inject constructor(
         if (_loginState.value is UiState.Loading) return // 防重复提交
         _loginState.value = UiState.Loading
         viewModelScope.launch {
-            try {
-                val user = authRepository.login(username, password)
-                _loginState.value = UiState.Success(user.username)
-                _loginSuccessEvent.tryEmit(Unit)
-            } catch (e: CancellationException) {
-                throw e // H-43：scope 取消不得转为用户可见失败
-            } catch (e: AppException) {
-                _loginState.value = UiState.Failure(e.userMessage)
-            } catch (e: Exception) {
-                _loginState.value = UiState.Failure("登录失败，请稍后重试")
-            }
+            performLogin(username, password)
+        }
+    }
+
+    // M-150：抽取登录主体。手动登录经 login() 的 Loading 守卫防重复提交；
+    // 注册成功后的自动登录不经守卫直接 await（守卫会在在途登录态下静默吞掉自动登录）
+    private suspend fun performLogin(username: String, password: String) {
+        try {
+            val user = authRepository.login(username, password)
+            _loginState.value = UiState.Success(user.username)
+            _loginSuccessEvent.tryEmit(Unit)
+        } catch (e: CancellationException) {
+            throw e // H-43：scope 取消不得转为用户可见失败
+        } catch (e: AppException) {
+            _loginState.value = UiState.Failure(e.userMessage)
+        } catch (e: Exception) {
+            _loginState.value = UiState.Failure("登录失败，请稍后重试")
         }
     }
 
     fun register(username: String, password: String) {
         if (_registerState.value is UiState.Loading) return
+        // M-148：注册流程开始时清空旧值，避免上次注册残留的用户名被再次消费
+        _registeredUsername.value = null
         _registerState.value = UiState.Loading
         viewModelScope.launch {
             try {
-                authRepository.register(username, password)
-                _registerState.value = UiState.Success(username)
-                _registeredUsername.value = username
+                // M-149：使用后端返回的规范化用户名，而非用户原始输入
+                val user = authRepository.register(username, password)
+                _registerState.value = UiState.Success(user.username)
+                _registeredUsername.value = user.username
                 _registerSuccessEvent.tryEmit(Unit)
-                // 注册成功引导直接登录
-                login(username, password)
+                // 注册成功引导直接登录：M-150 直接 await 登录主体，
+                // 绕过 login() 的 Loading 守卫；register 自身守卫保证不会并发双登录
+                _loginState.value = UiState.Loading
+                performLogin(username, password)
             } catch (e: CancellationException) {
                 throw e // H-44：同 login，取消必须传播
             } catch (e: AppException) {

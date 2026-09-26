@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -57,6 +58,21 @@ fun BankTab(
     viewModel: BankViewModel = hiltViewModel()
 ) {
     val home by viewModel.home.collectAsStateWithLifecycle()
+
+    // M-160：启用题库数一次遍历预构建（remember catalog），避免每个学科项 O(subjects×banks) 重复扫描
+    val catalogSnapshot = home.catalog
+    val enabledBankCounts = remember(catalogSnapshot) {
+        val cat = (catalogSnapshot as? Load.Ready)?.value
+        if (cat == null) {
+            emptyMap()
+        } else {
+            HashMap<String, Int>().also { counts ->
+                cat.banks.forEach { b ->
+                    if (b.enabled) counts[b.subjectId] = (counts[b.subjectId] ?: 0) + 1
+                }
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -150,15 +166,17 @@ fun BankTab(
                             }
                         }
                     }
-                    home.errorHint?.let { hint ->
-                        item {
-                            Text(
-                                text = hint,
-                                color = MaterialTheme.colorScheme.error,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
+                }
+
+                // M-159：errorHint 不再依赖 lastContext 分支，任何来源的错误提示都要可见
+                home.errorHint?.let { hint ->
+                    item {
+                        Text(
+                            text = hint,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
 
@@ -193,7 +211,8 @@ fun BankTab(
                                     ) {
                                         Column(Modifier.weight(1f)) {
                                             Text(subject.name, style = MaterialTheme.typography.titleMedium)
-                                            val bankCount = catalog.banks.count { it.subjectId == subject.id && it.enabled }
+                                            // M-160：查预构建计数表，不再逐项线性扫描 catalog.banks
+                                            val bankCount = enabledBankCounts[subject.id] ?: 0
                                             Text(
                                                 "$bankCount 个题库 · ${subject.types.size} 类",
                                                 style = MaterialTheme.typography.bodySmall,

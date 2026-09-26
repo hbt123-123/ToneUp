@@ -15,12 +15,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.toneup.app.ui.components.formula.FormulaRenderEvent
@@ -85,19 +87,30 @@ fun FormulaPocScreen(onBack: () -> Unit) {
         }
         items(POC_SAMPLES.size) { index ->
             val sample = POC_SAMPLES[index]
-            var startAt by remember(index) { mutableLongStateOf(System.currentTimeMillis()) }
+            var startAt by remember(index) { mutableLongStateOf(0L) }
+            // M-165：每样本只统计首个渲染事件，保证幂等（成功监听可能随 render() 重复触发）
+            var counted by remember(index) { mutableStateOf(false) }
+            // M-164：startAt 改取首帧时刻（与 JS 渲染回调同为墙钟口径），而非组合时刻
+            LaunchedEffect(index) {
+                withFrameNanos { startAt = System.currentTimeMillis() }
+            }
             Card {
                 Column(Modifier.padding(10.dp)) {
                     FormulaText(
                         text = sample,
                         onRenderEvent = { event ->
-                            when (event) {
-                                is FormulaRenderEvent.Success -> {
-                                    successCount++
-                                    totalFirstFrameMs +=
-                                        System.currentTimeMillis() - startAt
+                            if (!counted) {
+                                counted = true
+                                when (event) {
+                                    is FormulaRenderEvent.Success -> {
+                                        successCount++
+                                        if (startAt > 0) {
+                                            totalFirstFrameMs +=
+                                                System.currentTimeMillis() - startAt
+                                        }
+                                    }
+                                    is FormulaRenderEvent.Failure -> failureCount++
                                 }
-                                is FormulaRenderEvent.Failure -> failureCount++
                             }
                         },
                         modifier = Modifier.fillMaxWidth()

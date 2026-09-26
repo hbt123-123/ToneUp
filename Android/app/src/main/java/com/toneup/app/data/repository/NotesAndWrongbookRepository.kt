@@ -15,6 +15,11 @@ class NotesRepository @Inject constructor(
     private val notesApi: NotesApi,
     private val jsonProvider: JsonProvider
 ) {
+    companion object {
+        // M-67：默认页大小集中定义，消除与 WrongbookRepository 重复的魔法数字 20
+        const val DEFAULT_PAGE_SIZE = 20
+    }
+
     suspend fun note(bankId: String, questionId: Long): NoteDto? =
         try {
             EnvelopeUnwrapper.unwrap(jsonProvider.json) {
@@ -30,7 +35,7 @@ class NotesRepository @Inject constructor(
         }
 
     /** 我的笔记聚合列表（临时端点，待后端对齐） */
-    suspend fun myNotes(page: Int, pageSize: Int = 20): PageData<NoteListItemDto> =
+    suspend fun myNotes(page: Int, pageSize: Int = DEFAULT_PAGE_SIZE): PageData<NoteListItemDto> =
         EnvelopeUnwrapper.unwrap(jsonProvider.json) { notesApi.myNotes(page, pageSize) }
 }
 
@@ -41,11 +46,16 @@ class WrongbookRepository @Inject constructor(
     private val wrongQuestionApi: com.toneup.app.data.remote.api.WrongQuestionApi,
     private val jsonProvider: JsonProvider
 ) {
+    companion object {
+        // M-67：默认页大小集中定义（与 NotesRepository.DEFAULT_PAGE_SIZE 同值，分属两个 API 域）
+        const val DEFAULT_PAGE_SIZE = 20
+    }
+
     suspend fun wrongbook(
         bankId: String?,
         subjectId: String?,
         page: Int,
-        pageSize: Int = 20
+        pageSize: Int = DEFAULT_PAGE_SIZE
     ): PageData<com.toneup.app.data.remote.dto.WrongbookItemDto> =
         EnvelopeUnwrapper.unwrap(jsonProvider.json) {
             wrongbookApi.wrongbook(bankId, subjectId, page, pageSize)

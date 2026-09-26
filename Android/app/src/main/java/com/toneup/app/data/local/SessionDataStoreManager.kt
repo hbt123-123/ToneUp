@@ -1,11 +1,13 @@
 package com.toneup.app.data.local
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.CorruptionException
 import androidx.datastore.core.DataStore
 import androidx.datastore.core.DataStoreFactory
 import androidx.datastore.core.Serializer
 import com.toneup.app.di.ApplicationScope
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -45,9 +47,15 @@ object SessionDataSerializer : Serializer<SessionData> {
  */
 @Singleton
 class SessionDataStoreManager @Inject constructor(
-    private val context: Context,
+    // M-75：显式限定 Application Context（原依赖 NetworkModule 的冗余无限定 Context 绑定，已随 M-75 删除）
+    @ApplicationContext private val context: Context,
     @ApplicationScope private val scope: CoroutineScope
 ) {
+    // TODO(M-17)：全局 Mutex 会让不同 userId 的 store 获取互相串行。改为锁外快路径会
+    // 重新引入与 wipeUser 的竞态（H-8 修复目标），同 userId 并发 create 又必须全局互斥
+    // （否则多 DataStore 实例同文件抛 IllegalStateException）；单用户场景竞争概率极低，
+    // 暂维持现状，后续如确有需要可引入按 userId 分段锁 + 引用计数。
+
     private val mutex = Mutex()
     private val stores = ConcurrentHashMap<Long, DataStore<SessionData>>()
 
@@ -72,7 +80,16 @@ class SessionDataStoreManager @Inject constructor(
             // 锁内排空旧实例在途写入后再删文件，防止并发 storeFor 为同一文件重建实例；
             // H-9：updateData 走一次完整读-写事务，强制把 pending 写落盘（data.first() 只读快照不保证 flush）
             if (store != null) runCatching { store.updateData { it } }
-            if (file.exists()) file.delete()
+            // M-18：去掉 exists() 前置判断（TOCTOU 竞态且多余），直接删除并核对结果，
+            // 文件存在但删除失败（被占用/IO 错误）时留痕，避免静默残留旧用户数据
+            val deleted = file.delete()
+            if (!deleted && file.exists()) {
+                Log.w(TAG, "failed to delete session data file: ${file.name}")
+            }
         }
+    }
+
+    private companion object {
+        const val TAG = "SessionDataStoreManager"
     }
 }

@@ -11,6 +11,7 @@ import com.toneup.app.data.repository.PracticeSessionRegistry
 import com.toneup.app.data.repository.QuestionRef
 import com.toneup.app.data.repository.SessionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,6 +63,9 @@ class SessionHistoryViewModel @Inject constructor(
                     page = 1,
                     hasMore = page.hasMore
                 )
+            } catch (e: CancellationException) {
+                // M-236：同类统一修复——refresh 协程被取消时显式重抛，不误报"加载失败"
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     loading = false,
@@ -90,6 +94,9 @@ class SessionHistoryViewModel @Inject constructor(
                     page = latest.page + 1,
                     hasMore = page.hasMore
                 )
+            } catch (e: CancellationException) {
+                // M-236：显式重抛取消，避免吞掉协程取消导致取消语义丢失
+                throw e
             } catch (_: Exception) {
                 _state.value = _state.value.copy(loadingMore = false)
             }
@@ -105,6 +112,9 @@ class SessionHistoryViewModel @Inject constructor(
                     items = _state.value.items.filterNot { it.id == sessionId }
                 )
                 sessionRegistry.remove("srv_$sessionId")
+            } catch (e: CancellationException) {
+                // M-236：同类统一修复——delete 协程被取消时显式重抛，不误报"删除失败"
+                throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     deleteError = (e as? com.toneup.app.data.repository.AppException)?.userMessage
@@ -138,6 +148,9 @@ class SessionHistoryViewModel @Inject constructor(
                 saveLastContext(session, startIndex)
                 _state.value = _state.value.copy(resumingId = null)
                 onReady(session.sessionId, startIndex)
+            } catch (e: CancellationException) {
+                // M-237：显式重抛取消，避免把协程取消误报为"会话恢复失败"
+                throw e
             } catch (_: Exception) {
                 _state.value = _state.value.copy(
                     resumingId = null,

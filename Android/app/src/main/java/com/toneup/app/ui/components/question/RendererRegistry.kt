@@ -50,8 +50,10 @@ object RendererRegistry {
         }
         QuestionType.all.forEach { type ->
             val count = registeredCodes.getOrDefault(type.typeCode, 0)
-            if (count != 1) {
-                problems += "RendererRegistry missing: ${type.typeCode} (found $count)"
+            // M-125：缺失与重复分别精确上报，原 count != 1 统一报 missing 会把重复注册误报成缺失
+            when {
+                count == 0 -> problems += "RendererRegistry missing: ${type.typeCode} (found 0)"
+                count > 1 -> problems += "RendererRegistry duplicated: ${type.typeCode} (found $count)"
             }
             registeredCodes.remove(type.typeCode)
         }

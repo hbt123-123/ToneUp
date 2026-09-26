@@ -1,5 +1,6 @@
 package com.toneup.app.ui.feature.practice
 
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -31,7 +32,11 @@ import com.toneup.app.domain.logic.SessionDraftMerge
 import com.toneup.app.domain.model.AnswerValue
 import com.toneup.app.domain.model.QuestionType
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,6 +49,7 @@ import javax.inject.Inject
 data class PaperStats(
     val totalCount: Int,
     val answeredCount: Int,
+    /** 未答题数；-1 表示总数未知（分页模式尚未装载完），UI 应显示 "?" 而非把已装载部分当全量 */
     val unansweredCount: Int,
     val markedCount: Int,
     val wrongCount: Int = 0
@@ -120,6 +126,14 @@ class PracticeViewModel @Inject constructor(
     private val draftFlushJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
     private val essayFlushJobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
 
+    // M-195：记录各题待落盘的最新草稿（questionId → 题目+答案），防抖 Job 被 onCleared
+    // 取消时据此兜底补写，避免 500ms/3s 窗口内的最后一次输入丢失
+    private val pendingDrafts =
+        java.util.concurrent.ConcurrentHashMap<Long, Pair<QuestionDto, AnswerValue>>()
+
+    // M-195：onCleared 时 viewModelScope 已被取消、不能承载 suspend 写入，用独立作用域兜底
+    private val draftSafetyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private val _elapsedSeconds = MutableStateFlow(0)
     val elapsedSeconds: StateFlow<Int> = _elapsedSeconds
     private var timerJob: Job? = null
@@ -174,7 +188,13 @@ class PracticeViewModel @Inject constructor(
         viewModelScope.launch {
             connectivityMonitor.onlineFlow.collect { online ->
                 if (online) {
+                    // M-191：重放失败原先被完全吞掉，网络/API 故障时答案会静默滞留队列且 UI 无痕，
+                    // 至少留日志便于排查（不打扰用户）；CancellationException 属协程正常取消，须原样重抛
                     runCatching { practiceRepository.replayPendingQueue() }
+                        .onFailure { e ->
+                            if (e is CancellationException) throw e
+                            Log.w("PracticeViewModel", "待同步队列重放失败：${e.message}", e)
+                        }
                     refreshPending()
                 }
             }
@@ -492,18 +512,25 @@ class PracticeViewModel @Inject constructor(
 
     fun submitPaperStats(): PaperStats {
         val slots = _state.value.slots
-        val total = _state.value.knownTotal.coerceAtLeast(slots.size)
+        val knownTotal = _state.value.knownTotal
+        // M-192：knownTotal=-1（分页模式尚未装载任何页）时总数未知，unansweredCount 置 -1 哨兵，
+        // 不再把 coerceAtLeast(slots.size) 得到的"已装载下限"误当全量完成度
+        val total = knownTotal.coerceAtLeast(slots.size)
         val answered = slots.count { slot ->
             slot.answer != null && !slot.answer.isEmpty
         }
+        // M-193：isSlotCorrect 对非 Choice/MultiChoice 一律返回 false，原逻辑会把主观题
+        // （essay/text/blanks 等）全部计入错题；本地无法判分的题型不纳入 wrongCount
         val wrong = slots.count { slot ->
-            slot.question != null && slot.answer != null && !slot.answer.isEmpty &&
+            val answer = slot.answer
+            slot.question != null && answer != null && !answer.isEmpty &&
+                (answer is AnswerValue.Choice || answer is AnswerValue.MultiChoice) &&
                 !isSlotCorrect(slot)
         }
         return PaperStats(
             totalCount = total,
             answeredCount = answered,
-            unansweredCount = total - answered,
+            unansweredCount = if (knownTotal >= 0) total - answered else -1,
             markedCount = slots.count { it.marked },
             wrongCount = wrong
         )
@@ -553,6 +580,8 @@ class PracticeViewModel @Inject constructor(
      */
     private fun scheduleDraftWrite(index: Int, answer: AnswerValue) {
         val question = slotAt(index)?.question ?: return
+        // M-195：先记录最新待落盘草稿，防抖 Job 被 onCleared 取消时据此兜底补写
+        pendingDrafts[question.questionId] = question to answer
         draftFlushJobs.remove(question.questionId)?.cancel()
         draftFlushJobs[question.questionId] = viewModelScope.launch {
             delay(DRAFT_DEBOUNCE_MS)
@@ -583,10 +612,14 @@ class PracticeViewModel @Inject constructor(
                 )
             )
         }
+        // M-195：写盘成功即清除兜底记录（仅当记录仍是刚写入的这份，避免误删其后更新的待写草稿）
+        pendingDrafts.remove(question.questionId, question to answer)
     }
 
     private suspend fun clearDraft(bankId: String, questionId: Long) {
         val userId = sessionManager.currentUserId() ?: return
+        // M-195：草稿被显式清除（提交成功/重做/清空作答）时同步撤销兜底记录，防止 onCleared 复写已删草稿
+        pendingDrafts.remove(questionId)
         sessionDataStoreManager.storeFor(userId).updateData { data ->
             data.copy(drafts = data.drafts.filterNot {
                 it.bankId == bankId && it.questionId == questionId
@@ -602,10 +635,6 @@ class PracticeViewModel @Inject constructor(
         val question = slot.question ?: return
         val answer = slot.answer ?: return
         dispatch(index, PracticeEvent.SubmitClicked)
-        // 恢复草稿的题停留在 Idle（状态机无 Idle→Submitting 转移），显式置位以禁用按钮并支持失败重试
-        if (slotAt(index)?.status == PracticeStatus.Idle) {
-            setStatus(index, PracticeStatus.Submitting)
-        }
         viewModelScope.launch {
             try {
                 val elapsedSeconds =
@@ -675,11 +704,17 @@ class PracticeViewModel @Inject constructor(
                     ?: throw AppException.Unauthorized()
                 val store = sessionDataStoreManager.storeFor(userId)
                 val sid = s.serverSessionId
-                val existing = store.data.first().sessionSubmitRequestId
-                val scoped = existing?.takeIf { it.startsWith("$sid:") }
-                val clientRequestId = scoped?.substringAfter(':') ?: UUID.randomUUID().toString()
-                if (scoped == null) {
-                    store.updateData { it.copy(sessionSubmitRequestId = "$sid:$clientRequestId") }
+                // M-194：幂等键改为单次 updateData 原子读改写——原 data.first() 读旧值再 updateData
+                // 覆盖的间隙里，其他会话并发交卷会把本会话的在途键覆盖丢失
+                var clientRequestId = UUID.randomUUID().toString()
+                store.updateData { data ->
+                    val scoped = data.sessionSubmitRequestId?.takeIf { it.startsWith("$sid:") }
+                    if (scoped != null) {
+                        clientRequestId = scoped.substringAfter(':')
+                        data
+                    } else {
+                        data.copy(sessionSubmitRequestId = "$sid:$clientRequestId")
+                    }
                 }
                 try {
                     val resp = sessionRepository.submitSession(sid, clientRequestId)
@@ -743,6 +778,13 @@ class PracticeViewModel @Inject constructor(
         timerJob?.cancel()
         draftFlushJobs.values.forEach { it.cancel() }
         essayFlushJobs.values.forEach { it.cancel() }
+        // M-195：被取消的防抖 Job 里最新草稿尚未落盘；viewModelScope 已随 clear() 取消，
+        // 用独立作用域把未落盘草稿补写一次（异步，失败仅丢兜底、不影响主流程）
+        val leftovers = pendingDrafts.values.toList()
+        pendingDrafts.clear()
+        leftovers.forEach { (question, answer) ->
+            draftSafetyScope.launch { runCatching { writeDraft(question, answer) } }
+        }
     }
 
     companion object {

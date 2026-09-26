@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import java.io.File
 
 /** 相机权限状态 */
@@ -61,6 +62,19 @@ fun rememberCameraPermissionFlow(): CameraPermissionFlowState {
     }
     var showPrePrompt by remember { mutableStateOf(state == CameraPermissionState.UNKNOWN) }
     var denialDismissed by remember { mutableStateOf(false) }
+    // M-134：请求被拒次数，用于区分首次拒绝与真正的永久拒绝
+    var denialCount by remember { mutableStateOf(0) }
+
+    // M-133：权限状态此前仅在首次组合时采样一次，用户去系统设置开启权限后返回页面不会刷新；
+    // 改为每次回到前台重新检查，已授权则升级为 GRANTED（未授权时保留既有引导状态）
+    LifecycleResumeEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            state = CameraPermissionState.GRANTED
+        }
+        onPauseOrDispose { }
+    }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -69,14 +83,18 @@ fun rememberCameraPermissionFlow(): CameraPermissionFlowState {
             state = CameraPermissionState.GRANTED
         } else {
             denialDismissed = false
+            denialCount++
             val activity = context.findActivity()
             val shouldShowRationale = activity?.let {
                 androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(
                     it, Manifest.permission.CAMERA
                 )
             } ?: false
+            // M-134：部分 OEM ROM/系统版本在首次拒绝（甚至勾选"不再询问"前）也可能返回
+            // rationale = false，单次 false 即判永久拒绝会误判；仅当已多次被拒且仍无理由
+            // 弹窗时才判定为永久拒绝，首次拒绝按可再解释处理
             state =
-                if (shouldShowRationale) CameraPermissionState.DENIED_RATIONALE
+                if (shouldShowRationale || denialCount < 2) CameraPermissionState.DENIED_RATIONALE
                 else CameraPermissionState.PERMANENTLY_DENIED
         }
     }
@@ -225,6 +243,8 @@ fun CameraCaptureView(
                         }
 
                         override fun onError(exception: ImageCaptureException) {
+                            // M-135：拍照失败时删除本次已创建的临时文件，避免 cacheDir 泄漏
+                            file.delete()
                             errorMessage = "拍照失败：${exception.message}"
                         }
                     }

@@ -6,6 +6,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -28,8 +32,11 @@ import com.toneup.app.ui.navigation.addPracticeGraph
 import com.toneup.app.ui.navigation.addSecondaryGraphs
 import com.toneup.app.ui.navigation.addSectionListGraph
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -38,7 +45,8 @@ import javax.inject.Inject
 class RootViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val prefsStore: com.toneup.app.data.local.UserPreferencesStore,
-    val sessionManager: SessionManager
+    // M-261：SessionManager 为数据层单例，收窄为 private，不再向 UI 暴露
+    private val sessionManager: SessionManager
 ) : ViewModel() {
 
     sealed interface BootState {
@@ -48,7 +56,12 @@ class RootViewModel @Inject constructor(
     }
 
     private val _state = MutableStateFlow<BootState>(BootState.Loading)
-    val state = _state
+    // M-262：对外仅暴露只读 StateFlow，防止 UI 直接改写启动态
+    val state: kotlinx.coroutines.flow.StateFlow<BootState> = _state.asStateFlow()
+
+    // M-261：401 失效信号在 ViewModel 内转换为 UI 事件流（UI 事件模型，屏蔽数据层
+    // SessionManager/UnauthorizedEvent 类型），UI 只消费"发生了 401"这一信号
+    val unauthorizedEvents: Flow<Unit> = sessionManager.unauthorizedEvents.map { }
 
     /** 全局偏好：动效/触感/深色策略 */
     val preferences: kotlinx.coroutines.flow.StateFlow<com.toneup.app.data.local.UserPreferences> =
@@ -93,11 +106,16 @@ fun ToneUpRoot(rootViewModel: RootViewModel = hiltViewModel()) {
     val prefs by rootViewModel.preferences.collectAsStateWithLifecycle()
 
     com.toneup.app.ui.theme.ToneUpTheme(darkModePolicy = prefs.darkModePolicy) {
-        androidx.compose.runtime.CompositionLocalProvider(
-            LocalToneUpPreferences provides ToneUpPreferences(
+        // M-263：remember 缓存偏好实例（按相关字段作为 key），避免每次重组新分配
+        // ToneUpPreferences 导致 staticCompositionLocalOf 的下游全量失效
+        val toneUpPrefs = remember(prefs.animationsEnabled, prefs.hapticsEnabled) {
+            ToneUpPreferences(
                 animationsEnabled = prefs.animationsEnabled,
                 hapticsEnabled = prefs.hapticsEnabled
             )
+        }
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalToneUpPreferences provides toneUpPrefs
         ) {
             ToneUpNavGraph(navController, rootViewModel, bootState)
         }
@@ -112,8 +130,9 @@ private fun ToneUpNavGraph(
 ) {
 
     // 401 失效事件：清会话跳登录，保留恢复路由（§2.5）
+    // M-261：改为消费 ViewModel 封装的 UI 事件流，UI 不再直接触达数据层 SessionManager
     LaunchedEffect(Unit) {
-        rootViewModel.sessionManager.unauthorizedEvents.collect { _ ->
+        rootViewModel.unauthorizedEvents.collect {
             navController.navigate(Routes.LOGIN) {
                 popUpTo(0) { inclusive = true }
                 launchSingleTop = true
@@ -128,7 +147,31 @@ private fun ToneUpNavGraph(
             }
         }
 
-        else -> {
+        // M-264：逐分支枚举替代 else，保留 sealed 层级的穷尽性检查（新增状态时编译期即暴露漏分支）
+        RootViewModel.BootState.LoggedIn,
+        RootViewModel.BootState.NeedLogin -> {
+            // M-265：NavHost 的 startDestination 仅在图首次创建时按当时 bootState 决定；
+            // refresh() 事后翻转登录态时图不会重建，这里监听后续翻转并显式补导航对齐，
+            // 避免 UI 停留在与登录态不符的目的地
+            var navGraphPlaced by rememberSaveable { mutableStateOf(false) }
+            LaunchedEffect(bootState) {
+                if (!navGraphPlaced) {
+                    // 首次进入：startDestination 已按当前 bootState 决定，无需补导航
+                    navGraphPlaced = true
+                    return@LaunchedEffect
+                }
+                val target =
+                    if (bootState == RootViewModel.BootState.LoggedIn) Routes.MAIN else Routes.LOGIN
+                if (navController.currentBackStackEntry?.destination?.route != target) {
+                    navController.navigate(target) {
+                        // 清掉与目标登录态相反一侧的回栈（登录栈 ↔ 主栈），语义同"登录态切换"
+                        popUpTo(if (target == Routes.MAIN) Routes.LOGIN else Routes.MAIN) {
+                            inclusive = true
+                        }
+                        launchSingleTop = true
+                    }
+                }
+            }
             NavHost(
                 navController = navController,
                 startDestination =

@@ -43,48 +43,66 @@ fun BankPickerSheet(
     val picker by viewModel.picker.collectAsStateWithLifecycle()
     val home by viewModel.home.collectAsStateWithLifecycle()
     if (!picker.visible) return
-    val catalog = (home.catalog as? Load.Ready)?.value ?: return
-    val yearsError = picker.yearsError
+    // M-156：局部空安全绑定消除 !! 断言链（delegated 属性无法 smart cast）
+    val p = picker
+    val subjectId = p.subjectId
+    val typeId = p.typeId
+    val bankId = p.bankId
+    val yearsError = p.yearsError
 
     ModalBottomSheet(
         onDismissRequest = { viewModel.closePicker() },
         modifier = Modifier.heightIn(max = 420.dp)
     ) {
         Column(Modifier.padding(horizontal = 16.dp)) {
-            Breadcrumb(
-                crumbs = buildList {
-                    picker.subjectId?.let {
-                        add(BreadcrumbCrumb(subjectLabel(catalog, it)) { viewModel.selectType(null) })
-                    }
-                    picker.typeId?.let {
-                        add(BreadcrumbCrumb(typeLabel(catalog, picker.subjectId, it)) { viewModel.selectBank(null) })
-                    }
-                },
-                onSelectRoot = { viewModel.selectSubject(null) }
-            )
+            // M-155：catalog 未就绪（加载中/失败）时显示加载/错误占位，不再静默早退留白
+            val catalog = (home.catalog as? Load.Ready)?.value
+            if (catalog == null) {
+                when (val cs = home.catalog) {
+                    is Load.Failed -> Text(
+                        cs.message,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(vertical = 24.dp)
+                    )
+                    else -> Row(Modifier.padding(vertical = 24.dp)) { CircularProgressIndicator() }
+                }
+            } else {
+                Breadcrumb(
+                    crumbs = buildList {
+                        subjectId?.let {
+                            add(BreadcrumbCrumb(subjectLabel(catalog, it)) { viewModel.selectType(null) })
+                        }
+                        typeId?.let {
+                            add(BreadcrumbCrumb(typeLabel(catalog, subjectId, it)) { viewModel.selectBank(null) })
+                        }
+                    },
+                    onSelectRoot = { viewModel.selectSubject(null) }
+                )
 
-            when {
-                picker.subjectId == null ->
-                    SubjectLevel(viewModel, catalog)
+                when {
+                    subjectId == null ->
+                        // M-157：weight(1f, fill=false) 约束列表高度，避免占满整屏挤压下方按钮
+                        SubjectLevel(viewModel, catalog, Modifier.weight(1f, fill = false))
 
-                picker.typeId == null ->
-                    TypeLevel(viewModel, catalog, picker.subjectId!!)
+                    typeId == null ->
+                        TypeLevel(viewModel, catalog, subjectId, Modifier.weight(1f, fill = false))
 
-                picker.bankId == null ->
-                    BankLevel(viewModel, catalog, picker.subjectId!!, picker.typeId!!)
+                    bankId == null ->
+                        BankLevel(viewModel, catalog, subjectId, typeId, Modifier.weight(1f, fill = false))
 
-                picker.yearsLoading -> Row(Modifier.padding(24.dp)) { CircularProgressIndicator() }
+                    p.yearsLoading -> Row(Modifier.padding(24.dp)) { CircularProgressIndicator() }
 
-                yearsError != null ->
-                    Text(yearsError, color = MaterialTheme.colorScheme.error)
+                    yearsError != null ->
+                        Text(yearsError, color = MaterialTheme.colorScheme.error)
 
-                else -> YearLevel(viewModel, picker)
+                    else -> YearLevel(viewModel, p, Modifier.weight(1f, fill = false))
+                }
             }
 
             // EC-01：选定题库后可跳转专题/章节列表选题（修复原死路由）
-            if (picker.bankId != null) {
+            if (bankId != null) {
                 TextButton(
-                    onClick = { onOpenSectionList(picker.bankId!!) },
+                    onClick = { onOpenSectionList(bankId) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp)
@@ -93,7 +111,7 @@ fun BankPickerSheet(
                 }
             }
 
-            if (picker.year != null && picker.bankId != null) {
+            if (p.year != null && bankId != null) {
                 Button(
                     onClick = { viewModel.startPractice(onSessionReady) },
                     enabled = !picker.creating,
@@ -149,8 +167,13 @@ private fun Breadcrumb(crumbs: List<BreadcrumbCrumb>, onSelectRoot: () -> Unit) 
 }
 
 @Composable
-private fun SubjectLevel(viewModel: BankViewModel, catalog: CatalogDto) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+private fun SubjectLevel(
+    viewModel: BankViewModel,
+    catalog: CatalogDto,
+    modifier: Modifier = Modifier
+) {
+    // M-157：由调用方传入 weight/heightIn 约束，避免无高度约束占满 Sheet
+    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(catalog.subjects, key = { it.id }) { subject ->
             Row(
                 modifier = Modifier
@@ -166,9 +189,14 @@ private fun SubjectLevel(viewModel: BankViewModel, catalog: CatalogDto) {
 }
 
 @Composable
-private fun TypeLevel(viewModel: BankViewModel, catalog: CatalogDto, subjectId: String) {
+private fun TypeLevel(
+    viewModel: BankViewModel,
+    catalog: CatalogDto,
+    subjectId: String,
+    modifier: Modifier = Modifier
+) {
     val types = catalog.subjects.firstOrNull { it.id == subjectId }?.types ?: emptyList()
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(types, key = { it.id }) { type ->
             Row(
                 modifier = Modifier
@@ -188,11 +216,12 @@ private fun BankLevel(
     viewModel: BankViewModel,
     catalog: CatalogDto,
     subjectId: String,
-    typeId: String
+    typeId: String,
+    modifier: Modifier = Modifier
 ) {
     val banks: List<BankSummaryDto> =
         catalog.banksOf(subjectId, typeId).filter { it.enabled }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (banks.isEmpty()) {
             item { Text("该分类下暂无可用题库", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
@@ -211,10 +240,19 @@ private fun BankLevel(
 }
 
 @Composable
-private fun YearLevel(viewModel: BankViewModel, picker: PickerUiState) {
-    Column {
+private fun YearLevel(
+    viewModel: BankViewModel,
+    picker: PickerUiState,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
         Text("选择年份", style = MaterialTheme.typography.titleSmall)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyColumn(
+            // M-157：内部列表同样以 weight 约束高度，不挤压外部布局
+            modifier = Modifier.weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // M-158：年份已在 ViewModel 侧 distinct() 去重，key 唯一性成立
             items(picker.years, key = { it }) { year ->
                 FilterChip(
                     selected = picker.year == year,

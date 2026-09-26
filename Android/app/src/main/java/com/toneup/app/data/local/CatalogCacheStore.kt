@@ -1,6 +1,7 @@
 package com.toneup.app.data.local
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
@@ -58,7 +59,10 @@ class CatalogDataStoreManager @Inject constructor(
 
     override suspend fun read(): CatalogCachePayload? = try {
         val raw = context.catalogDataStore.data.first()[key] ?: return null
+        // M-7：缺时间戳（默认 0）或缺目录的载荷不视为有效缓存，
+        // 防止默认/零时间戳载荷以 epoch 时间戳命中缓存
         CatalogCachePayload.parseOrNull(raw)
+            ?.takeIf { it.cachedAtMillis > 0 && it.catalog != null }
     } catch (e: CancellationException) {
         // H-4：取消必须透传，吞掉会破坏结构化并发
         throw e
@@ -67,16 +71,32 @@ class CatalogDataStoreManager @Inject constructor(
     }
 
     override suspend fun write(payload: CatalogCachePayload) {
-        runCatching {
+        try {
             context.catalogDataStore.edit { prefs ->
                 prefs[key] = CatalogCachePayload.encode(payload)
             }
+        } catch (e: CancellationException) {
+            // M-8：取消必须透传（runCatching 会连 CancellationException 一起吞掉）
+            throw e
+        } catch (e: Exception) {
+            // M-8：持久化失败不再静默——留痕日志；读侧有新鲜度校验兜底，下次进目录仍会走网络刷新
+            Log.w(TAG, "persist catalog cache failed", e)
         }
     }
 
     override suspend fun clear() {
-        runCatching {
+        try {
             context.catalogDataStore.edit { it.remove(key) }
+        } catch (e: CancellationException) {
+            // M-9：取消必须透传
+            throw e
+        } catch (e: Exception) {
+            // M-9：登出清除失败必须留痕——失败意味着旧用户目录缓存可能残留给下一账号
+            Log.w(TAG, "clear catalog cache failed on logout", e)
         }
+    }
+
+    private companion object {
+        const val TAG = "CatalogCacheStore"
     }
 }

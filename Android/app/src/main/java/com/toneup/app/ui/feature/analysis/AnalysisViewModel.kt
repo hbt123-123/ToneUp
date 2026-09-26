@@ -22,6 +22,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -68,6 +69,11 @@ class AnalysisViewModel @Inject constructor(
     }
 
     fun load() {
+        // M-143：参数无效（缺失/不可解析回退 -1）时不发起加载，直接展示错误态
+        if (attemptId <= 0L) {
+            _state.value = _state.value.copy(attempt = Load.Failed("无效的练习记录"))
+            return
+        }
         viewModelScope.launch {
             _state.value = _state.value.copy(attempt = Load.Loading)
             try {
@@ -119,9 +125,8 @@ class AnalysisViewModel @Inject constructor(
     /** FR-AN-04 判分状态卡：queued/processing 轮询，指数退避 2s→5s 上限 60s */
     private fun startPollingIfPending() {
         val current = (_state.value.attempt as? Load.Ready)?.value ?: return
-        if (!current.isSubjectivePending && current.gradingStatus != AttemptResultDto.GRADING_FAILED) {
-            return
-        }
+        // M-144：仅"主观题待判分"时自动轮询；判分失败不自动重试，
+        // 由状态卡上的"重试查询/自评"入口显式触发（原 else 分支为死代码）
         if (current.isSubjectivePending) startPolling()
     }
 
@@ -136,7 +141,13 @@ class AnalysisViewModel @Inject constructor(
                         _state.value = _state.value.copy(pollTimedOut = true)
                         return@launch
                     }
-                    delay(PollBackoffPolicy.delayForAttempt(attemptIndex))
+                    // M-88 联动：带截止感知的延迟，睡醒后不越过总 deadline
+                    delay(
+                        PollBackoffPolicy.delayForAttempt(
+                            attemptIndex,
+                            System.currentTimeMillis() - startedAt
+                        )
+                    )
                     attemptIndex++
                     val latest = practiceRepository.fetchAttempt(attemptId)
                     applyResult(latest)
@@ -145,6 +156,9 @@ class AnalysisViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e // H-42：取消不得吞掉，保持结构化并发
             } catch (_: Exception) {
+                // M-145：先确认 job 未被取消，避免被 retryPolling 取消的旧 job
+                // 在收尾时把刚重置的 pollTimedOut 又改回 true
+                ensureActive()
                 _state.value = _state.value.copy(pollTimedOut = true)
             }
         }
@@ -206,9 +220,11 @@ class AnalysisViewModel @Inject constructor(
         val ready = (_state.value.attempt as? Load.Ready)?.value ?: return
         val bankId = ready.bankId ?: return
         val questionId = ready.questionId ?: return
+        // M-146：协程启动前捕获文本快照，保存期间用户继续编辑不影响本次提交内容
+        val textSnapshot = _state.value.noteText
         viewModelScope.launch {
             try {
-                notesRepository.saveNote(bankId, questionId, _state.value.noteText)
+                notesRepository.saveNote(bankId, questionId, textSnapshot)
                 _state.value = _state.value.copy(noteDirty = false, noteSavedAtHint = "已保存")
                 onSaved()
             } catch (e: AppException) {

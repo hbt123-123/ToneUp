@@ -34,9 +34,10 @@ data class NotesPage(
 
 @Serializable
 data class SharedNoteDto(
-    @SerialName("note_id") val noteId: Long,
-    @SerialName("note_text") val noteText: String,
-    @SerialName("user_id") val userId: Long,
+    // M-32：核心标识字段加保守默认值（空文本/0），载荷缺字段时不致反序列化崩溃
+    @SerialName("note_id") val noteId: Long = 0,
+    @SerialName("note_text") val noteText: String = "",
+    @SerialName("user_id") val userId: Long = 0,
     @SerialName("like_count") val likeCount: Int = 0,
     @SerialName("is_liked_by_me") val isLikedByMe: Boolean = false,
     val visibility: String = "public",

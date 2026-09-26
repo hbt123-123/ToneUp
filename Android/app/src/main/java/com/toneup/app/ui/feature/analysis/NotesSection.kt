@@ -30,6 +30,8 @@ fun NotesSection(
             OutlinedTextField(
                 value = noteText,
                 onValueChange = onChange,
+                // M-147：补充 label，占位符消失后字段仍有可见名称与无障碍语义
+                label = { Text("笔记内容") },
                 placeholder = { Text("记录这道题的思路、易错点…") },
                 minLines = 3,
                 modifier = Modifier.fillMaxWidth()

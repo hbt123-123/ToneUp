@@ -98,14 +98,16 @@ fun LoginScreen(
 
         OutlinedTextField(
             value = username,
-            onValueChange = { username = it.trim() },
+            // M-151：输入过程不做 trim（每键 trim 会吞空格并导致光标跳动），提交时再 trim
+            onValueChange = { username = it },
             label = { Text("用户名") },
             isError = usernameError != null,
             supportingText = {
                 if (usernameError != null) {
                     Text(usernameError, color = MaterialTheme.colorScheme.error)
                 } else if (registeredUsername != null &&
-                    username.isEmpty()
+                    // M-152：prefillUsername 会预先填入注册用户名，此时也要提示"注册成功"
+                    (username.isEmpty() || username == registeredUsername)
                 ) {
                     Text("注册成功，请登录", color = MaterialTheme.colorScheme.primary)
                 }
@@ -149,7 +151,8 @@ fun LoginScreen(
         Spacer(Modifier.height(24.dp))
 
         Button(
-            onClick = { viewModel.login(username, password) },
+            // M-151：提交时统一 trim
+            onClick = { viewModel.login(username.trim(), password) },
             enabled = canSubmit,
             modifier = Modifier.fillMaxWidth().height(48.dp)
         ) {
@@ -166,7 +169,12 @@ fun LoginScreen(
 
         when (val s = state) {
             is AuthViewModel.UiState.Failure ->
-                ErrorRetryCard(message = s.message, onRetry = { viewModel.login(username, password) })
+                ErrorRetryCard(
+                    message = s.message,
+                    // M-153：重试与登录按钮同入口，先过 canSubmit 校验（含 Loading 守卫），
+                    // 避免失败后编辑过的非法输入被直接重放提交
+                    onRetry = { if (canSubmit) viewModel.login(username.trim(), password) }
+                )
             else -> {}
         }
 

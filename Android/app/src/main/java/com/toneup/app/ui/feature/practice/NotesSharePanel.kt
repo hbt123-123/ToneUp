@@ -67,6 +67,59 @@ fun NotesSharePanel(
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("网友笔记", "我的笔记")
 
+    // M-180：网友笔记状态提升到面板级，切 tab 不再销毁组合导致已加载列表/状态丢失
+    var sharedNotes by remember { mutableStateOf<List<SharedNoteDto>>(emptyList()) }
+    var sharedLoading by remember { mutableStateOf(true) }
+    var sharedError by remember { mutableStateOf<String?>(null) }
+    // H-56：点赞/取消点赞失败走独立提示通道，不得顶掉加载错误分支
+    var sharedActionError by remember { mutableStateOf<String?>(null) }
+    // H-55：加载协程归 LaunchedEffect 所有——用 retryKey 触发重试，
+    // 组合销毁时请求随 effect 取消，不会在离开屏幕后回写状态
+    var sharedRetryKey by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+
+    // M-181：请求依赖 bankId，key 补齐 bankId，避免同题号跨题库时错用上一题库的结果
+    LaunchedEffect(questionId, bankId, sharedRetryKey) {
+        sharedLoading = true
+        sharedError = null
+        try {
+            val result = notesSharedApi.getNotes(questionId, bankId, scope = "public")
+            sharedNotes = result.data?.items ?: emptyList()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            sharedError = e.message ?: "加载失败"
+        } finally {
+            sharedLoading = false
+        }
+    }
+
+    // 点赞/取消点赞：成功后回写面板级列表（H-56 失败写独立通道）
+    fun toggleSharedNoteLike(note: SharedNoteDto) {
+        scope.launch {
+            try {
+                if (note.isLikedByMe) {
+                    notesSharedApi.unlikeNote(note.noteId)
+                } else {
+                    notesSharedApi.likeNote(note.noteId)
+                }
+                sharedNotes = sharedNotes.map {
+                    if (it.noteId == note.noteId) {
+                        it.copy(
+                            isLikedByMe = !it.isLikedByMe,
+                            likeCount = if (it.isLikedByMe) it.likeCount - 1 else it.likeCount + 1
+                        )
+                    } else it
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // H-56：写入独立通道，加载错误分支不受影响
+                sharedActionError = e.message ?: "操作失败"
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         // 标签页
         TabRow(selectedTabIndex = selectedTab) {
@@ -81,9 +134,12 @@ fun NotesSharePanel(
 
         when (selectedTab) {
             0 -> SharedNotesTab(
-                questionId = questionId,
-                bankId = bankId,
-                notesSharedApi = notesSharedApi
+                notes = sharedNotes,
+                loading = sharedLoading,
+                error = sharedError,
+                actionError = sharedActionError,
+                onRetry = { sharedRetryKey++ },
+                onLikeToggle = { toggleSharedNoteLike(it) }
             )
             1 -> MyNotesTab(
                 noteText = myNoteText,
@@ -97,35 +153,15 @@ fun NotesSharePanel(
 
 @Composable
 private fun SharedNotesTab(
-    questionId: Long,
-    bankId: String,
-    notesSharedApi: NotesSharedApi
+    notes: List<SharedNoteDto>,
+    loading: Boolean,
+    error: String?,
+    actionError: String?,
+    onRetry: () -> Unit,
+    onLikeToggle: (SharedNoteDto) -> Unit
 ) {
-    var notes by remember { mutableStateOf<List<SharedNoteDto>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf<String?>(null) }
-    // H-56：点赞/取消点赞失败走独立提示通道，不得顶掉加载错误分支
-    var actionError by remember { mutableStateOf<String?>(null) }
-    // H-55：加载协程归 LaunchedEffect 所有——用 retryKey 触发重试，
-    // 组合销毁时请求随 effect 取消，不会在离开屏幕后回写状态
-    var retryKey by remember { mutableStateOf(0) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(questionId, retryKey) {
-        loading = true
-        error = null
-        try {
-            val result = notesSharedApi.getNotes(questionId, bankId, scope = "public")
-            notes = result.data?.items ?: emptyList()
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            error = e.message ?: "加载失败"
-        } finally {
-            loading = false
-        }
-    }
-
+    // M-180/M-182：状态已提升至 NotesSharePanel（切 tab 不丢列表）；
+    // error 为函数参数可空安全 smart cast，无需 error!!
     when {
         loading -> {
             Box(
@@ -145,12 +181,12 @@ private fun SharedNotesTab(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = error!!,
+                    text = error,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
                 Spacer(Modifier.height(8.dp))
-                TextButton(onClick = { retryKey++ }) {
+                TextButton(onClick = onRetry) {
                     Text("重试")
                 }
             }
@@ -179,30 +215,7 @@ private fun SharedNotesTab(
                     items(notes, key = { it.noteId }) { note ->
                         SharedNoteItem(
                             note = note,
-                            onLikeToggle = {
-                                scope.launch {
-                                    try {
-                                        if (note.isLikedByMe) {
-                                            notesSharedApi.unlikeNote(note.noteId)
-                                        } else {
-                                            notesSharedApi.likeNote(note.noteId)
-                                        }
-                                        notes = notes.map {
-                                            if (it.noteId == note.noteId) {
-                                                it.copy(
-                                                    isLikedByMe = !it.isLikedByMe,
-                                                    likeCount = if (it.isLikedByMe) it.likeCount - 1 else it.likeCount + 1
-                                                )
-                                            } else it
-                                        }
-                                    } catch (e: kotlinx.coroutines.CancellationException) {
-                                        throw e
-                                    } catch (e: Exception) {
-                                        // H-56：写入独立通道，加载错误分支不受影响
-                                        actionError = e.message ?: "操作失败"
-                                    }
-                                }
-                            }
+                            onLikeToggle = { onLikeToggle(note) }
                         )
                     }
                 }
@@ -294,6 +307,12 @@ private fun MyNotesTab(
 ) {
     var editingText by remember { mutableStateOf(noteText) }
     var isEditing by remember { mutableStateOf(false) }
+
+    // M-183：noteText 外部刷新（加载完成/保存回传/清除）时同步编辑文本；
+    // 编辑中不覆盖用户正在输入的内容
+    LaunchedEffect(noteText) {
+        if (!isEditing) editingText = noteText
+    }
 
     Column(modifier = Modifier.padding(12.dp)) {
         // 可见性切换

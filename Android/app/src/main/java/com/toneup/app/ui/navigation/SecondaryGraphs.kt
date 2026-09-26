@@ -33,6 +33,10 @@ import javax.inject.Inject
 class RedoSessionHelper @Inject constructor(
     private val registry: PracticeSessionRegistry
 ) : ViewModel() {
+    // M-252：登记本 helper 上一次注册的会话 id，注册新会话前先移除旧会话，
+    // 避免单例 registry 随每次重做点击无界累积（同一页面停留期间至多保留一个会话）
+    private var lastRegisteredId: String? = null
+
     fun createSingleQuestionSession(
         bankId: String,
         questionId: Long,
@@ -40,6 +44,8 @@ class RedoSessionHelper @Inject constructor(
         onReady: (String) -> Unit
     ) {
         val sessionId = "redo_" + UUID.randomUUID().toString().take(8)
+        // M-252：旧会话的 practice 条目此时必然已被弹出（回到本页才会再次注册），移除安全
+        lastRegisteredId?.let(registry::remove)
         registry.register(
             PracticeSession(
                 sessionId = sessionId,
@@ -49,6 +55,7 @@ class RedoSessionHelper @Inject constructor(
                 fixedRefs = listOf(QuestionRef(bankId, questionId))
             )
         )
+        lastRegisteredId = sessionId
         onReady(sessionId)
     }
 }
@@ -59,6 +66,9 @@ class SectionListSessionHelper @Inject constructor(
     private val registry: PracticeSessionRegistry,
     private val sessionRepository: com.toneup.app.data.repository.SessionRepository
 ) : ViewModel() {
+    // M-252：同 RedoSessionHelper——注册新会话前移除本 helper 上一个会话，防单例 registry 累积
+    private var lastRegisteredId: String? = null
+
     /** 本地全量练习（离线兜底路径）：按年份/题型分页装载 */
     fun createLocalSectionSession(
         bankId: String,
@@ -68,6 +78,8 @@ class SectionListSessionHelper @Inject constructor(
         onReady: (String) -> Unit
     ) {
         val sessionId = "sec_" + UUID.randomUUID().toString().take(8)
+        // M-252：旧会话的 practice 条目此时必然已被弹出，移除安全
+        lastRegisteredId?.let(registry::remove)
         registry.register(
             PracticeSession(
                 sessionId = sessionId,
@@ -78,6 +90,7 @@ class SectionListSessionHelper @Inject constructor(
                 typeCodeFilter = typeCodeFilter
             )
         )
+        lastRegisteredId = sessionId
         onReady(sessionId)
     }
 
@@ -112,9 +125,18 @@ class SectionListSessionHelper @Inject constructor(
                     serverSessionId = sid
                 )
                 session.appendAll(resp.questions)
+                // M-252：服务端会话同样纳入本 helper 的移除管理
+                lastRegisteredId?.let(registry::remove)
                 registry.register(session)
+                lastRegisteredId = session.sessionId
                 onReady(session.sessionId, true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // M-253：显式重抛取消，避免作用域取消后仍执行 fallback/回调破坏结构化并发
+                throw e
             } catch (_: Exception) {
+                // M-254：TODO(M-254)：fallback 丢弃 collectionIds/count 约束——本地分页装载
+                // 路径尚不支持这两个约束的表达，需统一设计本地会话约束模型后透传（涉及
+                // PracticeSession/装载逻辑/既有测试语义），当前已有 Toast 降级提示兜底
                 createLocalSectionSession(bankId, year, typeCodeFilter, title) { localId ->
                     onReady(localId, false)
                 }
@@ -133,6 +155,12 @@ fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
         )
     ) { entry ->
         val sessionId = entry.arguments?.getString("sessionId") ?: ""
+        // M-255：sessionId 为必填参数，缺失/空串时不再静默以空串继续（会导致 PracticeScreen
+        // 取不到会话或后续路由构建异常），直接回退上一页
+        if (sessionId.isEmpty()) {
+            LaunchedEffect(Unit) { navController.popBackStack() }
+            return@composable
+        }
         PracticeScreen(
             initialIndex = entry.arguments?.getInt("index") ?: -1,
             onExit = { navController.popBackStack() },
@@ -153,8 +181,12 @@ fun NavGraphBuilder.addPracticeGraph(navController: NavHostController) {
         arguments = listOf(navArgument("sessionId") { type = NavType.StringType })
     ) { entry ->
         val sessionId = entry.arguments?.getString("sessionId") ?: ""
+        // M-255：空 sessionId 会使后续 Routes.practice(sessionId) 构建出无法匹配的路由，直接回退
+        if (sessionId.isEmpty()) {
+            LaunchedEffect(Unit) { navController.popBackStack() }
+            return@composable
+        }
         ReviewCheckScreen(
-            sessionId = sessionId,
             onBack = { navController.popBackStack() },
             onSelectQuestion = { index ->
                 navController.navigate(Routes.practice(sessionId, index = index)) {

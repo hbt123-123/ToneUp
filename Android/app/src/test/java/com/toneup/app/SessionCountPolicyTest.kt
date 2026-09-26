@@ -36,8 +36,9 @@ class SessionCountPolicyTest {
     }
 
     @Test
-    fun `zero available coerces upper bound to 1`() {
-        assertEquals(1, SessionCountPolicy.resolve("3", available = 0))
+    fun `zero available returns 0 per contract`() {
+        // M-93：available<=0 不得再强抬到 1（违反「不得超过 available」契约），返回 0
+        assertEquals(0, SessionCountPolicy.resolve("3", available = 0))
     }
 
     @Test

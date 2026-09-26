@@ -43,7 +43,8 @@ object CoroutineModule {
     @Singleton
     @ApplicationScope
     fun applicationScope(
-        @DefaultDispatcher dispatcher: CoroutineDispatcher
+        // M-74：现有消费方（目录后台刷新、DataStore 文件 IO）均为阻塞 I/O，改挂 IO 线程池，避免占满 Default 池
+        @IoDispatcher dispatcher: CoroutineDispatcher
     ): CoroutineScope = CoroutineScope(
         // H-24：根协程未捕获异常需兜底记录，避免直接崩进程
         SupervisorJob() + dispatcher + CoroutineExceptionHandler { _, e ->

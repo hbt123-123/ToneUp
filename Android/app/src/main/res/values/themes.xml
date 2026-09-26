@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  M-427：启动窗口深浅由系统配置决定（本文件=浅色，values-night/themes.xml=深色），
+  与 app 内 DarkModePolicy.SYSTEM（默认值）走 isSystemInDarkTheme() 的行为一致：
+  冷启动首帧（DataStore 偏好未送达前）app 内容也按系统深浅渲染，二者不冲突。
+  已知边界：用户显式选“浅色/深色”且与系统不一致时，冷启动首帧会有一次深浅切换，
+  属低概率场景；彻底消除需运行时读取偏好切换启动主题（主线程同步 IO + 新增非 night
+  限定主题），代价大于收益，故保持现状。
+-->
 <resources>
     <style name="Theme.ToneUp" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>

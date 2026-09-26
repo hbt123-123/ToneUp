@@ -13,8 +13,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.toneup.app.data.remote.dto.QuestionDto
-import com.toneup.app.domain.model.AnswerValue
 import com.toneup.app.ui.components.question.QuestionContext
 
 /** §6.4 未知题型降级卡：含原始 code、重试与跳过，绝不崩溃 */
@@ -35,10 +33,17 @@ fun FallbackRenderer(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { context.onRetryLoad?.invoke() }) {
+                // M-204：回调为 null（QuestionContext 默认）时按钮禁用，避免点击无响应
+                OutlinedButton(
+                    onClick = { context.onRetryLoad?.invoke() },
+                    enabled = context.onRetryLoad != null
+                ) {
                     Text("重试")
                 }
-                OutlinedButton(onClick = { context.onSkipQuestion?.invoke() }) {
+                OutlinedButton(
+                    onClick = { context.onSkipQuestion?.invoke() },
+                    enabled = context.onSkipQuestion != null
+                ) {
                     Text("跳过本题")
                 }
             }

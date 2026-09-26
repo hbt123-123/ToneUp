@@ -65,48 +65,60 @@ fun ClozeRenderer(context: QuestionContext) {
             )
         }
 
-        Text(
-            text = "共 $blankCount 空，当前第 ${focusedBlank.coerceAtLeast(0) + 1} 空",
-            style = MaterialTheme.typography.labelLarge
-        )
+        // M-199：解析不出空位时隐藏输入区（原先"共 0 空"计数 + 悬空输入行冗余且误导），仅显示降级提示
+        if (blankCount <= 0) {
+            Text(
+                text = "未解析到可填空位，可重试加载或反馈给开发者",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text(
+                text = "共 $blankCount 空，当前第 ${focusedBlank.coerceAtLeast(0) + 1} 空",
+                style = MaterialTheme.typography.labelLarge
+            )
 
-        OutlinedTextField(
-            value = blanks[focusedBlank] ?: "",
-            onValueChange = { text ->
-                context.onAnswerChange(
-                    AnswerValue.BlankLabels(blanks + (focusedBlank to text))
-                )
-            },
-            enabled = !context.readonly && !context.disabled,
-            singleLine = true,
-            label = { Text("第 ${focusedBlank + 1} 空") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { if (focusedBlank > 0) focusedBlank-- },
-                enabled = focusedBlank > 0 && !context.readonly
-            ) {
-                Text("上一空")
-            }
-            OutlinedButton(
-                onClick = { if (focusedBlank < blankCount - 1) focusedBlank++ },
-                enabled = focusedBlank < blankCount - 1 && !context.readonly
-            ) {
-                Text("下一空")
-            }
-            Spacer(Modifier.size(8.dp))
-            // 空序号快速定位
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                (0 until blankCount).take(MAX_BLANK_CHIPS).forEach { i ->
-                    FilterChip(
-                        selected = i == focusedBlank,
-                        onClick = { focusedBlank = i },
-                        label = {
-                            Text(if ((blanks[i] ?: "").isBlank()) "${i + 1}" else "✓${i + 1}")
-                        }
+            OutlinedTextField(
+                value = blanks[focusedBlank] ?: "",
+                onValueChange = { text ->
+                    context.onAnswerChange(
+                        AnswerValue.BlankLabels(blanks + (focusedBlank to text))
                     )
+                },
+                enabled = !context.readonly && !context.disabled,
+                singleLine = true,
+                label = { Text("第 ${focusedBlank + 1} 空") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // M-200：与上方输入框一致补上 disabled 门控，禁用态不再允许跳转空位
+                OutlinedButton(
+                    onClick = { if (focusedBlank > 0) focusedBlank-- },
+                    enabled = focusedBlank > 0 && !context.readonly && !context.disabled
+                ) {
+                    Text("上一空")
+                }
+                OutlinedButton(
+                    onClick = { if (focusedBlank < blankCount - 1) focusedBlank++ },
+                    enabled = focusedBlank < blankCount - 1 && !context.readonly && !context.disabled
+                ) {
+                    Text("下一空")
+                }
+                Spacer(Modifier.size(8.dp))
+                // 空序号快速定位
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    (0 until blankCount).take(MAX_BLANK_CHIPS).forEach { i ->
+                        FilterChip(
+                            selected = i == focusedBlank,
+                            onClick = { focusedBlank = i },
+                            // M-201：与输入框/按钮一致补 enabled 门控，只读/禁用时不可点击定位
+                            enabled = !context.readonly && !context.disabled,
+                            label = {
+                                Text(if ((blanks[i] ?: "").isBlank()) "${i + 1}" else "✓${i + 1}")
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -220,6 +232,10 @@ fun OrderingRenderer(context: QuestionContext) {
                         val swapped = mutable[existingIndex]
                         mutable[existingIndex] = mutable[slot]
                         mutable[slot] = swapped
+                    } else if (slot in mutable.indices) {
+                        // M-202：候选 id 不在当前顺序（持久化顺序不完整/数据不一致）时，
+                        // 落位到所选槽位而非静默忽略；被顶替项仍可从其他槽位下拉选回
+                        mutable[slot] = id
                     }
                     orderIds = mutable.toList()
                     context.onAnswerChange(AnswerValue.Order(orderIds))

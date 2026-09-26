@@ -41,7 +41,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.toneup.app.data.remote.dto.OptionDto
@@ -79,7 +78,7 @@ fun OptionCard(
             .clickable(enabled = enabled, role = if (multiSelectMode) Role.Checkbox else Role.RadioButton, onClick = onClick)
             .border(1.dp, borderColor, RoundedCornerShape(12.dp))
             .semantics {
-                role = if (multiSelectMode) Role.Checkbox else Role.RadioButton
+                // M-205：role 已由 clickable(role=...) 统一设置，此处重复设置属冗余，仅保留朗读描述
                 contentDescription = buildString {
                     append("选项 ${option.label}")
                     if (selected) append("，已选中")
@@ -222,15 +221,16 @@ fun LongAnswerEditor(
     )
 }
 
-@Composable
+// M-206：纯映射函数无需 @Composable（不组合任何内容），调用方不必处于组合上下文
 fun answerStateLabel(isCorrect: Boolean?): String = when (isCorrect) {
     true -> "回答正确"
     false -> "回答错误"
     null -> "待判分"
 }
 
-val CorrectColor: Color @Composable get() = CorrectGreen
-val WrongColor: Color @Composable get() = WrongRed
+// M-207：静态颜色别名改为普通常量，去掉 @Composable getter 的无谓重组参与
+val CorrectColor: Color = CorrectGreen
+val WrongColor: Color = WrongRed
 
 /** 提交后判分反馈条：绿底正确 / 红底错误，左右分栏显示我的答案与参考答案 */
 @Composable

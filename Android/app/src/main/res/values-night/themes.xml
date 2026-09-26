@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- M-427：与 values/themes.xml 成对，启动窗口按系统深浅选择，与 app 内默认
+     DarkModePolicy.SYSTEM（跟随系统）保持一致（完整设计说明见 values/themes.xml 注释） -->
 <resources>
     <style name="Theme.ToneUp" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>

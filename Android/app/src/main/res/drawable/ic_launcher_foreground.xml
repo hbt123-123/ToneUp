@@ -9,6 +9,8 @@
         android:pathData="M38,34 L70,34 L70,41 L58,41 L58,76 L50,76 L50,41 L38,41 Z" />
     <path
         android:fillColor="#7C3AED"
-        android:pathData="M66,60 m-9,0 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0"
+        android:pathData="M68,60 m-9,0 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0"
         android:strokeWidth="0" />
+    <!-- M-426：徽章圆心由 (66,60) 右移至 (68,60)：原圆最左点 x=57 会压到 T 字竖杆右缘
+         （x=50~58），现最左点 x=59，与竖杆留出间隙且仍位于右上徽章区域 -->
 </vector>

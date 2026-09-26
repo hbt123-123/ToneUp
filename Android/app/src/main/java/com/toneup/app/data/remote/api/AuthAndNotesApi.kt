@@ -28,6 +28,8 @@ interface NotesApi {
     @GET("api/questions/{question_id}/notes")
     suspend fun note(
         @Path("question_id") questionId: Long,
+        // M-26：后端 notes.py 此端点 bank_id 为必填 Query(...)，而 wrong_questions.py 的过滤参数可选，
+        // 两者契约本就不同，此处必填是正确对齐，勿改为可选（可选会触发后端 422）
         @Query("bank_id") bankId: String
     ): ApiEnvelope<NoteDto>
 
@@ -37,7 +39,12 @@ interface NotesApi {
         @Body body: NotePutRequest
     ): ApiEnvelope<NoteDto>
 
-    /** 临时聚合端点（自拟，待后端对齐） */
+    /**
+     * 临时聚合端点（自拟，待后端对齐）
+     * M-27：后端 notes.py 目前仅有 PUT/DELETE /api/notes/{note_id} 与点赞端点，
+     * 并不存在 GET /api/notes 列表端点，本方法调用会 404；Retrofit 路径错误只在运行时暴露，
+     * 后端补齐或下线本端点时必须同步修改此处路径
+     */
     @GET("api/notes")
     suspend fun myNotes(
         @Query("page") page: Int = 1,

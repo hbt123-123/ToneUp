@@ -12,10 +12,12 @@ import com.toneup.app.data.repository.AuthRepository
 import com.toneup.app.data.repository.NotesRepository
 import com.toneup.app.ui.common.Load
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -47,7 +49,8 @@ class MineViewModel @Inject constructor(
         loadNotes()
         viewModelScope.launch {
             prefsStore.preferences.collect { prefs ->
-                _state.value = _state.value.copy(preferences = prefs)
+                // M-168：非原子读改写改为 update{} 原子更新（多协程并发写 _state）
+                _state.update { it.copy(preferences = prefs) }
             }
         }
     }
@@ -56,11 +59,14 @@ class MineViewModel @Inject constructor(
     fun loadUser() {
         viewModelScope.launch {
             try {
-                _state.value = _state.value.copy(user = Load.Ready(authRepository.me()))
+                val me = authRepository.me()
+                _state.update { it.copy(user = Load.Ready(me)) }
             } catch (e: AppException) {
-                _state.value = _state.value.copy(user = Load.Failed(e.userMessage))
+                _state.update { it.copy(user = Load.Failed(e.userMessage)) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
-                _state.value = _state.value.copy(user = Load.Failed("加载失败"))
+                _state.update { it.copy(user = Load.Failed("加载失败")) }
             }
         }
     }
@@ -70,39 +76,59 @@ class MineViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val page = notesRepository.myNotes(page = 1, pageSize = 50)
-                _state.value = _state.value.copy(notes = Load.Ready(page.items))
+                _state.update { it.copy(notes = Load.Ready(page.items)) }
             } catch (e: AppException) {
-                _state.value = _state.value.copy(notes = Load.Failed(e.userMessage))
+                // M-169：与通用异常分支统一口径——已有 Ready 列表时不覆盖为失败态
+                _state.update { s ->
+                    if (s.notes is Load.Ready) s else s.copy(notes = Load.Failed(e.userMessage))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _state.update { s ->
+                    if (s.notes is Load.Ready) s else s.copy(notes = Load.Failed("加载失败"))
+                }
+            }
+        }
+    }
+
+    // M-170：偏好写入包异常处理——取消异常必须重抛，IO 等失败留痕不再静默
+    private fun launchPrefsWrite(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                if (_state.value.notes is Load.Ready) return@launch
-                _state.value = _state.value.copy(notes = Load.Failed("加载失败"))
+                Log.e(TAG, "preferences write failed", e)
             }
         }
     }
 
     fun setAnimationsEnabled(enabled: Boolean) {
-        viewModelScope.launch { prefsStore.setAnimationsEnabled(enabled) }
+        launchPrefsWrite { prefsStore.setAnimationsEnabled(enabled) }
     }
 
     fun setHapticsEnabled(enabled: Boolean) {
-        viewModelScope.launch { prefsStore.setHapticsEnabled(enabled) }
+        launchPrefsWrite { prefsStore.setHapticsEnabled(enabled) }
     }
 
     fun setDarkModePolicy(policy: com.toneup.app.ui.theme.DarkModePolicy) {
-        viewModelScope.launch { prefsStore.setDarkModePolicy(policy) }
+        launchPrefsWrite { prefsStore.setDarkModePolicy(policy) }
     }
 
     /** FR-ME-04 退出登录：二次确认后清令牌/缓存/草稿/队列 */
     fun logout() {
         if (_state.value.logoutBusy) return
-        _state.value = _state.value.copy(logoutBusy = true)
+        // M-168：logoutBusy 的置位/复位同样走 update{} 原子更新
+        _state.update { it.copy(logoutBusy = true) }
         viewModelScope.launch {
             // H-51：Repository 内部已容错，本地清理若仍失败必须打点可见，
             // 不得静默丢弃后照常宣告登出成功
             runCatching { authRepository.logout() }
                 .onFailure { Log.e(TAG, "logout local cleanup failed", it) }
             sessionManager.clearSession()
-            _state.value = _state.value.copy(logoutBusy = false)
+            _state.update { it.copy(logoutBusy = false) }
             // H-50：一次性事件替代 sticky 的 loggedOut 标志，避免组合重建后重复导航
             _logoutEvent.tryEmit(Unit)
         }

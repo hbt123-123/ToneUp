@@ -19,7 +19,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.toneup.app.domain.logic.MarkdownSanitizer
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 公式混排文本（需求 §7.2 主案）：
@@ -36,7 +35,8 @@ fun FormulaText(
     var heightPx by remember(text) { mutableIntStateOf(-1) }
     var failed by remember(text) { mutableStateOf(false) }
     var pooledRef by remember { mutableStateOf<PooledWebView?>(null) }
-    val consecutiveFailures = remember { AtomicInteger(0) }
+    // M-120：AtomicInteger 非 Compose 快照状态，重组读不到其变化导致失败提示不刷新；改用 mutableIntStateOf
+    var consecutiveFailures by remember { mutableIntStateOf(0) }
 
     // 仅以生效配色判定深浅色：用户强制浅色而系统深色时，WebView 不应按深色渲染
     val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -47,9 +47,11 @@ fun FormulaText(
     }
     var lastRendered by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
 
-    if (forceRawText || failed) {
+    // M-121：池未初始化（预览或 Application 极早期组合）时降级为原文渲染，不再 require() 抛异常
+    val pool = FormulaWebViewPoolHolder.getOrNull()
+    if (forceRawText || failed || pool == null) {
         Text(text = text, style = MaterialTheme.typography.bodyLarge, modifier = modifier)
-        if (consecutiveFailures.get() >= FAILURE_THRESHOLD) {
+        if (consecutiveFailures >= FAILURE_THRESHOLD) {
             Text(
                 text = "公式多次渲染失败，如持续出现请在“我的”中反馈该题内容",
                 style = MaterialTheme.typography.labelSmall,
@@ -62,7 +64,6 @@ fun FormulaText(
     Box(modifier.fillMaxWidth()) {
         AndroidView(
             factory = { ctx ->
-                val pool = FormulaWebViewPoolHolder.require()
                 val pooled = pool.acquire()
                 pooledRef = pooled
                 (pooled.webView.parent as? ViewGroup)?.removeView(pooled.webView)
@@ -80,7 +81,7 @@ fun FormulaText(
                     // 导致 text 变更后高度/失败更新丢失
                     pooled.heightListener = { h ->
                         if (h > 0) {
-                            consecutiveFailures.set(0)
+                            consecutiveFailures = 0
                             heightPx = h
                         }
                     }
@@ -88,7 +89,7 @@ fun FormulaText(
                         onRenderEvent?.invoke(FormulaRenderEvent.Success)
                     }
                     pooled.failureListener = {
-                        consecutiveFailures.incrementAndGet()
+                        consecutiveFailures += 1
                         failed = true
                         onRenderEvent?.invoke(FormulaRenderEvent.Failure)
                     }

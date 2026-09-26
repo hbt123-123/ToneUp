@@ -27,7 +27,8 @@ object ReciteMode {
         recite: Boolean
     ): Derived = Derived(
         readonly = submitted || recite,
-        disabled = submitting || recite,
+        // M-92：disabled 与 readonly 对齐纳入 submitted，两个只读标志对「已提交」的判定保持一致
+        disabled = submitting || submitted || recite,
         // 背题时全部题型亮答案；普通模式仅提交态的客观题亮答案（现状保持）
         showAnswer = (submitted && objectiveType) || recite,
         showAnalysis = submitted || recite

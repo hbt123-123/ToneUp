@@ -30,6 +30,7 @@ import androidx.lifecycle.viewModelScope
 import com.toneup.app.data.repository.AppException
 import com.toneup.app.data.repository.NotesRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -54,20 +55,34 @@ class NoteEditorViewModel @Inject constructor(
     val questionId: Long = savedStateHandle.get<Long>("questionId") ?: -1L
     val bankId: String = savedStateHandle.get<String>("bankId") ?: ""
 
+    // M-171：无效路由参数（缺 questionId/bankId）不再静默默认后照常请求，
+    // 标记非法参数态：加载与保存全部短路并显示错误
+    val hasValidArgs: Boolean = questionId > 0L && bankId.isNotBlank()
+
+    // M-173：保存 in-flight 守卫，防连点并发 PUT 与状态竞写
+    private var saving = false
+
     private val _state = MutableStateFlow(NoteEditorUiState())
     val state: StateFlow<NoteEditorUiState> = _state
 
     init {
-        viewModelScope.launch {
-            try {
-                val note = notesRepository.note(bankId, questionId)
-                _state.value = _state.value.copy(
-                    loaded = true,
-                    // H-52：请求在飞期间用户已输入（dirty）时不得覆盖其内容
-                    noteText = if (_state.value.dirty) _state.value.noteText else (note?.noteText ?: "")
-                )
-            } catch (e: Exception) {
-                _state.value = _state.value.copy(loaded = true, error = (e as? AppException)?.userMessage ?: "笔记加载失败")
+        if (!hasValidArgs) {
+            _state.value = _state.value.copy(loaded = true, error = "笔记参数无效")
+        } else {
+            viewModelScope.launch {
+                try {
+                    val note = notesRepository.note(bankId, questionId)
+                    _state.value = _state.value.copy(
+                        loaded = true,
+                        // H-52：请求在飞期间用户已输入（dirty）时不得覆盖其内容
+                        noteText = if (_state.value.dirty) _state.value.noteText else (note?.noteText ?: "")
+                    )
+                } catch (e: CancellationException) {
+                    // M-172：不再吞掉取消异常，交给协程正常取消
+                    throw e
+                } catch (e: Exception) {
+                    _state.value = _state.value.copy(loaded = true, error = (e as? AppException)?.userMessage ?: "笔记加载失败")
+                }
             }
         }
     }
@@ -77,15 +92,27 @@ class NoteEditorViewModel @Inject constructor(
     }
 
     fun save(onSaved: () -> Unit) {
+        // M-171：参数非法时直接错误态返回，不调用 saveNote()
+        if (!hasValidArgs) {
+            _state.value = _state.value.copy(error = "笔记参数无效")
+            return
+        }
+        // M-173：已有保存在飞则忽略本次点击
+        if (saving) return
+        saving = true
         viewModelScope.launch {
             try {
                 notesRepository.saveNote(bankId, questionId, _state.value.noteText)
                 _state.value = _state.value.copy(dirty = false, hint = "已保存", error = null)
                 onSaved()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: AppException) {
                 _state.value = _state.value.copy(error = e.userMessage)
             } catch (_: Exception) {
                 _state.value = _state.value.copy(error = "保存失败")
+            } finally {
+                saving = false
             }
         }
     }

@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -61,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -131,7 +133,15 @@ fun PracticeScreen(
         }
     }
 
-    val slot = state.slots.getOrNull(state.currentIndex) ?: return
+    // M-186：当前题槽尚未装载（会话初始化/分页装载中）时给出加载占位反馈，
+    // 而非裸 return 隐藏整屏（顶栏/底栏/横幅全部消失且无任何提示）
+    val slot = state.slots.getOrNull(state.currentIndex)
+    if (slot == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
 
     Column(Modifier.fillMaxSize()) {
         // ===== 新顶栏 =====
@@ -298,7 +308,12 @@ fun PracticeScreen(
 
     // ===== 交卷确认对话框 =====
     if (showSubmitDialog) {
-        val stats = viewModel.submitPaperStats()
+        // M-187：stats 不再在组合期直调 submitPaperStats（原每次重组都重复扫描
+        // 全部题槽），改由 LaunchedEffect 在对话框打开时计算一次缓存
+        var paperStats by remember(showSubmitDialog) { mutableStateOf<PaperStats?>(null) }
+        LaunchedEffect(showSubmitDialog) {
+            paperStats = viewModel.submitPaperStats()
+        }
         val submitState by viewModel.sessionSubmitState.collectAsStateWithLifecycle()
         val context = androidx.compose.ui.platform.LocalContext.current
         LaunchedEffect(submitState) {
@@ -316,16 +331,19 @@ fun PracticeScreen(
                 else -> {}
             }
         }
-        SubmitConfirmDialog(
-            stats = stats,
-            submitting = submitState is com.toneup.app.ui.feature.practice.SessionSubmitState.Submitting,
-            onConfirm = { viewModel.submitSession() },
-            onDismiss = {
-                if (submitState !is com.toneup.app.ui.feature.practice.SessionSubmitState.Submitting) {
-                    showSubmitDialog = false
+        val stats = paperStats
+        if (stats != null) {
+            SubmitConfirmDialog(
+                stats = stats,
+                submitting = submitState is com.toneup.app.ui.feature.practice.SessionSubmitState.Submitting,
+                onConfirm = { viewModel.submitSession() },
+                onDismiss = {
+                    if (submitState !is com.toneup.app.ui.feature.practice.SessionSubmitState.Submitting) {
+                        showSubmitDialog = false
+                    }
                 }
-            }
-        )
+            )
+        }
     }
 }
 
@@ -576,8 +594,11 @@ private fun SubmitConfirmDialog(
         title = { Text("确认交卷") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // M-192：总数未知（unansweredCount=-1 哨兵）时显示 "?"，不把已装载部分当全量
                 Text(
-                    text = "已答 ${stats.answeredCount} / 未答 ${stats.unansweredCount} / 标记 ${stats.markedCount}",
+                    text = "已答 ${stats.answeredCount} / 未答 " +
+                        (if (stats.unansweredCount >= 0) stats.unansweredCount.toString() else "?") +
+                        " / 标记 ${stats.markedCount}",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 if (stats.unansweredCount > 0) {
@@ -716,7 +737,9 @@ fun QuestionBody(
                             )
                         }
                         if (isCorrect == false && featureApis != null) {
-                            var removed by remember { mutableStateOf(false) }
+                            // M-188：加 questionId/index key，随题切换重置，
+                            // 避免 QuestionBody 复用同一组合槽时残留上一题的移除/撤销状态
+                            var removed by remember(question.questionId, index) { mutableStateOf(false) }
                             Spacer(Modifier.height(8.dp))
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1131,8 +1154,13 @@ fun BoxWithEdgeSwipe(
     val density = LocalDensity.current
     val edgeBandPx = with(density) { EDGE_BAND_DP.dp.toPx() }
     var containerWidth by remember { mutableStateOf(0f) }
-    var startX by remember { mutableStateOf(0f) }
     var hasFired by remember { mutableStateOf(false) }
+    // M-190：拖动起点是否落在边缘带内，仅带内拖动才消费手势
+    var startInEdgeBand by remember { mutableStateOf(false) }
+    // M-189：始终捕获最新回调——pointerInput 仅以 enabled 为 key，
+    // 手势协程重启前组合层传入的新 lambda 旧实现拿不到
+    val currentOnSwipeLeft by rememberUpdatedState(onSwipeLeft)
+    val currentOnSwipeRight by rememberUpdatedState(onSwipeRight)
 
     Box(
         modifier
@@ -1140,17 +1168,17 @@ fun BoxWithEdgeSwipe(
             .pointerInput(enabled) {
                 detectHorizontalDragGestures(
                     onDragStart = { offset ->
-                        startX = offset.x
                         hasFired = false
+                        // M-190：起点在边缘带内才标记消费，避免吞掉内部横向滚动/文本选择手势
+                        startInEdgeBand = offset.x <= edgeBandPx ||
+                            offset.x >= containerWidth - edgeBandPx
                     },
                     onHorizontalDrag = { change, amount ->
-                        change.consume()
-                        if (enabled && !hasFired && amount != 0f) {
-                            val isLeftEdge = startX <= edgeBandPx
-                            val isRightEdge = startX >= containerWidth - edgeBandPx
-                            if (isLeftEdge || isRightEdge) {
+                        if (startInEdgeBand) {
+                            change.consume()
+                            if (enabled && !hasFired && amount != 0f) {
                                 hasFired = true
-                                if (amount < 0) onSwipeLeft() else onSwipeRight()
+                                if (amount < 0) currentOnSwipeLeft() else currentOnSwipeRight()
                             }
                         }
                     }

@@ -22,6 +22,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+// M-216：新增 remember 用于组合期缓存派生状态；getValue 为下方 `by collectAsStateWithLifecycle()` 委托所需
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -44,9 +47,12 @@ fun SummaryScreen(
     // EC-01：服务端会话拉取服务端 summary 覆盖本地估算
     val serverSummary by viewModel.serverSummary.collectAsStateWithLifecycle()
     androidx.compose.runtime.LaunchedEffect(serverSessionId) {
+        // M-215：serverSessionId 变化或为空时先清空旧服务端 summary，避免旧会话数据继续覆盖本地结果
+        viewModel.clearServerSummary()
         serverSessionId?.let { viewModel.loadServerResult(it) }
     }
-    val localState = viewModel.buildState(stats, totalTime)
+    // M-216：remember 按 (stats, totalTime) 缓存派生结果，避免每次重组重复分配 SummaryUiState 与格式化
+    val localState = remember(stats, totalTime) { viewModel.buildState(stats, totalTime) }
     val uiState = serverSummary ?: localState
 
     Scaffold(
@@ -94,7 +100,8 @@ fun SummaryScreen(
                     )
                     StatRow(label = "用时", value = uiState.formattedTime)
                     StatRow(
-                        label = "错题数",
+                        // M-217：服务端口径 wrongCount = 已答 − 正确（含主观题未判分），与本地逐题判错口径不同，标签予以区分
+                        label = if (uiState.serverBacked) "答错/未判分" else "错题数",
                         value = "${uiState.wrongCount}",
                         valueColor = if (uiState.wrongCount > 0) {
                             MaterialTheme.colorScheme.error

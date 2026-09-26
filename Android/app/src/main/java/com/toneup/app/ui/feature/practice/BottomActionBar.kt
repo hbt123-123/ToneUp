@@ -61,6 +61,16 @@ fun BottomActionBar(
 
         Column(Modifier.weight(1f)) {
             when {
+                // M-174：网络错误分支须先于 attemptId 判断——提交失败（含重试得到
+                // 新 attemptId 的场景）时用户首先需要的是"重试提交"入口，
+                // 原顺序会让带旧 attemptId 的失败题直接跳到"查看解析"
+                isNetworkError -> Button(
+                    onClick = onRetrySubmit,
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("重试提交")
+                }
+
                 attemptId != null -> {
                     Button(
                         onClick = { onOpenAnalysis(attemptId) },
@@ -77,13 +87,6 @@ fun BottomActionBar(
                     ) {
                         Text("下一题")
                     }
-                }
-
-                isNetworkError -> Button(
-                    onClick = onRetrySubmit,
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text("重试提交")
                 }
 
                 else -> Button(

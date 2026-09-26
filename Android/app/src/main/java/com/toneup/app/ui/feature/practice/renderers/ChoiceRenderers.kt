@@ -36,7 +36,9 @@ fun SingleRenderer(context: QuestionContext) {
             OptionCard(
                 option = option,
                 selected = selectedLabel == option.label,
-                correct = if (context.showAnswer) {
+                // M-196：correctLabel 解析失败（answerText 空或畸形）时为 null，原 when 永远匹配不到
+                // "正确"分支——此时全部选项不标对错，用户选中项保持普通高亮，避免误导
+                correct = if (context.showAnswer && correctLabel != null) {
                     when (option.label) {
                         correctLabel -> true
                         selectedLabel -> false
@@ -77,7 +79,16 @@ fun MultiRenderer(context: QuestionContext) {
             OptionCard(
                 option = option,
                 selected = option.label in selected,
-                correct = if (context.showAnswer && option.label in correctLabels) true else null,
+                // M-197：补齐"选中但不在正确集合"→ false 的分支，提交后错选项与单选/判断一致标红
+                correct = if (context.showAnswer) {
+                    when {
+                        option.label in correctLabels -> true
+                        option.label in selected -> false
+                        else -> null
+                    }
+                } else {
+                    null
+                },
                 enabled = !context.readonly && !context.disabled,
                 onClick = {
                     val next = if (option.label in selected) {
@@ -126,7 +137,14 @@ fun JudgeRenderer(context: QuestionContext) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         judgeOptions.forEach { option ->
             OptionCard(
-                option = option.copy(text = option.text.ifBlank { if (option.label == "A") "正确" else "错误" }),
+                // M-198：text 空时不再按 label=="A" 硬编码判定语义（非 A/B 标签、乱序或多于
+                // 两个选项时会全部误标"错误"）；作答态显示 label 本身不猜测判定语义，
+                // 仅 showAnswer 时用实际正确答案比较标注，避免作答中泄露正确选项
+                option = option.copy(
+                    text = option.text.ifBlank {
+                        if (context.showAnswer && option.label == correctLabel) "正确" else option.label
+                    }
+                ),
                 selected = selectedLabel == option.label,
                 correct = if (context.showAnswer) {
                     when (option.label) {

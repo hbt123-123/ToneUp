@@ -33,6 +33,11 @@ class SummaryViewModel @Inject constructor(
     private val _serverSummary = MutableStateFlow<SummaryUiState?>(null)
     val serverSummary: StateFlow<SummaryUiState?> = _serverSummary
 
+    /** M-218：会话变化或重新进入小结页时清空旧服务端 summary，避免只写不清导致残留数据覆盖新会话 */
+    fun clearServerSummary() {
+        _serverSummary.value = null
+    }
+
     fun buildState(stats: PaperStats, elapsedSeconds: Int): SummaryUiState {
         val rate = if (stats.answeredCount > 0) {
             ((stats.answeredCount - stats.wrongCount) * 100) / stats.answeredCount
@@ -76,9 +81,11 @@ class SummaryViewModel @Inject constructor(
     }
 
     private fun formatTime(seconds: Int): String {
-        val h = seconds / 3600
-        val m = (seconds % 3600) / 60
-        val s = seconds % 60
+        // M-219：负值（如服务端时钟偏差）钳 0，超大值封顶 99:59:59，避免畸形时长展示
+        val safe = seconds.coerceAtLeast(0).coerceAtMost(99 * 3600 + 59 * 60 + 59)
+        val h = safe / 3600
+        val m = (safe % 3600) / 60
+        val s = safe % 60
         return "%02d:%02d:%02d".format(h, m, s)
     }
 }

@@ -78,7 +78,8 @@ internal fun TopicProgressItem.fraction(): Float =
 @Composable
 fun AttemptTrendChart(points: List<DailyTrendPoint>, modifier: Modifier = Modifier) {
     if (points.isEmpty()) {
-        EmptyState("暂无作答数据")
+        // M-112：空态需转发调用方 modifier，否则占位与图表占用的尺寸/位置不一致
+        EmptyState("暂无作答数据", modifier = modifier)
         return
     }
     val barColor = MaterialTheme.colorScheme.primary
@@ -86,7 +87,8 @@ fun AttemptTrendChart(points: List<DailyTrendPoint>, modifier: Modifier = Modifi
     val fractions = barFractions(points)
     Canvas(modifier.fillMaxWidth().height(96.dp)) {
         val n = points.size
-        val gap = 4.dp.toPx()
+        // M-113：点数过多时按可用宽度收窄间距，保证 barW 恒为正，避免向 drawRoundRect 传入负尺寸
+        val gap = minOf(4.dp.toPx(), size.width / (2 * n))
         val barW = (size.width - gap * (n - 1)) / n
         fractions.forEachIndexed { i, f ->
             val x = i * (barW + gap)
@@ -113,16 +115,23 @@ fun AttemptTrendChart(points: List<DailyTrendPoint>, modifier: Modifier = Modifi
 @Composable
 fun AccuracyTrendChart(points: List<DailyTrendPoint>, modifier: Modifier = Modifier) {
     if (points.isEmpty()) {
-        EmptyState("暂无正确率数据")
+        // M-114：空态需转发调用方 modifier，与 AttemptTrendChart 同因
+        EmptyState("暂无正确率数据", modifier = modifier)
         return
     }
     val lineColor = MaterialTheme.colorScheme.tertiary
     Canvas(modifier.fillMaxWidth().height(96.dp)) {
         val n = points.size
-        val stepX = if (n > 1) size.width / (n - 1) else size.width
+        // M-115：单点时 Path 只有 moveTo、描边为空，唯一数据点会丢失——改绘圆点标记
+        if (n == 1) {
+            val y = size.height * (1f - points.first().correctRate.toFloat().coerceIn(0f, 1f))
+            drawCircle(color = lineColor, radius = 6f, center = Offset(size.width / 2f, y))
+            return@Canvas
+        }
+        val stepX = size.width / (n - 1)
         val path = Path()
         points.forEachIndexed { i, p ->
-            val x = if (n > 1) i * stepX else size.width / 2
+            val x = i * stepX
             val y = size.height * (1f - p.correctRate.toFloat().coerceIn(0f, 1f))
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
@@ -134,7 +143,8 @@ fun AccuracyTrendChart(points: List<DailyTrendPoint>, modifier: Modifier = Modif
 @Composable
 fun TopicProgressList(items: List<TopicProgressItem>, modifier: Modifier = Modifier) {
     if (items.isEmpty()) {
-        EmptyState("暂无专题进度")
+        // M-116：空态需转发调用方 modifier，与另两个图表同因
+        EmptyState("暂无专题进度", modifier = modifier)
         return
     }
     val barColor = MaterialTheme.colorScheme.primary

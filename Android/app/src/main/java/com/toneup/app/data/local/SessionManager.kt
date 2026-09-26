@@ -1,5 +1,6 @@
 package com.toneup.app.data.local
 
+import android.util.Log
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -28,13 +29,20 @@ class SessionManager @Inject constructor(
     private val _user = MutableStateFlow<SessionUser?>(null)
     val user: StateFlow<SessionUser?> = _user
 
-    private val _unauthorizedEvents = MutableSharedFlow<UnauthorizedEvent>(extraBufferCapacity = 1)
+    // M-19：强制登出信号必须可靠——replay=1 保证事件在订阅前发射也能送达消费方
+    // （如冷启动早期 401），extraBufferCapacity 提升到 4 为并发多条 401 提供缓冲；
+    // 消费方语义是"跳转登录页"（launchSingleTop 幂等），重复消费无副作用
+    private val _unauthorizedEvents =
+        MutableSharedFlow<UnauthorizedEvent>(replay = 1, extraBufferCapacity = 4)
     val unauthorizedEvents: SharedFlow<UnauthorizedEvent> = _unauthorizedEvents
 
     /** 触发 401 时正在访问的路由，用于登录后恢复原位 */
     @Volatile
     var pendingRestoreRoute: String? = null
         private set
+
+    // M-20：路由的写入与一次性取走共用此锁，消除读-改-写与 401 写入的交错竞态
+    private val restoreRouteLock = Any()
 
     // H-10：update 原子完成 miss 时落盘镜像回填，消除"读后写"与 clearSession 的交错竞态
     fun cachedToken(): String? = _token.update { current -> current ?: tokenStore.token() }
@@ -61,22 +69,36 @@ class SessionManager @Inject constructor(
     /** 收到 401：清会话并发出事件；[currentRoute] 供登录后恢复 */
     suspend fun onUnauthorized(currentRoute: String?) {
         clearSession()
-        pendingRestoreRoute = currentRoute
+        synchronized(restoreRouteLock) {
+            // M-20：写入纳入与 consumeRestoreRoute 相同的锁
+            pendingRestoreRoute = currentRoute
+        }
         _unauthorizedEvents.emit(UnauthorizedEvent(restoreRoute = currentRoute))
     }
 
-    /** 登录成功后取走恢复路由（一次性） */
-    fun consumeRestoreRoute(): String? {
+    /** 登录成功后取走恢复路由（一次性，读-清原子） */
+    fun consumeRestoreRoute(): String? = synchronized(restoreRouteLock) {
         val route = pendingRestoreRoute
         pendingRestoreRoute = null
-        return route
+        route
     }
 
     fun clearSession() {
-        tokenStore.clear()
+        // M-21：先清内存镜像再清落盘令牌——即使 tokenStore.clear() 抛异常，
+        // 内存中的可用凭据也已被清除，不会残留
         _token.value = null
         _user.value = null
+        try {
+            tokenStore.clear()
+        } catch (e: Exception) {
+            // M-21：磁盘清除失败留痕（内存已失效，进程内无凭据残留风险）
+            Log.w(TAG, "clear persisted token failed", e)
+        }
     }
 
     data class UnauthorizedEvent(val restoreRoute: String?)
+
+    private companion object {
+        const val TAG = "SessionManager"
+    }
 }

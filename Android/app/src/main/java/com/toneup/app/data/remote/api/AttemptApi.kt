@@ -21,6 +21,7 @@ interface AttemptApi {
     suspend fun attempt(@Path("attempt_id") attemptId: Long): ApiEnvelope<AttemptResultDto>
 }
 
+// TODO(M-25)：AiFeedbackApi 与文件名 AttemptApi.kt 不符，应按"一文件一公共类型"约定拆分至独立的 AiFeedbackApi.kt（涉及 Hilt 注入与 import 调整的重型重构，延后）
 interface AiFeedbackApi {
     @Multipart
     @POST("api/ai/feedback")

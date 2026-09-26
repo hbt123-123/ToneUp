@@ -20,6 +20,8 @@ data class WeaknessItemDto(
     val dimension: String = "type",
     @SerialName("subject_id") val subjectId: String? = null,
     /** 展示键：dimension=type 时为题型码，dimension=tag 时为知识点名 */
+    // M-50：后端把题型码与标签名都编码在单一 key 字段，刻意维持单字段按 dimension 分流展示，
+    // 不增设 typeCode/tag 两个重复映射字段，避免同名异义键的二次错配
     val key: String = "",
     val attempts: Int = 0,
     val accuracy: Double = 0.0,

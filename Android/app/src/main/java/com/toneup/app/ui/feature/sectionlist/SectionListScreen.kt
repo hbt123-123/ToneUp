@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -87,11 +87,13 @@ fun SectionListScreen(
             // 主体内容
             when {
                 state.isLoading -> {
-                    ShimmerSectionList()
+                    // M-226：占位列表与主列表同样以 weight(1f) 约束，避免无界高度铺满挤压底部筛选行
+                    ShimmerSectionList(modifier = Modifier.weight(1f))
                 }
                 state.error != null && state.filteredSections.isEmpty() -> {
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        // M-226：错误态占位以 weight(1f) 约束高度，避免无界高度破坏 Column 布局
+                        modifier = Modifier.weight(1f).fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -109,7 +111,8 @@ fun SectionListScreen(
                 }
                 state.filteredSections.isEmpty() -> {
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        // M-226：空态占位同样以 weight(1f) 约束高度
+                        modifier = Modifier.weight(1f).fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -129,7 +132,10 @@ fun SectionListScreen(
                             vertical = 12.dp
                         )
                     ) {
-                        items(state.filteredSections, key = { sectionKey(it) }) { section ->
+                        // M-229：hashCode 作 key 跨重组/重载不稳定，改用 year/title 优先、index 兜底的稳定组合
+                        itemsIndexed(state.filteredSections, key = { index, section ->
+                            sectionKey(section, index)
+                        }) { _, section ->
                             SectionCard(
                                 section = section,
                                 onContinue = {
@@ -165,9 +171,14 @@ fun SectionListScreen(
     if (showSelectDialog && dialogSection != null) {
         SelectQuestionDialog(
             section = dialogSection,
-            onDismiss = { showSelectDialog = false },
+            // M-227：关闭弹窗时同步清空 selectedSection，避免残留旧分组引用影响下次打开
+            onDismiss = {
+                showSelectDialog = false
+                selectedSection = null
+            },
             onStart = { count ->
                 showSelectDialog = false
+                selectedSection = null
                 onCreateSession(
                     state.bankId,
                     dialogSection.collectionIds.ifEmpty { null },
@@ -304,6 +315,8 @@ private fun SelectQuestionDialog(
     onStart: (Int) -> Unit
 ) {
     val maxCount = section.total - section.done
+    // M-228：全部做完时 maxCount<=0，禁用开始按钮并明确提示，避免 resolve 返回 0 仍发起空会话
+    val hasAvailable = maxCount > 0
     var countText by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -312,7 +325,11 @@ private fun SelectQuestionDialog(
         text = {
             Column {
                 Text(
-                    text = "共 $maxCount 题未做 · 默认 ${SessionCountPolicy.DEFAULT_COUNT} 题，最多 ${SessionCountPolicy.MAX_COUNT} 题",
+                    text = if (hasAvailable) {
+                        "共 $maxCount 题未做 · 默认 ${SessionCountPolicy.DEFAULT_COUNT} 题，最多 ${SessionCountPolicy.MAX_COUNT} 题"
+                    } else {
+                        "本组题目已全部完成，无可练习的题目"
+                    },
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -330,7 +347,8 @@ private fun SelectQuestionDialog(
                 onClick = {
                     // 空输入 → 默认 20；>50 钳制 50；不超过可用题量（EC-01 D1）
                     onStart(SessionCountPolicy.resolve(countText, maxCount))
-                }
+                },
+                enabled = hasAvailable
             ) {
                 Text("开始练习")
             }
@@ -345,7 +363,7 @@ private fun SelectQuestionDialog(
 
 /** 骨架屏 shimmer 占位 */
 @Composable
-private fun ShimmerSectionList() {
+private fun ShimmerSectionList(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "shimmer")
     val shimmerOffset by transition.animateFloat(
         initialValue = 0f,
@@ -367,7 +385,8 @@ private fun ShimmerSectionList() {
     )
 
     LazyColumn(
-        modifier = Modifier.padding(horizontal = 16.dp),
+        // M-226：接收外部 weight(1f) 约束，避免内部 LazyColumn 无界高度铺满挤压底部筛选行
+        modifier = modifier.padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
     ) {
@@ -383,5 +402,6 @@ private fun ShimmerSectionList() {
     }
 }
 
-private fun sectionKey(section: SectionItem): String =
-    section.year?.toString() ?: section.title ?: section.hashCode().toString()
+// M-229：year/title 组合字符串 + index 兜底生成稳定 key，替换跨重组/重载不稳定的 identity hashCode
+private fun sectionKey(section: SectionItem, index: Int): String =
+    "y${section.year ?: "-"}|t${section.title ?: "-"}|i$index"

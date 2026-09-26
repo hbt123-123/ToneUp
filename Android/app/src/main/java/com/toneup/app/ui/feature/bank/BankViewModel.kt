@@ -14,8 +14,6 @@ import com.toneup.app.data.repository.SectionRepository
 import com.toneup.app.data.repository.SessionRepository
 import com.toneup.app.data.repository.StatsRepository
 import com.toneup.app.data.repository.AppException
-import com.toneup.app.data.repository.QuestionRepository
-import com.toneup.app.data.repository.JsonProvider
 import com.toneup.app.domain.logic.AnswerCodec
 import com.toneup.app.ui.common.Load
 import com.toneup.app.ui.common.toLoadMessage
@@ -24,6 +22,7 @@ import com.toneup.app.ui.components.charts.TopicProgressItem
 import com.toneup.app.ui.components.charts.toChartPoint
 import com.toneup.app.ui.components.charts.toProgressItem
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -68,11 +67,10 @@ class BankViewModel @Inject constructor(
     private val catalogRepository: CatalogRepository,
     private val statsRepository: StatsRepository,
     private val sectionRepository: SectionRepository,
-    private val questionRepository: QuestionRepository,
+    // M-161：移除未使用的 questionRepository/jsonProvider 注入
     private val sessionRegistry: PracticeSessionRegistry,
     private val sessionDataStoreManager: SessionDataStoreManager,
     private val sessionManager: SessionManager,
-    private val jsonProvider: JsonProvider,
     private val sessionRepository: SessionRepository
 ) : ViewModel() {
 
@@ -192,7 +190,8 @@ class BankViewModel @Inject constructor(
                 val detail = catalogRepository.bankDetail(bankId)
                 // H-49：过期响应丢弃——用户已切换题库或回退到根时不得覆盖当前选择
                 if (_picker.value.bankId != bankId) return@launch
-                val years = detail.years.sortedDescending().ifEmpty {
+                // M-158：distinct() 去重，避免重复年份导致 LazyColumn key 冲突
+                val years = detail.years.sortedDescending().distinct().ifEmpty {
                     val (minY, maxY) = detail.yearMin to detail.yearMax
                     if (minY != null && maxY != null) (minY..maxY).toList() else emptyList()
                 }
@@ -251,7 +250,8 @@ class BankViewModel @Inject constructor(
     suspend fun saveLastContext(session: PracticeSession, index: Int) {
         val userId = sessionManager.currentUserId() ?: return
         val store = sessionDataStoreManager.storeFor(userId)
-        store.updateData { data ->
+        // M-162：直接用 updateData 的返回值更新 _home，避免二次读盘与读改写竞态
+        val updated = store.updateData { data ->
             data.copy(
                 lastContext = LastPracticeContext(
                     userId = userId,
@@ -266,7 +266,7 @@ class BankViewModel @Inject constructor(
                 )
             )
         }
-        _home.value = _home.value.copy(lastContext = store.data.first().lastContext)
+        _home.value = _home.value.copy(lastContext = updated.lastContext)
     }
 
     /** FR-HM-02 继续上次刷题（EC-01：恢复到上次题号；服务端会话走 GET detail 重建） */
@@ -278,10 +278,15 @@ class BankViewModel @Inject constructor(
         } else {
             viewModelScope.launch {
                 try {
-                    val session = rebuildSession(ctx)
+                    // M-163：rebuildSession 返回 degraded 标记，服务端失败降级本地时给用户可见提示
+                    val (session, degraded) = rebuildSession(ctx)
                     sessionRegistry.register(session)
-                    _home.value = _home.value.copy(errorHint = null)
+                    _home.value = _home.value.copy(
+                        errorHint = if (degraded) "服务端会话恢复失败，已切换为本地模式继续" else null
+                    )
                     onReady(session.sessionId, ctx.questionIndex)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
                     _home.value = _home.value.copy(errorHint = "继续刷题失败，请重新选题")
                 }
@@ -292,8 +297,9 @@ class BankViewModel @Inject constructor(
     /**
      * EC-01 会话重建：服务端会话（serverSessionId 非空）优先走 GET detail 拉题目+草稿，
      * 失败（离线/服务端异常）回退本地分页装载路径。
+     * M-163：返回 (会话, 是否发生服务端→本地的降级)。
      */
-    private suspend fun rebuildSession(ctx: LastPracticeContext): PracticeSession {
+    private suspend fun rebuildSession(ctx: LastPracticeContext): Pair<PracticeSession, Boolean> {
         val sid = ctx.serverSessionId
         if (sid != null) {
             try {
@@ -308,9 +314,11 @@ class BankViewModel @Inject constructor(
                     restoredDraft = d.session.draft
                 )
                 session.appendAll(d.questions)
-                return session
+                return session to false
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
-                // 落入本地重建路径
+                // M-163：落入本地重建路径，degraded = true 由下方返回值标记
             }
         }
         return PracticeSession(
@@ -320,7 +328,7 @@ class BankViewModel @Inject constructor(
             mode = PracticeSession.MODE_PRACTICE,
             year = ctx.year,
             typeCodeFilter = ctx.typeCode
-        )
+        ) to (sid != null)
     }
 
     companion object {

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  M-425：API 31+ 数据提取规则，与 android:allowBackup="false" 的语义保持一致——
+  云备份（cloud-backup）与设备迁移（device-transfer）均排除全部数据域。
+  说明：API 31+ 上 allowBackup="false" 仅禁用云备份，设备到设备迁移仍放行，
+  故在此对两种传输方式显式排除全部 domain（path="." 表示整个域目录）。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- root：内部存储全部私有数据（涵盖 files/databases/shared_prefs/cache） -->
+        <exclude domain="root" path="." />
+        <!-- device_root：设备保护存储（device-protected storage）全部数据 -->
+        <exclude domain="device_root" path="." />
+        <!-- external：外部存储应用专属目录全部数据 -->
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

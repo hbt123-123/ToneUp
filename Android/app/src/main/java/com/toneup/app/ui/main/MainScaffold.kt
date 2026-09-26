@@ -22,6 +22,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import android.util.Log
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -35,6 +36,7 @@ import com.toneup.app.ui.feature.review.ReviewTab
 import com.toneup.app.ui.feature.stats.StatsTab
 import com.toneup.app.ui.navigation.Routes
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,7 +57,16 @@ class ReviewBadgeViewModel @Inject constructor(
 
     fun refresh(limit: Int = 100) {
         viewModelScope.launch(Dispatchers.IO) {
-            _count.value = runCatching { reviewRepository.today(limit).total }.getOrDefault(0)
+            // M-246：失败不再静默归零（失败与"今日无待复习"在 UI 上无法区分），
+            // 改为 Log.w 留痕并保留上次计数；底部角标无独立错误表达空间，故不加 UI 提示。
+            // CancellationException 显式重抛，不破坏结构化并发
+            try {
+                _count.value = reviewRepository.today(limit).total
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("ReviewBadgeViewModel", "刷新复习角标失败，保留上次计数 ${_count.value}", e)
+            }
         }
     }
 }
@@ -135,7 +146,9 @@ fun MainScaffold(rootNavController: NavHostController) {
                     rootNavController = rootNavController,
                     onLoggedOut = {
                         rootNavController.navigate(Routes.LOGIN) {
-                            popUpTo(0) { inclusive = true }
+                            // M-247：popUpTo(0) 依赖"id=0 永不匹配目的地"的副作用清空回栈，
+                            // 属未文档化魔法用法；root 导航图中真实存在的根路由是 Routes.MAIN
+                            popUpTo(Routes.MAIN) { inclusive = true }
                             launchSingleTop = true
                         }
                     }

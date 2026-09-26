@@ -22,6 +22,7 @@ data class FeedbackRequest(
 
 @Serializable
 data class FeedbackResponse(
-    @SerialName("feedback_id") val feedbackId: String,
-    val status: String
+    // M-31：后端正常必返两字段；加保守默认空串，防异常分支漏发字段时反序列化崩溃
+    @SerialName("feedback_id") val feedbackId: String = "",
+    val status: String = ""
 )

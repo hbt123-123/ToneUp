@@ -33,14 +33,16 @@ data class BankSummaryDto(
     @SerialName("subject_id") val subjectId: String,
     @SerialName("type_id") val typeId: String,
     val name: String,
-    val enabled: Boolean = true
+    // M-41：后端 /api/catalog 恒返回 enabled；去掉 true 默认，禁用库漏发字段时快速失败而非误展示可练
+    val enabled: Boolean
 )
 
 @Serializable
 data class BankDetailDto(
     val id: String,
     val name: String,
-    @SerialName("subject_id") val subjectId: String? = null,
+    // M-40：后端 bank_detail 恒返回 subject_id（registry 保证非空），与 BankSummaryDto 统一为必填非空
+    @SerialName("subject_id") val subjectId: String,
     @SerialName("year_min") val yearMin: Int? = null,
     @SerialName("year_max") val yearMax: Int? = null,
     val years: List<Int> = emptyList(),

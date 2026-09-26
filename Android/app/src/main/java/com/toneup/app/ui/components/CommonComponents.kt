@@ -9,11 +9,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 
 /** 错误重试卡：就地提示，不弹阻断对话框 */
@@ -31,6 +30,8 @@ fun ErrorRetryCard(
     message: String,
     modifier: Modifier = Modifier,
     onRetry: () -> Unit,
+    // TODO(M-117)：默认标签为硬编码中文，与当前全应用中文文案现状一致；
+    // 资源化需项目级 i18n 决策（补 strings.xml 条目并统一其余硬编码文案），延后处理
     retryLabel: String = "重试"
 ) {
     Column(
@@ -72,6 +73,8 @@ fun SkeletonBlock(modifier: Modifier = Modifier) {
             .height(16.dp)
             .alpha(alpha)
             .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+            // M-118：骨架块为纯装饰占位，清空语义避免 TalkBack 播报无意义内容
+            .clearAndSetSemantics { }
     )
 }
 
@@ -82,9 +85,7 @@ fun QuestionSkeleton(modifier: Modifier = Modifier) {
         SkeletonBlock(Modifier.height(20.dp))
         SkeletonBlock()
         SkeletonBlock()
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Spacer(Modifier.size(4.dp))
-        }
+        // M-119：删除仅含单个 Spacer 的空 Row——渲染无任何可见内容，组内间距已由 Column spacedBy 统一控制
         repeat(4) {
             SkeletonBlock(Modifier.height(48.dp))
         }

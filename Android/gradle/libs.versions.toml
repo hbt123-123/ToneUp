@@ -19,7 +19,8 @@ coil = "2.7.0"
 camerax = "1.4.1"
 androidxExifInterface = "1.3.7"
 junit = "4.13.2"
-mockwebserver = "4.12.0"
+# M-266：删除独立的 mockwebserver 版本号——与 okhttp 同组（com.squareup.okhttp3），
+# 统一引用 okhttp 的 version.ref，避免两处版本漂移（见 [libraries] 中 okhttp-mockwebserver）
 vico = "2.0.0-beta.2"
 
 [libraries]
@@ -46,7 +47,8 @@ retrofit = { group = "com.squareup.retrofit2", name = "retrofit", version.ref = 
 retrofit-kotlinx-serialization = { group = "com.jakewharton.retrofit", name = "retrofit2-kotlinx-serialization-converter", version.ref = "retrofitKotlinxSerialization" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
-okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "mockwebserver" }
+# M-266：mockwebserver 与 okhttp 同组同源，版本统一引用 okhttp 的 version.ref
+okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }

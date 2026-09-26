@@ -14,9 +14,7 @@ class SanitizedLoggingInterceptor @Inject constructor() {
         return HttpLoggingInterceptor { message ->
             // H-17：HEADERS 级别会打印全部头，仅遮 Bearer 会漏 Cookie/Set-Cookie/X-Api-Key 等；
             // (?im) 多行匹配逐头脱敏，值整体不回显任何真实字符
-            val safe = Regex(
-                "(?im)^(Authorization|Proxy-Authorization|Cookie|Set-Cookie|X-Api-Key):\\s*(.+)$"
-            ).replace(message) { match ->
+            val safe = SENSITIVE_HEADER_REGEX.replace(message) { match ->
                 val name = match.groupValues[1]
                 val value = match.groupValues[2].trim()
                 if (value.startsWith("Bearer ")) {
@@ -28,5 +26,11 @@ class SanitizedLoggingInterceptor @Inject constructor() {
             }
             android.util.Log.d("OkHttp", safe)
         }.apply { level = HttpLoggingInterceptor.Level.HEADERS }
+    }
+
+    companion object {
+        // M-52：敏感头正则提升为单例常量，避免每条日志在 IO 线程上重复编译 Regex
+        private val SENSITIVE_HEADER_REGEX =
+            Regex("(?im)^(Authorization|Proxy-Authorization|Cookie|Set-Cookie|X-Api-Key):\\s*(.+)$")
     }
 }

@@ -92,17 +92,60 @@
     }
   }
 
+  // M-5：ResizeObserver 一帧内可能触发多次，直接 postHeight 会反复通知 native
+  // 调整 WebView 高度；用 rAF 把同帧多次回调合并为一次上报
+  // （postHeight 内部另有 lastHeight 去重，首帧双保险调用保持不变）
+  var heightScheduled = false;
+  function schedulePostHeight() {
+    if (heightScheduled) return;
+    heightScheduled = true;
+    requestAnimationFrame(function() {
+      heightScheduled = false;
+      postHeight();
+    });
+  }
+
+  // M-4：裸 $ 行内定界会把同一文本节点中的两个美元符号误判为公式（如"价格 $5 与税 $1"）。
+  // 渲染前对文本节点做严格配对转换：仅当 $ 紧贴非空白内容且不跨行时才转为 \(...\)
+  // （与 Pandoc 行内数学约定一致），其余 $ 对按普通文本保留；
+  // 下方 delimiters 中不再保留裸 $ 条目，转换后的 \( \) 交给 auto-render 渲染。
+  function convertInlineDollar(text) {
+    if (text.indexOf('$') === -1) return text;
+    var stash = [];
+    // 先摘出 display 公式 $$...$$，避免其中的 $ 被行内转换误伤
+    var s = text.replace(/\$\$[^$]*\$\$/g, function(m) {
+      stash.push(m);
+      return '\u0000' + (stash.length - 1) + '\u0000';
+    });
+    s = s.replace(/\$([^\$\n]+?)\$/g, function(m, inner) {
+      return (/^\s|\s$/.test(inner)) ? m : '\\(' + inner + '\\)';
+    });
+    return s.replace(/\u0000(\d+)\u0000/g, function(m, i) { return stash[+i]; });
+  }
+
+  function convertInlineDollarsInTree(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (var i = 0; i < nodes.length; i++) {
+      var converted = convertInlineDollar(nodes[i].nodeValue);
+      if (converted !== nodes[i].nodeValue) nodes[i].nodeValue = converted;
+    }
+  }
+
   function renderContent(html, dark) {
     try {
       document.body.classList.toggle('dark', !!dark);
       var el = document.getElementById('content');
       el.innerHTML = sanitizeHtml(html);
+      // M-4：行内公式不再依赖 auto-render 的裸 $ 定界（会误判普通美元文本），
+      // 先按严格规则把紧贴的 $...$ 转为 \(...\)，见 convertInlineDollar
+      convertInlineDollarsInTree(el);
       renderMathInElement(el, {
         delimiters: [
           {left: '$$', right: '$$', display: true},
           {left: '\\[', right: '\\]', display: true},
-          {left: '\\(', right: '\\)', display: false},
-          {left: '$', right: '$', display: false}
+          {left: '\\(', right: '\\)', display: false}
         ],
         throwOnError: false,
         ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
@@ -124,9 +167,12 @@
 
   window.addEventListener('load', function() {
     if (typeof ResizeObserver !== 'undefined') {
-      new ResizeObserver(postHeight).observe(document.getElementById('content'));
+      // M-5：经 rAF 合并后再上报，避免高频布局抖动反复通知 native
+      new ResizeObserver(schedulePostHeight).observe(document.getElementById('content'));
     }
-    try { window.AndroidBridge.onTemplateReady(); } catch (e) {}
+    // M-6：原先此处调用 AndroidBridge.onTemplateReady()，但 native Bridge 只声明了
+    // onHeight/onRendered/onError（见 FormulaWebViewPool.Bridge），该调用必然抛错；
+    // 模板就绪由 native 侧 onPageFinished 判定，无需 JS 通知，故移除该调用。
   });
 
   // JS 错误上报（降级链路）

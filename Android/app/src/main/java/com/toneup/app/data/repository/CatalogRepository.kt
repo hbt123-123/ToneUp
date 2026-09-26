@@ -7,6 +7,7 @@ import com.toneup.app.data.remote.api.CatalogApi
 import com.toneup.app.data.remote.dto.BankDetailDto
 import com.toneup.app.data.remote.dto.CatalogDto
 import com.toneup.app.di.ApplicationScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -40,6 +41,11 @@ object CatalogCache {
         bankDetails[dto.id] = dto
     }
 
+    // M-64：题库详情无 TTL，只能靠目录刷新整体失效，避免强刷后仍展示旧详情
+    fun clearBankDetails() {
+        bankDetails.clear()
+    }
+
     fun reset() {
         entry = null
         bankDetails.clear()
@@ -66,12 +72,21 @@ class CatalogRepository @Inject constructor(
                 return stale
             }
             // EC-05 持久缓存：内存 miss 时先发磁盘缓存（cache-first 水合）
-            cacheStore.read()?.let { payload ->
-                payload.catalog?.let { dto ->
-                    CatalogCache.putCatalog(dto, payload.cachedAtMillis)
+            // M-63：read 失败（IO/反序列化）按缓存 miss 降级，与 write 侧容错对称，不让磁盘故障阻塞网络路径
+            val payload = try {
+                cacheStore.read()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("CatalogRepository", "catalog cache read failed: ${e.message}")
+                null
+            }
+            payload?.let { p ->
+                p.catalog?.let { dto ->
+                    CatalogCache.putCatalog(dto, p.cachedAtMillis)
                     // 磁盘缓存过期：先渲染，同时后台刷新
                     // （否则新增题库/题目在用户手动下拉刷新前永远不可见）
-                    if (System.currentTimeMillis() - payload.cachedAtMillis >=
+                    if (System.currentTimeMillis() - p.cachedAtMillis >=
                         CatalogCache.TTL_MILLIS
                     ) {
                         refreshInBackground()
@@ -87,6 +102,8 @@ class CatalogRepository @Inject constructor(
     private suspend fun fetchAndCache(): CatalogDto {
         val dto = EnvelopeUnwrapper.unwrap(jsonProvider.json) { catalogApi.catalog() }
         CatalogCache.putCatalog(dto)
+        // M-64：目录刷新（含 forceRefresh 与后台刷新路径）后失效题库详情内存缓存
+        CatalogCache.clearBankDetails()
         runCatching {
             cacheStore.write(
                 CatalogCachePayload(cachedAtMillis = System.currentTimeMillis(), catalog = dto)

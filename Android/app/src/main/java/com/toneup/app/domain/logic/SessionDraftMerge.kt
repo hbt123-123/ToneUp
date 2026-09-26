@@ -43,7 +43,9 @@ object SessionDraftMerge {
         localEntries: List<Pair<Long, JsonObject>>,
         questionId: Long
     ): JsonObject? {
-        parseServerDraft(serverDraft)[questionId]?.let { return it }
+        // M-95：restore 期间每题调用一次，直接按 key 精确查找而非重建整张服务端映射（O(n²)→O(n)）；
+        // questionId 十进制串必过 toLongOrNull 校验，value 过滤口径与 parseServerDraft 一致
+        (serverDraft?.get(questionId.toString()) as? JsonObject)?.let { return it }
         return localEntries.firstOrNull { it.first == questionId }?.second
     }
 

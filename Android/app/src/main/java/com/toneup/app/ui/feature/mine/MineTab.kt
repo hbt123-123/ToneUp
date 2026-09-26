@@ -1,5 +1,6 @@
 package com.toneup.app.ui.feature.mine
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,7 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -18,6 +19,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -40,6 +42,8 @@ fun MineTab(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var showLogoutDialog by remember { mutableStateOf(false) }
+    // M-167：导航防抖时间戳，快速双击不重复入栈
+    var lastNavigateAtMs by remember { mutableLongStateOf(0L) }
 
     // H-50：登出导航信号走一次性事件流，loggedOut 是 sticky 标志会重复触发导航
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -118,15 +122,24 @@ fun MineTab(
                 if (notes.value.isEmpty()) {
                     item { EmptyState("还没有笔记，去题目解析里记一条吧") }
                 } else {
-                    items(notes.value, key = { "${it.bankId}:${it.questionId}" }) { note ->
+                    // M-166：key 追加索引兜底，避免 (bankId, questionId) 重复导致 LazyColumn 崩溃
+                    itemsIndexed(
+                        notes.value,
+                        key = { index, note -> "${note.bankId}:${note.questionId}#$index" }
+                    ) { _, note ->
                         Card(
                             onClick = {
-                                rootNavController.navigate(
-                                    com.toneup.app.ui.navigation.Routes.noteEditor(
-                                        questionId = note.questionId,
-                                        bankId = note.bankId
+                                // M-167：600ms 防抖窗口内的重复点击直接忽略
+                                val now = SystemClock.uptimeMillis()
+                                if (now - lastNavigateAtMs > 600L) {
+                                    lastNavigateAtMs = now
+                                    rootNavController.navigate(
+                                        com.toneup.app.ui.navigation.Routes.noteEditor(
+                                            questionId = note.questionId,
+                                            bankId = note.bankId
+                                        )
                                     )
-                                )
+                                }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {

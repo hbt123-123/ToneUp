@@ -95,8 +95,22 @@ fun AiPhotoScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.size(16.dp))
-                        Button(onClick = permissionFlow.request, enabled = true) {
-                            Text("去开启相机权限")
+                        // M-126：永久拒绝后系统权限弹窗不再弹出，CTA 应改为跳转系统设置，而非无效的再次申请
+                        Button(
+                            onClick = if (permissionFlow.state == CameraPermissionState.PERMANENTLY_DENIED) {
+                                permissionFlow.openSettings
+                            } else {
+                                permissionFlow.request
+                            },
+                            enabled = true
+                        ) {
+                            Text(
+                                if (permissionFlow.state == CameraPermissionState.PERMANENTLY_DENIED) {
+                                    "去系统设置开启相机权限"
+                                } else {
+                                    "去开启相机权限"
+                                }
+                            )
                         }
                     }
                 }
@@ -149,7 +163,8 @@ fun AiPhotoScreen(
                 ) {
                     CircularProgressIndicator()
                     Spacer(Modifier.size(14.dp))
-                    Text("AI 正在诊断你的手写过程…")
+                    // M-128：pollElapsedSeconds 已在 ViewModel 轮询循环中真实更新，展示已耗时
+                    Text("AI 正在诊断你的手写过程…（已等待 ${state.pollElapsedSeconds} 秒）")
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 16.dp))
                 }
             }

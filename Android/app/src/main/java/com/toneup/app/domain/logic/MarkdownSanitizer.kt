@@ -8,15 +8,24 @@ package com.toneup.app.domain.logic
  */
 object MarkdownSanitizer {
 
+    // M-86：正则预编译为对象级常量，避免渲染热路径（KaTeX 页面）每次调用重复编译三个模式
+    private val BOLD = Regex("\\*\\*(.+?)\\*\\*")
+    private val ITALIC = Regex("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)")
+    private val INLINE_CODE = Regex("`([^`]+)`")
+
     fun sanitize(raw: String): String {
         val escaped = escapeHtml(raw)
         return escaped
-            .replace(Regex("\\*\\*(.+?)\\*\\*")) { "<b>${it.groupValues[1]}</b>" }
-            .replace(Regex("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)")) { "<i>${it.groupValues[1]}</i>" }
-            .replace(Regex("`([^`]+)`")) { "<code>${it.groupValues[1]}</code>" }
+            .replace(BOLD) { "<b>${it.groupValues[1]}</b>" }
+            .replace(ITALIC) { "<i>${it.groupValues[1]}</i>" }
+            .replace(INLINE_CODE) { "<code>${it.groupValues[1]}</code>" }
     }
 
-    /** 段落化：连续空行分段，单换行转 <br/> */
+    /**
+     * 段落化：连续空行分段，单换行转 <br/>。
+     * M-87：入参必须是 [sanitize] 的输出（仅含白名单标记的受控 HTML），
+     * 本方法不转义、直接拼接 <p>/<br/> 标记，禁止传入未净化文本。
+     */
     fun toParagraphs(sanitized: String): String =
         sanitized.split(Regex("\\n\\s*\\n"))
             .joinToString("</p><p>") { it.replace("\n", "<br/>") }
