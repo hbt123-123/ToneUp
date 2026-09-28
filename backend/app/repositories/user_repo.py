@@ -451,22 +451,24 @@ def notes_list_public(
 def notes_list_mine(
     db_path: str,
     user_id: int,
-    bank_id: str | None = None,
-    question_id: int | None = None,
+    bank_id: str,
+    question_id: int,
 ) -> Optional[sqlite3.Row]:
-    conditions: list[str] = ["user_id = ?"]
-    args: list[object] = [user_id]
-    if bank_id is not None:
-        conditions.append("bank_id = ?")
-        args.append(bank_id)
-    if question_id is not None:
-        conditions.append("question_id = ?")
-        args.append(question_id)
-    where_sql = " AND ".join(conditions)
+    """查询用户在指定题目上的笔记（单条）。
+
+    Args:
+        db_path: 数据库路径
+        user_id: 用户ID
+        bank_id: 题库ID（必填，确保资源归属验证）
+        question_id: 题目ID（必填，确保资源归属验证）
+
+    Returns:
+        用户笔记记录，不存在则返回 None
+    """
     with user_connection(db_path) as conn:
         return conn.execute(
-            f"SELECT * FROM user_notes WHERE {where_sql}",
-            args,
+            "SELECT * FROM user_notes WHERE user_id = ? AND bank_id = ? AND question_id = ?",
+            (user_id, bank_id, question_id),
         ).fetchone()
 
 

@@ -268,7 +268,12 @@ export const usePracticeStore = defineStore('practice', () => {
           detailCache.set(key, d)
           const target = runtimes.get(key)
           if (target && !target.detail) target.detail = d
-        }).catch(() => {/* 预取失败静默 */})
+        }).catch((err) => {
+          // 记录预取失败，便于排查问题（但不阻塞用户操作）
+          if (import.meta.env.DEV) {
+            console.warn(`[practice] prefetch question ${b}:${id} failed:`, err)
+          }
+        })
       }
     })
   }

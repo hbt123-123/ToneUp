@@ -25,10 +25,15 @@ _generation = 0
 
 
 def _open_ro_connection(db_path: str) -> sqlite3.Connection:
-    """新开只读连接并登记到全局集合，供 close_all_connections 统一关闭。"""
+    """新开只读连接并登记到全局集合，供 close_all_connections 统一关闭。
+
+    注意：虽然是只读连接，仍启用外键约束以确保跨表查询的引用完整性验证。
+    """
     posix = Path(db_path).resolve().as_posix()
     conn = sqlite3.connect(f"file:{posix}?mode=ro", uri=True)
     conn.execute("PRAGMA query_only = ON")
+    # 启用外键约束，确保跨表查询时引用完整性
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     with _connections_lock:
         _open_connections.add(conn)

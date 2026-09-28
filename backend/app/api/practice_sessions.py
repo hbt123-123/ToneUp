@@ -155,11 +155,18 @@ def _pick_question_ids(
         raise BadRequestError("no eligible question types after excluding ESSAY/AI")
 
     # ── 第一步：题库库候选（DISTINCT 防止"不足补已答"使同题重复入会话）──
+    # 限制 IN 子句长度防止 SQLite 限制（默认最大 999 个参数）
+    MAX_IN_CLAUSE_ITEMS = 500
+    if len(type_ids) > MAX_IN_CLAUSE_ITEMS:
+        raise BadRequestError(f"too many type_ids (max {MAX_IN_CLAUSE_ITEMS})")
+
     conn = bank_repo.get_connection(str(entry.path))
     placeholders = ",".join("?" * len(type_ids))
     sql = f"SELECT DISTINCT id FROM questions WHERE question_type_id IN ({placeholders})"
     args: list = [*type_ids]
     if collection_ids:
+        if len(collection_ids) > MAX_IN_CLAUSE_ITEMS:
+            raise BadRequestError(f"too many collection_ids (max {MAX_IN_CLAUSE_ITEMS})")
         cph = ",".join("?" * len(collection_ids))
         sql += f" AND collection_id IN ({cph})"
         args.extend(collection_ids)

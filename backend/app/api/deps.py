@@ -5,7 +5,7 @@ from fastapi import Depends, Request
 
 from app.core.config import get_settings
 from app.core.errors import ForbiddenError, UnauthorizedError
-from app.core.security import decode_token
+from app.core.security import decode_token, TokenError
 from app.repositories import user_repo
 
 
@@ -22,7 +22,8 @@ def get_current_user(request: Request):
     settings = get_settings()
     try:
         payload = decode_token(token, settings.jwt_secret)
-    except Exception as exc:
+    except TokenError as exc:
+        # 仅捕获 TokenError（令牌过期/无效/签名错误），避免隐藏其他编程错误
         raise UnauthorizedError("invalid or expired token") from exc
     try:
         user_id = int(payload.get("sub", ""))
