@@ -118,7 +118,15 @@ def list_questions(
         str(entry.path), question_type_id=type_id, year=year, page=page_num, page_size=page_size
     )
     # M-284：本页涉及的全部 passage_id 一次批量预载，替代每题一次 get_passage 的 N+1
-    passage_ids = list({r["passage_id"] for r in rows if r["passage_id"] is not None})
+    # 修复（M-284 回归）：数学/政治等库的 questions 表无 passage_id 列（仅英语库有），
+    # 裸访问 r["passage_id"] 抛 IndexError → 500；对齐 _build_dto 内 try-except 的
+    # 异构 schema 防护语义，先探测列存在再收集（列集合对同一查询的所有行一致）。
+    has_passage_col = bool(rows) and "passage_id" in rows[0].keys()
+    passage_ids = (
+        list({r["passage_id"] for r in rows if r["passage_id"] is not None})
+        if has_passage_col
+        else []
+    )
     passage_map = bank_repo.get_passages(str(entry.path), passage_ids) if passage_ids else {}
     items = [
         _build_dto(entry, r, include_answer=False, passage_map=passage_map)

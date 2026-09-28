@@ -9,7 +9,7 @@ import { CONTRACT_TYPE_CODES } from './types'
  * H-118：不用 defineAsyncComponent——其 onError 里 fail() 之后 retry 闭包即失效，
  * 内置错误态无法可靠重试；改为自管加载状态，重试时重新触发 loader。
  */
-function lazyRenderer(loader: () => Promise<Component>): Component {
+function lazyRenderer(loader: () => Promise<Component | { default: Component }>): Component {
   return defineComponent({
     name: 'AsyncRenderer',
     setup() {
@@ -19,7 +19,11 @@ function lazyRenderer(loader: () => Promise<Component>): Component {
       async function load(): Promise<void> {
         state.value = 'loading'
         try {
-          resolved.value = await loader()
+          // 修复：动态 import() 返回 Module namespace（Vite 不做 default 解包），
+          // h() 需要组件本身——不解包会因缺 render/setup 渲染为空白。
+          // （原 defineAsyncComponent 实现由 Vue 内部自动解包，H-118 改自管时丢失。）
+          const mod = await loader()
+          resolved.value = (mod as { default?: Component }).default ?? mod
           state.value = 'ready'
         } catch (error) {
           console.error('[ToneUp] 题型渲染组件加载失败，已降级为占位', error)
