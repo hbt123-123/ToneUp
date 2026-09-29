@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NInput, NSelect, NSwitch, NTag } from 'naive-ui'
+import { NButton, NEmpty, NInput, NSelect, NSwitch, NTag } from 'naive-ui'
 import { useAuthStore } from '@/stores/auth'
 import { useWrongBookStore } from '@/stores/wrongbook'
 import { useCatalogStore } from '@/stores/catalog'
