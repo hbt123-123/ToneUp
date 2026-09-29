@@ -47,7 +47,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        // dev 默认转发到线上后端（Cloudflare Tunnel）；本地调试后端时改回 http://127.0.0.1:8000
+        target: 'https://tu.lztfirefly.top',
         changeOrigin: true,
       },
     },

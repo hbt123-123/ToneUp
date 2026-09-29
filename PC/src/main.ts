@@ -35,7 +35,13 @@ setGlobalFeedbackTheme(ui.isDark)
 ui.$subscribe(() => setGlobalFeedbackTheme(ui.isDark))
 
 // 401 全局处理（FR-AUTH-04）：清除会话、记录恢复路径、跳登录
+// H-DEV-BYPASS：开发绕过模式下不跳登录，避免无后端时 API 401 把人踢出去
+const DEV_BYPASS_AUTH = import.meta.env.DEV && import.meta.env.VITE_DEV_BYPASS_AUTH === 'true'
 setUnauthorizedHandler(() => {
+  if (DEV_BYPASS_AUTH) {
+    console.warn('[dev-bypass] 捕获到 401，开发模式下忽略，不跳登录')
+    return
+  }
   const currentRoute = router.currentRoute.value
   // M-386：已在登录页时仅清理会话，不再记录/跳转——登录页触发的 401
   //（如携带过期令牌的 /auth/me 会话恢复失败）此前会因 currentPath !== '/' 判断不成立，

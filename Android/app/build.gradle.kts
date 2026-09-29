@@ -34,15 +34,14 @@ android {
             buildConfigField("boolean", "ENABLE_NETWORK_LOG", "true")
         }
         release {
-            // M-2：release BASE_URL 不允许悄悄打包占位域名——优先读 gradle 属性
-            // toneup.baseUrl（gradle.properties 或 -Ptoneup.baseUrl=...），其次环境变量
-            // TONEUP_BASE_URL；均缺省时回退占位域名，并在构建期打印 MUST-CONFIGURE 告警
+            // M-2：release BASE_URL 默认指向线上后端（Cloudflare Tunnel），仍可被
+            // gradle 属性 toneup.baseUrl 或环境变量 TONEUP_BASE_URL 覆盖
             val releaseBaseUrl = (project.findProperty("toneup.baseUrl") as String?)
                 ?: System.getenv("TONEUP_BASE_URL")
-                ?: "https://api.toneup.example.com/"
+                ?: "https://tu.lztfirefly.top/"
             if (releaseBaseUrl.contains("example.com")) {
                 logger.warn(
-                    "M-2 MUST-CONFIGURE: release BASE_URL 仍为占位域名 api.toneup.example.com，" +
+                    "M-2 MUST-CONFIGURE: release BASE_URL 仍为占位域名，" +
                         "发布前请通过 -Ptoneup.baseUrl=<真实服务地址> 或环境变量 TONEUP_BASE_URL 注入"
                 )
             }
