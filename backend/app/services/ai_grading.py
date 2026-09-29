@@ -2,6 +2,7 @@
 
 - Prompt：System 约束（只能从给定标签选择、严禁捏造、输出 JSON）+ 按题型评分维度
 - 输出 JSON Schema 校验失败自动重试一次，再失败置 failed
+- GLM 在 JSON 字符串里裸写 LaTeX（\\sqrt 等）致解析失败时，先修复转义再解析（M-540）
 - tag_ids 过滤：不存在或不属于当前学科的剔除；空存 [] 不阻塞判分
 - FILL_BLANK 确定性优先：LaTeX 归一化比对高置信时直接出结果，不调 AI
 """
@@ -63,14 +64,82 @@ def build_prompt(
     )
 
 
+def repair_json_escapes(text: str) -> str:
+    """M-540：修复 GLM 在 JSON 字符串里裸写的 LaTeX 反斜杠。
+
+    状态机逐字符扫描，跟踪字符串边界，仅改写字符串字面量内的转义：
+    - \\"、\\\\、\\/ 与带 4 位 hex 的 \\uXXXX：合法转义，原样保留
+    - \\b/\\f/\\t 紧跟 ASCII 字母（LaTeX 命令特征，如 \\frac/\\times/\\beta）：
+      合法转义但语义错误（解析成控制符静默损坏），反斜杠字面化为 \\\\
+    - 其余非法转义（\\s、\\d、\\unit 等致 raw_decode 直接报 Invalid \\escape）：
+      反斜杠字面化为 \\\\，LaTeX 命令以原文本形式存活
+    - \\n/\\r 不参与字面化：合法 JSON 换行远比 \\neq 类命令常见，字面化
+      会破坏真实多行文本
+    字符串外的结构字符一律原样复制。
+    """
+    out: list[str] = []
+    i, n = 0, len(text)
+    in_string = False
+    while i < n:
+        ch = text[i]
+        if not in_string:
+            if ch == '"':
+                in_string = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            in_string = False
+            out.append(ch)
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            nxt = text[i + 1]
+            if nxt in '"\\/':
+                out.append(text[i : i + 2])
+                i += 2
+                continue
+            hex4 = text[i + 2 : i + 6]
+            if nxt == "u" and len(hex4) == 4 and all(c in "0123456789abcdefABCDEF" for c in hex4):
+                out.append(text[i : i + 6])
+                i += 6
+                continue
+            follow = text[i + 2 : i + 3]
+            if nxt in "bft" and follow and follow.isascii() and follow.isalpha():
+                # \frac/\times/\beta 等：只消费反斜杠字面化，字母序列走普通复制
+                out.append("\\\\")
+                i += 1
+                continue
+            if nxt in "bfnrt":
+                out.append(text[i : i + 2])
+                i += 2
+                continue
+            out.append("\\\\")
+            i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def validate_model_output(raw: str) -> dict:
-    """从模型输出提取并校验 JSON；不合法抛 ValueError。"""
+    """从模型输出提取并校验 JSON；不合法抛 ValueError。
+
+    M-540：首次 raw_decode 失败（GLM 在字符串里裸写 LaTeX 反斜杠）时，
+    先经 repair_json_escapes 修复再解析一次；仍失败抛 JSONDecodeError
+    （ValueError 子类），由 grade_with_retry 捕获重试。修复不绕过
+    Schema 校验。
+    """
     # M-321：raw_decode 从首个 '{' 解析出首个完整 JSON 对象，
     # 避免贪婪正则把对象后的杂散 '}' 或文本一并吞入导致解析歧义
     start = raw.find("{")
     if start < 0:
         raise ValueError("no JSON object in model output")
-    data, _ = json.JSONDecoder().raw_decode(raw[start:])
+    body = raw[start:]
+    try:
+        data, _ = json.JSONDecoder().raw_decode(body)
+    except json.JSONDecodeError:
+        data, _ = json.JSONDecoder().raw_decode(repair_json_escapes(body))
     if not isinstance(data, dict) or not isinstance(data.get("is_correct"), bool):
         raise ValueError("is_correct boolean missing")
     if "score" in data and (

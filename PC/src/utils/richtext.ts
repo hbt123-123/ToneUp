@@ -81,7 +81,14 @@ function hardenStyles(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement | SVGElement>('*').forEach((el) => {
     if (!el.hasAttribute('style')) return
     const cls = el.getAttribute('class') ?? ''
-    const isKatex = cls.includes('katex') || KATEX_STYLE_TAGS.has(el.tagName.toLowerCase())
+    // M-542：KaTeX 分式/上下标排版依赖内层无 class 的 span 的 inline style
+    // （如 <span class="vlist" style="height:..."> 内的 <span style="top:-2.05em">），
+    // 仅按 class 前缀/标签名判定会把它们误剥成字符叠印；改为"位于 .katex 容器内
+    // 即视为 KaTeX 节点"，DANGEROUS_STYLE_RE 纵深防御保持不变
+    const isKatex =
+      cls.includes('katex') ||
+      KATEX_STYLE_TAGS.has(el.tagName.toLowerCase()) ||
+      el.closest('.katex') !== null
     if (!isKatex || DANGEROUS_STYLE_RE.test(el.getAttribute('style') ?? '')) {
       el.removeAttribute('style')
     }

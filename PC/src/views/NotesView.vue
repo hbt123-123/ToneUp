@@ -126,7 +126,15 @@ function gotoQuestion(entry: NoteIndexEntry): void {
     <div v-if="filtered.length > 0" class="list-wrap tu-card">
       <virtual-list :items="filtered" :item-size="88">
         <template #default="{ item }">
-          <div class="note-item option-row" @click="openEditor(item)">
+          <!-- M-541：note-item 原为裸 div @click，键盘/UIA 不可达；按 M-454 模式补齐 -->
+          <div
+            class="note-item option-row"
+            role="button"
+            tabindex="0"
+            @click="openEditor(item)"
+            @keydown.enter.prevent="openEditor(item)"
+            @keydown.space.prevent="openEditor(item)"
+          >
             <div class="ni-main">
               <p class="snippet">{{ item.snippet }}</p>
               <div class="meta text-secondary">

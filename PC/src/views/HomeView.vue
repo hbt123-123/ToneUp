@@ -317,23 +317,61 @@ function continuePractice(): void {
       <section class="section more-section">
         <h2 class="more-title">还有更多</h2>
         <div class="more-grid">
-          <div class="more-card" @click="router.push('/wrong-book')">
+          <!-- M-541：more-card 原为裸 div @click——UIA 自动化点不到、键盘不可达。
+               按 M-454 模式补 role="button" + tabindex + Enter/Space 触发 -->
+          <div
+            class="more-card"
+            role="button"
+            tabindex="0"
+            @click="router.push('/wrong-book')"
+            @keydown.enter.prevent="router.push('/wrong-book')"
+            @keydown.space.prevent="router.push('/wrong-book')"
+          >
             <span class="more-icon">📕</span>
             <span class="more-label">错题本</span>
           </div>
-          <div class="more-card" @click="router.push('/stats')">
+          <div
+            class="more-card"
+            role="button"
+            tabindex="0"
+            @click="router.push('/stats')"
+            @keydown.enter.prevent="router.push('/stats')"
+            @keydown.space.prevent="router.push('/stats')"
+          >
             <span class="more-icon">📊</span>
             <span class="more-label">统计</span>
           </div>
-          <div class="more-card" @click="router.push('/notes')">
+          <div
+            class="more-card"
+            role="button"
+            tabindex="0"
+            @click="router.push('/notes')"
+            @keydown.enter.prevent="router.push('/notes')"
+            @keydown.space.prevent="router.push('/notes')"
+          >
             <span class="more-icon">✏️</span>
             <span class="more-label">笔记</span>
           </div>
-          <div class="more-card" @click="router.push('/ai-feedback')">
+          <div
+            class="more-card"
+            role="button"
+            tabindex="0"
+            @click="router.push('/ai-feedback')"
+            @keydown.enter.prevent="router.push('/ai-feedback')"
+            @keydown.space.prevent="router.push('/ai-feedback')"
+          >
             <span class="more-icon">🤖</span>
             <span class="more-label">AI 纠错</span>
           </div>
-          <div v-if="auth.isAdmin" class="more-card" @click="router.push('/admin')">
+          <div
+            v-if="auth.isAdmin"
+            class="more-card"
+            role="button"
+            tabindex="0"
+            @click="router.push('/admin')"
+            @keydown.enter.prevent="router.push('/admin')"
+            @keydown.space.prevent="router.push('/admin')"
+          >
             <span class="more-icon">🛠️</span>
             <span class="more-label">管理</span>
           </div>
