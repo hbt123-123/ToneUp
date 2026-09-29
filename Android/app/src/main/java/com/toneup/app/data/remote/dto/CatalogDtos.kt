@@ -38,6 +38,13 @@ data class BankSummaryDto(
 )
 
 @Serializable
+data class TypeDistributionDto(
+    @SerialName("type_code") val typeCode: String,
+    val label: String? = null,
+    val count: Int? = null
+)
+
+@Serializable
 data class BankDetailDto(
     val id: String,
     val name: String,
@@ -47,5 +54,6 @@ data class BankDetailDto(
     @SerialName("year_max") val yearMax: Int? = null,
     val years: List<Int> = emptyList(),
     @SerialName("question_count") val questionCount: Int? = null,
-    @SerialName("type_codes") val typeCodes: List<String> = emptyList()
+    @SerialName("type_codes") val typeCodes: List<String> = emptyList(),
+    @SerialName("type_distribution") val typeDistribution: List<TypeDistributionDto> = emptyList()
 )

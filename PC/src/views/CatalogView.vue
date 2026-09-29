@@ -75,12 +75,21 @@ function bankYears(detail: BankDetail): number[] {
   return []
 }
 
+const typeCodeOptions = computed(() => {
+  const dist = bankDetail.value?.type_distribution ?? []
+  return dist.map((d) => ({
+    label: `${d.label ?? typeCodeLabel(String(d.type_code))} × ${d.count ?? '?'}`,
+    value: String(d.type_code),
+  }))
+})
+
 // M-518：详情请求序号守卫——快速连点多个卡片时，只有最新一次请求可写回结果
 let detailSeq = 0
 
 async function onPickBank(bankId: string): Promise<void> {
   const seq = ++detailSeq
   detailLoading.value = true
+  catalog.selectTypeCode(null)
   try {
     const detail = await catalog.fetchBankDetail(bankId)
     if (seq !== detailSeq) return // M-518：过期响应直接丢弃，不覆盖新选择
@@ -117,12 +126,18 @@ function onYearChange(value: number | null): void {
   syncQuery()
 }
 
+function onTypeCodeChange(value: string | null): void {
+  catalog.selectTypeCode(value)
+  syncQuery()
+}
+
 function syncQuery(): void {
   void router.replace({
     query: {
       ...(catalog.selectedSubjectId ? { subject: catalog.selectedSubjectId } : {}),
       ...(catalog.selectedTypeId ? { type: catalog.selectedTypeId } : {}),
       ...(catalog.selectedYear !== null ? { year: String(catalog.selectedYear) } : {}),
+      ...(catalog.selectedTypeCode ? { type_code: catalog.selectedTypeCode } : {}),
     },
   })
 }
@@ -134,6 +149,7 @@ function startPractice(bankId: string): void {
     params: { bankId },
     query: {
       ...(catalog.selectedYear !== null ? { year: String(catalog.selectedYear) } : {}),
+      ...(catalog.selectedTypeCode ? { type_code: catalog.selectedTypeCode } : {}),
     },
   })
 }
@@ -177,6 +193,15 @@ async function refreshCatalog(): Promise<void> {
           clearable
           :disabled="!bankDetail"
           @update:value="onYearChange"
+        />
+        <n-select
+          class="sel"
+          :value="catalog.selectedTypeCode"
+          :options="typeCodeOptions"
+          placeholder="题型"
+          clearable
+          :disabled="!bankDetail"
+          @update:value="onTypeCodeChange"
         />
       </div>
       <n-button quaternary size="small" @click="refreshCatalog">刷新目录</n-button>

@@ -58,8 +58,15 @@ data class PickerUiState(
     val years: List<Int> = emptyList(),
     val yearsLoading: Boolean = false,
     val yearsError: String? = null,
+    val typeDistribution: List<TypeDistributionItem> = emptyList(),
     val creating: Boolean = false,
     val error: String? = null
+)
+
+data class TypeDistributionItem(
+    val typeCode: String,
+    val label: String,
+    val count: Int
 )
 
 @HiltViewModel
@@ -180,11 +187,11 @@ class BankViewModel @Inject constructor(
         if (bankId == null) {
             _picker.value = _picker.value.copy(
                 bankId = null, year = null, years = emptyList(),
-                yearsLoading = false, yearsError = null
+                yearsLoading = false, yearsError = null, typeDistribution = emptyList()
             )
             return
         }
-        _picker.value = _picker.value.copy(bankId = bankId, year = null, yearsLoading = true, yearsError = null)
+        _picker.value = _picker.value.copy(bankId = bankId, year = null, yearsLoading = true, yearsError = null, typeDistribution = emptyList())
         viewModelScope.launch {
             try {
                 val detail = catalogRepository.bankDetail(bankId)
@@ -195,7 +202,14 @@ class BankViewModel @Inject constructor(
                     val (minY, maxY) = detail.yearMin to detail.yearMax
                     if (minY != null && maxY != null) (minY..maxY).toList() else emptyList()
                 }
-                _picker.value = _picker.value.copy(years = years, yearsLoading = false)
+                val typeDist = detail.typeDistribution.map { item ->
+                    TypeDistributionItem(
+                        typeCode = item.typeCode,
+                        label = item.label ?: item.typeCode,
+                        count = item.count ?: 0
+                    )
+                }
+                _picker.value = _picker.value.copy(years = years, yearsLoading = false, typeDistribution = typeDist)
             } catch (e: AppException) {
                 _picker.value = _picker.value.copy(yearsLoading = false, yearsError = e.userMessage)
             } catch (e: Exception) {

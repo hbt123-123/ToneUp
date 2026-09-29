@@ -35,6 +35,7 @@ export const useCatalogStore = defineStore('catalog', () => {
   const selectedSubjectId = ref<string | null>(null)
   const selectedTypeId = ref<string | null>(null)
   const selectedYear = ref<number | null>(null)
+  const selectedTypeCode = ref<string | null>(null)
   const currentBankName = ref<string | null>(null)
 
   const bankById = computed<Map<string, BankSummary>>(() => {
@@ -75,22 +76,28 @@ export const useCatalogStore = defineStore('catalog', () => {
     return catalogInflight
   }
 
-  /** 学科变化则题型与年份重置（§4.3 联动规则） */
+  /** 学科变化则题型、年份、题型筛选重置（§4.3 联动规则） */
   function selectSubject(subjectId: string | null): void {
     if (selectedSubjectId.value === subjectId) return
     selectedSubjectId.value = subjectId
     selectedTypeId.value = null
     selectedYear.value = null
+    selectedTypeCode.value = null
   }
 
   function selectType(typeId: string | null): void {
     if (selectedTypeId.value === typeId) return
     selectedTypeId.value = typeId
     selectedYear.value = null
+    selectedTypeCode.value = null
   }
 
   function selectYear(year: number | null): void {
     selectedYear.value = year
+  }
+
+  function selectTypeCode(code: string | null): void {
+    selectedTypeCode.value = code
   }
 
   /** 题库详情会话级缓存（§8.5 元数据缓存） */
@@ -130,6 +137,7 @@ export const useCatalogStore = defineStore('catalog', () => {
     selectedSubjectId.value = null
     selectedTypeId.value = null
     selectedYear.value = null
+    selectedTypeCode.value = null
     currentBankName.value = null
   }
 
@@ -141,6 +149,7 @@ export const useCatalogStore = defineStore('catalog', () => {
     selectedSubjectId,
     selectedTypeId,
     selectedYear,
+    selectedTypeCode,
     currentBankName,
     bankById,
     banksOf,
@@ -148,6 +157,7 @@ export const useCatalogStore = defineStore('catalog', () => {
     selectSubject,
     selectType,
     selectYear,
+    selectTypeCode,
     fetchBankDetail,
     invalidateAll,
     reset,

@@ -3,8 +3,12 @@ package com.toneup.app.ui.feature.bank
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -239,6 +243,7 @@ private fun BankLevel(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun YearLevel(
     viewModel: BankViewModel,
@@ -246,6 +251,29 @@ private fun YearLevel(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {
+        val typeDist = picker.typeDistribution
+        if (typeDist.isNotEmpty()) {
+            Text("选择题型", style = MaterialTheme.typography.titleSmall)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilterChip(
+                    selected = picker.typeCodeFilter == null,
+                    onClick = { viewModel.setTypeCodeFilter(null) },
+                    label = { Text("全部") }
+                )
+                typeDist.forEach { item ->
+                    FilterChip(
+                        selected = picker.typeCodeFilter == item.typeCode,
+                        onClick = { viewModel.setTypeCodeFilter(item.typeCode) },
+                        label = { Text("${item.label} × ${item.count}") }
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
         Text("选择年份", style = MaterialTheme.typography.titleSmall)
         LazyColumn(
             // M-157：内部列表同样以 weight 约束高度，不挤压外部布局
