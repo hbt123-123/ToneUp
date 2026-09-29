@@ -85,7 +85,7 @@ class ReciteModeTest {
         // Derived 仅四个渲染字段，无任何收藏/翻题/答题卡控制位（编译期即约束 buildContext 不得封禁收藏）。
         val fieldNames = ReciteMode.Derived::class.java.declaredFields
             .map { it.name }
-            .filter { it != "serialVersionUID" && it != "INSTANCE" }
+            .filter { it != "serialVersionUID" && it != "INSTANCE" && !it.startsWith("\$") }
             .sorted()
         assertEquals(listOf("disabled", "readonly", "showAnalysis", "showAnswer"), fieldNames)
     }

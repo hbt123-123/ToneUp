@@ -16,8 +16,14 @@ class SessionDraftMergeTest {
 
     private val json = Json
 
-    private fun obj(vararg pairs: Pair<String, String>): JsonObject = buildJsonObject {
-        pairs.forEach { (k, v) -> put(k, v) }
+    private fun obj(vararg pairs: Pair<String, Any>): JsonObject = buildJsonObject {
+        pairs.forEach { (k, v) ->
+            when (v) {
+                is String -> put(k, v)
+                is kotlinx.serialization.json.JsonElement -> put(k, v)
+                else -> put(k, v.toString())
+            }
+        }
     }
 
     // ---------- parseServerDraft ----------
@@ -41,7 +47,7 @@ class SessionDraftMergeTest {
 
     @Test
     fun `server draft wins over local`() {
-        val server = obj("101" to "server-answer")
+        val server = obj("101" to obj("101" to "server-answer"))
         val local = listOf(101L to obj("101" to "local-answer"))
         val resolved = SessionDraftMerge.resolve(server, local, 101L)
         assertEquals("server-answer", (resolved!!["101"] as kotlinx.serialization.json.JsonPrimitive).content)
@@ -49,7 +55,7 @@ class SessionDraftMergeTest {
 
     @Test
     fun `local used when server missing the question`() {
-        val server = obj("999" to "other-question")
+        val server = obj("999" to obj("999" to "other-question"))
         val local = listOf(101L to obj("101" to "local-answer"))
         val resolved = SessionDraftMerge.resolve(server, local, 101L)
         assertEquals("local-answer", (resolved!!["101"] as kotlinx.serialization.json.JsonPrimitive).content)
@@ -65,7 +71,7 @@ class SessionDraftMergeTest {
     @Test
     fun `resolve returns null when both missing`() {
         assertNull(SessionDraftMerge.resolve(null, emptyList(), 101L))
-        assertNull(SessionDraftMerge.resolve(obj("999" to "x"), emptyList(), 101L))
+        assertNull(SessionDraftMerge.resolve(obj("999" to obj("999" to "x")), emptyList(), 101L))
     }
 
     // ---------- toServerDraft ----------

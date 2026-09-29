@@ -111,7 +111,7 @@ class SectionListViewModel @Inject constructor(
                 } else {
                     _state.value = _state.value.copy(
                         isLoading = false,
-                        error = "加载失败，请检查网络后重试"
+                        error = "网络不可用，请检查网络后重试"
                     )
                 }
             } catch (e: AppException) {
